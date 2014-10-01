@@ -868,7 +868,8 @@ igb_resume(device_t dev)
 			    !drbr_empty(ifp, txr->br))
 				igb_mq_start_locked(ifp, txr);
 #else
-			if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+			if (((txr->queue_status & IGB_QUEUE_DEPLETED) == 0) &&
+			    !IFQ_DRV_IS_EMPTY(&ifp->if_snd))
 				igb_start_locked(txr, ifp);
 #endif
 			IGB_TX_UNLOCK(txr);
@@ -925,8 +926,10 @@ igb_start_locked(struct tx_ring *txr, struct ifnet *ifp)
 		if (igb_xmit(txr, &m_head)) {
 			if (m_head != NULL)
 				IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
-			if (txr->tx_avail <= IGB_MAX_SCATTER)
+			if (txr->tx_avail <= IGB_MAX_SCATTER) {
 				txr->queue_status |= IGB_QUEUE_DEPLETED;
+				ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+			}
 			break;
 		}
 
@@ -934,7 +937,7 @@ igb_start_locked(struct tx_ring *txr, struct ifnet *ifp)
 		ETHER_BPF_MTAP(ifp, m_head);
 
 		/* Set watchdog on */
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IGB_WATCHDOG;
 		txr->queue_status |= IGB_QUEUE_WORKING;
 	}
 }
@@ -1056,7 +1059,7 @@ igb_mq_start_locked(struct ifnet *ifp, struct tx_ring *txr)
 	if (enq > 0) {
 		/* Set the watchdog */
 		txr->queue_status |= IGB_QUEUE_WORKING;
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IGB_WATCHDOG;
 	}
 	if (txr->tx_avail <= IGB_TX_CLEANUP_THRESHOLD)
 		igb_txeof(txr);
@@ -1439,7 +1442,8 @@ igb_handle_que(void *context, int pending)
 		    !drbr_empty(ifp, txr->br))
 			igb_mq_start_locked(ifp, txr);
 #else
-		if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+		if (((txr->queue_status & IGB_QUEUE_DEPLETED) == 0) &&
+		    !IFQ_DRV_IS_EMPTY(&ifp->if_snd))
 			igb_start_locked(txr, ifp);
 #endif
 		IGB_TX_UNLOCK(txr);
@@ -1490,7 +1494,8 @@ igb_handle_link_locked(struct adapter *adapter)
 			    !drbr_empty(ifp, txr->br))
 				igb_mq_start_locked(ifp, txr);
 #else
-			if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+			if (((txr->queue_status & IGB_QUEUE_DEPLETED) == 0) &&
+			    !IFQ_DRV_IS_EMPTY(&ifp->if_snd))
 				igb_start_locked(txr, ifp);
 #endif
 			IGB_TX_UNLOCK(txr);
@@ -1631,7 +1636,8 @@ igb_msix_que(void *arg)
 	    !drbr_empty(ifp, txr->br))
 		igb_mq_start_locked(ifp, txr);
 #else
-	if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+	if (((txr->queue_status & IGB_QUEUE_DEPLETED) == 0) &&
+	    !IFQ_DRV_IS_EMPTY(&ifp->if_snd))
 		igb_start_locked(txr, ifp);
 #endif
 	IGB_TX_UNLOCK(txr);
@@ -2122,10 +2128,9 @@ igb_local_timer(void *arg)
 {
 	struct adapter		*adapter = arg;
 	device_t		dev = adapter->dev;
-	struct ifnet		*ifp = adapter->ifp;
 	struct tx_ring		*txr = adapter->tx_rings;
 	struct igb_queue	*que = adapter->queues;
-	int			hung = 0, busy = 0;
+	int			hung = 0;
 
 
 	IGB_CORE_LOCK_ASSERT(adapter);
@@ -2133,28 +2138,28 @@ igb_local_timer(void *arg)
 	igb_update_link_status(adapter);
 	igb_update_stats_counters(adapter);
 
+	/*
+	 * Don't check for any TX timeouts if the adapter received
+	 * pause frames since the last tick or if the link is down.
+	 */
+	if (adapter->pause_frames != 0 || adapter->link_active == 0)
+		goto out;
+
         /*
         ** Check the TX queues status
-	**	- central locked handling of OACTIVE
-	**	- watchdog only if all queues show hung
+	**	- watchdog if any queue hangs
         */
 	for (int i = 0; i < adapter->num_queues; i++, que++, txr++) {
-		if ((txr->queue_status & IGB_QUEUE_HUNG) &&
-		    (adapter->pause_frames == 0))
-			++hung;
-		if (txr->queue_status & IGB_QUEUE_DEPLETED)
-			++busy;
-		if ((txr->queue_status & IGB_QUEUE_IDLE) == 0)
-			taskqueue_enqueue(que->tq, &que->que_task);
+		IGB_TX_LOCK(txr);
+		if (txr->watchdog_time >= 0)
+			if (--txr->watchdog_time == 0)
+				++hung;
+		IGB_TX_UNLOCK(txr);
 	}
-	if (hung == adapter->num_queues)
+	if (hung != 0)
 		goto timeout;
-	if (busy == adapter->num_queues)
-		ifp->if_drv_flags |= IFF_DRV_OACTIVE;
-	else if ((ifp->if_drv_flags & IFF_DRV_OACTIVE) &&
-	    (busy < adapter->num_queues))
-		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
 
+out:
 	adapter->pause_frames = 0;
 	callout_reset(&adapter->timer, hz, igb_local_timer, adapter);
 #ifndef DEVICE_POLLING
@@ -2308,13 +2313,13 @@ igb_stop(void *arg)
 	callout_stop(&adapter->timer);
 
 	/* Tell the stack that the interface is no longer active */
-	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
-	ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+	ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
 
 	/* Disarm watchdog timer. */
 	for (int i = 0; i < adapter->num_queues; i++, txr++) {
 		IGB_TX_LOCK(txr);
 		txr->queue_status = IGB_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 		IGB_TX_UNLOCK(txr);
 	}
 
@@ -3696,6 +3701,7 @@ igb_initialize_transmit_units(struct adapter *adapter)
 		    E1000_READ_REG(hw, E1000_TDBAL(i)),
 		    E1000_READ_REG(hw, E1000_TDLEN(i)));
 
+		txr->watchdog_time = 0;
 		txr->queue_status = IGB_QUEUE_IDLE;
 
 		txdctl |= IGB_TX_PTHRESH;
@@ -4130,7 +4136,7 @@ igb_txeof(struct tx_ring *txr)
 		++txr->packets;
 		++processed;
 		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IGB_WATCHDOG;
 
 		/* Try the next packet */
 		++txd;
@@ -4151,20 +4157,15 @@ igb_txeof(struct tx_ring *txr)
 	work += txr->num_desc;
 	txr->next_to_clean = work;
 
-	/*
-	** Watchdog calculation, we know there's
-	** work outstanding or the first return
-	** would have been taken, so none processed
-	** for too long indicates a hang.
-	*/
-	if ((!processed) && ((ticks - txr->watchdog_time) > IGB_WATCHDOG))
-		txr->queue_status |= IGB_QUEUE_HUNG;
-
-	if (txr->tx_avail >= IGB_QUEUE_THRESHOLD)
+	if (txr->tx_avail >= IGB_QUEUE_THRESHOLD) {
 		txr->queue_status &= ~IGB_QUEUE_DEPLETED;	
+#ifdef IGB_LEGACY_TX
+		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+#endif
+	}
 
 	if (txr->tx_avail == txr->num_desc) {
-		txr->queue_status = IGB_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 		return (FALSE);
 	}
 
