@@ -2906,10 +2906,10 @@ an_start_locked(struct ifnet *ifp)
 		CSR_WRITE_2(sc, AN_INT_EN(sc->mpi350), AN_INTRS(sc->mpi350));
 	}
 
-	if (m0 != NULL)
+	if (sc->an_rdata.an_tx_prod != idx) {
 		ifp->if_drv_flags |= IFF_DRV_OACTIVE;
-
-	sc->an_rdata.an_tx_prod = idx;
+		sc->an_rdata.an_tx_prod = idx;
+	}
 
 	return;
 }
