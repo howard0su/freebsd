@@ -275,6 +275,40 @@ acpi_pci_save_handle(ACPI_HANDLE handle, UINT32 level, void *context,
 	return_ACPI_STATUS (AE_OK);
 }
 
+static void
+acpi_pci_override_handles(device_t dev)
+{
+	struct acpi_pci_devinfo *dinfo;
+	device_t *devlist;
+	int error, i, numdevs;
+	char tunable_name[64], *path;
+	ACPI_HANDLE handle;
+
+	error = device_get_children(dev, &devlist, &numdevs);
+	if (error)
+		return;
+	for (i = 0; i < numdevs; i++) {
+		dinfo = device_get_ivars(devlist[i]);
+		snprintf(tunable_name, sizeof(tunable_name),
+		    "hw.pci%d.%d.%d.%d.handle", dinfo->ap_dinfo.cfg.domain,
+		    dinfo->ap_dinfo.cfg.bus, dinfo->ap_dinfo.cfg.slot,
+		    dinfo->ap_dinfo.cfg.func);
+		path = getenv(tunable_name);
+		if (path == NULL)
+			continue;
+		if (ACPI_SUCCESS(AcpiGetHandle(NULL, path, &handle))) {
+			device_printf(dev,
+			    "Forcing device at %d.%d to use path %s\n",
+			    dinfo->ap_dinfo.cfg.slot,
+			    dinfo->ap_dinfo.cfg.func, path);
+			dinfo->ap_handle = handle;
+			acpi_pci_update_device(handle, devlist[i]);
+		}
+		freeenv(path);
+	}
+	free(devlist, M_TEMP);
+}
+
 static int
 acpi_pci_probe(device_t dev)
 {
@@ -317,6 +351,11 @@ acpi_pci_attach(device_t dev)
 	AcpiWalkNamespace(ACPI_TYPE_DEVICE, acpi_get_handle(dev), 1,
 	    acpi_pci_save_handle, NULL, dev, NULL);
 
+	/*
+	 * Perform another pass over child devices to allow their
+	 * handles to be overridden via a hint from the user.
+	 */
+	acpi_pci_override_handles(dev);
 	return (bus_generic_attach(dev));
 }
 
