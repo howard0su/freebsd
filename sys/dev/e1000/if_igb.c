@@ -2151,9 +2151,16 @@ igb_local_timer(void *arg)
         */
 	for (int i = 0; i < adapter->num_queues; i++, que++, txr++) {
 		IGB_TX_LOCK(txr);
-		if (txr->watchdog_time >= 0)
-			if (--txr->watchdog_time == 0)
+		if (txr->watchdog_time == 1) {
+			/*
+			 * If this cleans any packets it will reset
+			 * watchdog_time to IGB_WATCHDOG or 0.
+			 */
+			igb_txeof(txr);
+			if (txr->watchdog_time == 1)
 				++hung;
+		} else if (txr->watchdog_time != 0)
+			--txr->watchdog_time;
 		IGB_TX_UNLOCK(txr);
 	}
 	if (hung != 0)
@@ -4165,6 +4172,7 @@ igb_txeof(struct tx_ring *txr)
 	}
 
 	if (txr->tx_avail == txr->num_desc) {
+		txr->queue_status = IGB_QUEUE_IDLE;
 		txr->watchdog_time = 0;
 		return (FALSE);
 	}
