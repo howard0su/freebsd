@@ -769,11 +769,21 @@ const struct puc_cfg puc_pci_devices[] = {
 	    PUC_PORT_4S, 0x10, 0, 8,
 	},
 
+#if 1
+	/* XXX: Need subdevice/vendor */
+	{   0x1415, 0x9511, 0xffff, 0,
+	    "AAEON PER-C40C",
+	    DEFAULT_RCLK,
+	    PUC_PORT_4S, 0x10, 4, 0,
+	},
+#else
+
 	{   0x1415, 0x9511, 0xffff, 0,
 	    "Oxford Semiconductor OX9160/OX16PCI954 UARTs (function 1)",
 	    DEFAULT_RCLK,
 	    PUC_PORT_4S, 0x10, 0, 8,
 	},
+#endif
 
 	{   0x1415, 0x9521, 0xffff, 0,
 	    "Oxford Semiconductor OX16PCI952 UARTs",
