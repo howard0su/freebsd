@@ -54,19 +54,20 @@ static int	kcs_wait_for_obf(struct ipmi_softc *, int);
 static int
 kcs_wait_for_ibf(struct ipmi_softc *sc, int state)
 {
-	int status, start = ticks;
+	int i, status;
 
 	status = INB(sc, KCS_CTL_STS);
 	if (state == 0) {
 		/* WAIT FOR IBF = 0 */
-		while (ticks - start < MAX_TIMEOUT && status & KCS_STATUS_IBF) {
+		for (i = 0; i < MAX_TIMEOUT * 10000 && status & KCS_STATUS_IBF;
+		     i++) {
 			DELAY(100);
 			status = INB(sc, KCS_CTL_STS);
 		}
 	} else {
 		/* WAIT FOR IBF = 1 */
-		while (ticks - start < MAX_TIMEOUT &&
-		    !(status & KCS_STATUS_IBF)) {
+		for (i = 0; i < MAX_TIMEOUT * 10000 &&
+		    !(status & KCS_STATUS_IBF); i++) {
 			DELAY(100);
 			status = INB(sc, KCS_CTL_STS);
 		}
@@ -77,19 +78,20 @@ kcs_wait_for_ibf(struct ipmi_softc *sc, int state)
 static int
 kcs_wait_for_obf(struct ipmi_softc *sc, int state)
 {
-	int status, start = ticks;
+	int i, status;
 
 	status = INB(sc, KCS_CTL_STS);
 	if (state == 0) {
 		/* WAIT FOR OBF = 0 */
-		while (ticks - start < MAX_TIMEOUT && status & KCS_STATUS_OBF) {
+		for (i = 0; i < MAX_TIMEOUT * 10000 && status & KCS_STATUS_OBF;
+		     i++) {
 			DELAY(100);
 			status = INB(sc, KCS_CTL_STS);
 		}
 	} else {
 		/* WAIT FOR OBF = 1 */
-		while (ticks - start < MAX_TIMEOUT &&
-		    !(status & KCS_STATUS_OBF)) {
+		for (i = 0; i < MAX_TIMEOUT * 10000 &&
+		    !(status & KCS_STATUS_OBF); i++) {
 			DELAY(100);
 			status = INB(sc, KCS_CTL_STS);
 		}

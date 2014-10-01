@@ -696,7 +696,7 @@ ipmi_startup(void *arg)
 	req = ipmi_alloc_driver_request(IPMI_ADDR(IPMI_APP_REQUEST, 0),
 	    IPMI_GET_DEVICE_ID, 0, 15);
 
-	error = ipmi_submit_driver_request(sc, req, MAX_TIMEOUT);
+	error = ipmi_submit_driver_request(sc, req, MAX_TIMEOUT * hz);
 	if (error == EWOULDBLOCK) {
 		device_printf(dev, "Timed out waiting for GET_DEVICE_ID\n");
 		ipmi_free_request(req);
