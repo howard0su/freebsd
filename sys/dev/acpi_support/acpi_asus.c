@@ -379,6 +379,18 @@ static struct acpi_asus_model acpi_asus_models[] = {
 		.disp_set	= "SDSP"
 	},
 	{
+		.name		= "N50Vc",
+		.bled_set       = "BLED",
+		.wled_set	= "WLED",
+		.brn_get	= "GPLV",
+		.brn_set	= "SPLV",
+#if 0
+		.lcd_set	= "\\_SB.PCI0.SBRG.EC0._Q10",
+#endif
+		.disp_get	= "\\_SB.PCI0.P0P1.VGA.GETD",
+		.disp_set	= "SDSP"
+	},
+	{
 		.name		= "S1x",
 		.mled_set	= "MLED",
 		.wled_set	= "WLED",
@@ -508,6 +520,9 @@ static struct {
 };
 
 ACPI_SERIAL_DECL(asus, "ACPI ASUS extras");
+
+static int acpi_asus_wapf = 1;
+TUNABLE_INT("hw.acpi.asus.wapf", &acpi_asus_wapf);
 
 /* Function prototypes */
 static int	acpi_asus_probe(device_t dev);
@@ -735,6 +750,9 @@ acpi_asus_attach(device_t dev)
 	sc->sysctl_tree = SYSCTL_ADD_NODE(&sc->sysctl_ctx,
 	    SYSCTL_CHILDREN(acpi_sc->acpi_sysctl_tree),
 	    OID_AUTO, "asus", CTLFLAG_RD, 0, "");
+	SYSCTL_ADD_INT(&sc->sysctl_ctx, SYSCTL_CHILDREN(sc->sysctl_tree),
+	    OID_AUTO, "wapf", CTLFLAG_RD, &acpi_asus_wapf, 0,
+	    "Argument to pass WAPF method during initialization");
 
 	/* Hook up nodes */
 	for (int i = 0; acpi_asus_sysctls[i].name != NULL; i++) {
@@ -803,6 +821,9 @@ acpi_asus_attach(device_t dev)
 
 	/* Activate hotkeys */
 	AcpiEvaluateObject(sc->handle, "BSTS", NULL, NULL);
+
+	/* Configure wlan key. */
+	acpi_SetInteger(sc->handle, "WAPF", acpi_asus_wapf);
 
 	/* Handle notifies */
 	if (sc->model->n_func == NULL)
