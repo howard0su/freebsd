@@ -110,7 +110,7 @@ static timeout_t mpt_raid_timer;
 static void mpt_enable_vol(struct mpt_softc *mpt,
 			   struct mpt_raid_volume *mpt_vol, int enable);
 #endif
-static void mpt_verify_mwce(struct mpt_softc *, struct mpt_raid_volume *);
+static void mpt_verify_mwce(struct mpt_softc *, struct mpt_raid_volume *, int);
 static void mpt_adjust_queue_depth(struct mpt_softc *, struct mpt_raid_volume *,
     struct cam_path *);
 static void mpt_raid_sysctl_attach(struct mpt_softc *);
@@ -126,7 +126,7 @@ static void mpt_disk_prt(struct mpt_softc *mpt, struct mpt_raid_disk *disk,
 static int mpt_issue_raid_req(struct mpt_softc *mpt,
     struct mpt_raid_volume *vol, struct mpt_raid_disk *disk, request_t *req,
     u_int Action, uint32_t ActionDataWord, bus_addr_t addr, bus_size_t len,
-    int write, int wait);
+    int write, int wait, int sleep_ok);
 
 static int mpt_refresh_raid_data(struct mpt_softc *mpt);
 static void mpt_schedule_raid_refresh(struct mpt_softc *mpt);
@@ -508,7 +508,7 @@ mpt_raid_shutdown(struct mpt_softc *mpt)
 
 	mpt->raid_mwce_setting = MPT_RAID_MWCE_OFF;
 	RAID_VOL_FOREACH(mpt, mpt_vol) {
-		mpt_verify_mwce(mpt, mpt_vol);
+		mpt_verify_mwce(mpt, mpt_vol, FALSE);
 	}
 }
 
@@ -583,7 +583,7 @@ static int
 mpt_issue_raid_req(struct mpt_softc *mpt, struct mpt_raid_volume *vol,
 		   struct mpt_raid_disk *disk, request_t *req, u_int Action,
 		   uint32_t ActionDataWord, bus_addr_t addr, bus_size_t len,
-		   int write, int wait)
+		   int write, int wait, int sleep_ok)
 {
 	MSG_RAID_ACTION_REQUEST *rap;
 	SGE_SIMPLE32 *se;
@@ -614,7 +614,7 @@ mpt_issue_raid_req(struct mpt_softc *mpt, struct mpt_raid_volume *vol,
 
 	if (wait) {
 		return (mpt_wait_req(mpt, req, REQ_STATE_DONE, REQ_STATE_DONE,
-				     /*sleep_ok*/FALSE, /*time_ms*/2000));
+				     sleep_ok, /*time_ms*/2000));
 	} else {
 		return (0);
 	}
@@ -752,7 +752,7 @@ mpt_raid_quiesce_disk(struct mpt_softc *mpt, struct mpt_raid_disk *mpt_disk,
 					MPI_RAID_ACTION_QUIESCE_PHYS_IO,
 					/*ActionData*/0, /*addr*/0,
 					/*len*/0, /*write*/FALSE,
-					/*wait*/FALSE);
+					/*wait*/FALSE, /*sleep_ok*/FALSE);
 		if (rv != 0)
 			return (CAM_REQ_CMP_ERR);
 
@@ -871,7 +871,7 @@ mpt_enable_vol(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol,
 				enable ? MPI_RAID_ACTION_ENABLE_VOLUME
 				       : MPI_RAID_ACTION_DISABLE_VOLUME,
 				/*data*/0, /*addr*/0, /*len*/0,
-				/*write*/FALSE, /*wait*/TRUE);
+				/*write*/FALSE, /*wait*/TRUE, /*sleep_ok*/TRUE);
 	if (rv == ETIMEDOUT) {
 		mpt_vol_prt(mpt, mpt_vol, "mpt_enable_vol: "
 			    "%s Volume Timed-out\n",
@@ -892,7 +892,8 @@ mpt_enable_vol(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol,
 #endif
 
 static void
-mpt_verify_mwce(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol)
+mpt_verify_mwce(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol,
+    int sleep_ok)
 {
 	request_t *req;
 	struct mpt_raid_action_result *ar;
@@ -939,7 +940,7 @@ mpt_verify_mwce(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol)
 		return;
 	}
 
-	req = mpt_get_request(mpt, /*sleep_ok*/TRUE);
+	req = mpt_get_request(mpt, sleep_ok);
 	if (req == NULL) {
 		mpt_vol_prt(mpt, mpt_vol,
 			    "mpt_verify_mwce: Get request failed!\n");
@@ -954,7 +955,7 @@ mpt_verify_mwce(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol)
 	rv = mpt_issue_raid_req(mpt, mpt_vol, /*disk*/NULL, req,
 				MPI_RAID_ACTION_CHANGE_VOLUME_SETTINGS,
 				data, /*addr*/0, /*len*/0,
-				/*write*/FALSE, /*wait*/TRUE);
+				/*write*/FALSE, /*wait*/TRUE, sleep_ok);
 	if (rv == ETIMEDOUT) {
 		mpt_vol_prt(mpt, mpt_vol, "mpt_verify_mwce: "
 			    "Write Cache Enable Timed-out\n");
@@ -1007,7 +1008,8 @@ mpt_verify_resync_rate(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol)
 		rv = mpt_issue_raid_req(mpt, mpt_vol, /*disk*/NULL, req,
 					MPI_RAID_ACTION_SET_RESYNC_RATE,
 					mpt->raid_resync_rate, /*addr*/0,
-					/*len*/0, /*write*/FALSE, /*wait*/TRUE);
+					/*len*/0, /*write*/FALSE, /*wait*/TRUE,
+					/*sleep_ok*/TRUE);
 		if (rv == ETIMEDOUT) {
 			mpt_vol_prt(mpt, mpt_vol, "mpt_refresh_raid_data: "
 				    "Resync Rate Setting Timed-out\n");
@@ -1043,7 +1045,8 @@ mpt_verify_resync_rate(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol)
 		rv = mpt_issue_raid_req(mpt, mpt_vol, /*disk*/NULL, req,
 					MPI_RAID_ACTION_CHANGE_VOLUME_SETTINGS,
 					data, /*addr*/0, /*len*/0,
-					/*write*/FALSE, /*wait*/TRUE);
+					/*write*/FALSE, /*wait*/TRUE,
+					/*sleep_ok*/TRUE);
 		if (rv == ETIMEDOUT) {
 			mpt_vol_prt(mpt, mpt_vol, "mpt_refresh_raid_data: "
 				    "Resync Rate Setting Timed-out\n");
@@ -1303,7 +1306,7 @@ mpt_refresh_raid_vol(struct mpt_softc *mpt, struct mpt_raid_volume *mpt_vol,
 		return;
 	}
 	rv = mpt_issue_raid_req(mpt, mpt_vol, NULL, req,
-	    MPI_RAID_ACTION_INDICATOR_STRUCT, 0, 0, 0, FALSE, TRUE);
+	    MPI_RAID_ACTION_INDICATOR_STRUCT, 0, 0, 0, FALSE, TRUE, TRUE);
 	if (rv == ETIMEDOUT) {
 		mpt_vol_prt(mpt, mpt_vol,
 		    "mpt_refresh_raid_vol: Progress Indicator fetch timeout\n");
@@ -1463,7 +1466,7 @@ mpt_refresh_raid_data(struct mpt_softc *mpt)
 		mpt_vol->flags |= MPT_RVF_UP2DATE;
 		mpt_vol_prt(mpt, mpt_vol, "%s - %s\n",
 		    mpt_vol_type(mpt_vol), mpt_vol_state(mpt_vol));
-		mpt_verify_mwce(mpt, mpt_vol);
+		mpt_verify_mwce(mpt, mpt_vol, TRUE);
 
 		if (vol_pg->VolumeStatus.Flags == 0) {
 			continue;
@@ -1725,7 +1728,7 @@ mpt_raid_set_vol_mwce(struct mpt_softc *mpt, mpt_raid_mwce_t mwce)
 			mpt_vol_prt(mpt, mpt_vol, "WARNING - Unsafe shutdown "
 				    "detected.  Suggest full resync.\n");
 		}
-		mpt_verify_mwce(mpt, mpt_vol);
+		mpt_verify_mwce(mpt, mpt_vol, TRUE);
 	}
 	mpt->raid_mwce_set = 1;
 	MPT_UNLOCK(mpt);
