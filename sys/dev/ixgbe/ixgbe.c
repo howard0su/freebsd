@@ -264,13 +264,6 @@ SYSCTL_INT(_hw_ix, OID_AUTO, rx_process_limit, CTLFLAG_RDTUN,
     "Maximum number of received packets to process at a time,"
     "-1 means unlimited");
 
-/* How many packets txeof tries to clean at a time */
-static int ixgbe_tx_process_limit = 256;
-SYSCTL_INT(_hw_ix, OID_AUTO, tx_process_limit, CTLFLAG_RDTUN,
-    &ixgbe_tx_process_limit, 0,
-    "Maximum number of sent packets to process at a time,"
-    "-1 means unlimited");
-
 /*
 ** Smart speed setting, default to on
 ** this only works as a compile option
@@ -3232,9 +3225,6 @@ ixgbe_initialize_transmit_units(struct adapter *adapter)
 		txr->txd_cmd = IXGBE_TXD_CMD_IFCS;
 		txr->queue_status = IXGBE_QUEUE_IDLE;
 
-		/* Set the processing limit */
-		txr->process_limit = ixgbe_tx_process_limit;
-
 		/* Disable Head Writeback */
 		switch (hw->mac.type) {
 		case ixgbe_mac_82598EB:
@@ -3682,7 +3672,6 @@ ixgbe_txeof(struct tx_ring *txr)
 	struct ifnet		*ifp = adapter->ifp;
 #endif
 	u32			work, processed = 0;
-	u16			limit = txr->process_limit;
 	struct ixgbe_tx_buf	*buf;
 	union ixgbe_adv_tx_desc *txd;
 
@@ -3731,7 +3720,7 @@ ixgbe_txeof(struct tx_ring *txr)
         bus_dmamap_sync(txr->txdma.dma_tag, txr->txdma.dma_map,
             BUS_DMASYNC_POSTREAD);
 
-	do {
+	for (;;) {
 		union ixgbe_adv_tx_desc *eop= buf->eop;
 		if (eop == NULL) /* No work */
 			break;
@@ -3796,7 +3785,7 @@ ixgbe_txeof(struct tx_ring *txr)
 			txd = txr->tx_base;
 		}
 		prefetch(txd);
-	} while (__predict_true(--limit));
+	}
 
 	bus_dmamap_sync(txr->txdma.dma_tag, txr->txdma.dma_map,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);

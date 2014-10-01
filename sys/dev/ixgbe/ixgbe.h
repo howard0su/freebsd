@@ -290,7 +290,6 @@ struct tx_ring {
 	volatile u16		tx_avail;
 	u16			next_avail_desc;
 	u16			next_to_clean;
-	u16			process_limit;
 	u16			num_desc;
 	enum {
 	    IXGBE_QUEUE_IDLE,
