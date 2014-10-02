@@ -1038,6 +1038,20 @@ const struct puc_cfg puc_pci_devices[] = {
 	    .config_function = puc_config_sunix
 	},
 
+	{
+	    0x4348, 0x3253, 0x4348, 0x3253,
+	    "WinChipHead Dual Port RS-232",
+	    DEFAULT_RCLK,
+	    PUC_PORT_2S, 0x10, 4, 0,
+	},
+
+	{
+	    0x4348, 0x5053, 0x4348, 0x5053,
+	    "WinChipHead RS-232 and Printer port",
+	    DEFAULT_RCLK,
+	    PUC_PORT_1S1P, 0x10, 4, 0,
+	},
+
 	{   0x5372, 0x6873, 0xffff, 0,
 	    "Sun 1040 PCI Quad Serial",
 	    DEFAULT_RCLK,
