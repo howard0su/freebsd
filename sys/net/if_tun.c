@@ -78,6 +78,7 @@ struct tun_softc {
 #define	TUN_RWAIT	0x0040
 #define	TUN_ASYNC	0x0080
 #define	TUN_IFHEAD	0x0100
+#define	TUN_AUTODESTROY	0x0200
 
 #define TUN_READY       (TUN_OPEN | TUN_INITED)
 
@@ -740,6 +741,19 @@ tunioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag,
 	case TUNSIFPID:
 		mtx_lock(&tp->tun_mtx);
 		tp->tun_pid = curthread->td_proc->p_pid;
+		mtx_unlock(&tp->tun_mtx);
+		break;
+	case TUNSAUTODESTROY:
+		mtx_lock(&tp->tun_mtx);
+		if (*(int *)data)
+			tp->tun_flags |= TUN_AUTODESTROY;
+		else
+			tp->tun_flags &= ~TUN_AUTODESTROY;
+		mtx_unlock(&tp->tun_mtx);
+		break;
+	case TUNGAUTODESTROY:
+		mtx_lock(&tp->tun_mtx);
+		*(int *)data = (tp->tun_flags & TUN_AUTODESTROY) ? 1 : 0;
 		mtx_unlock(&tp->tun_mtx);
 		break;
 	case FIONBIO:

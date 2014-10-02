@@ -19,8 +19,6 @@
 #ifndef _NET_IF_TUN_H_
 #define _NET_IF_TUN_H_
 
-/* Refer to if_tunvar.h for the softc stuff */
-
 /* Maximum transmit packet size (default) */
 #define	TUNMTU		1500
 
@@ -44,5 +42,7 @@ struct tuninfo {
 #define	TUNSIFPID	_IO('t', 95)
 #define	TUNSIFHEAD	_IOW('t', 96, int)
 #define	TUNGIFHEAD	_IOR('t', 97, int)
+#define	TUNSAUTODESTROY	_IOW('t', 98, int)	/* Destroy on close */
+#define	TUNGAUTODESTROY	_IOR('t', 99, int)
 
 #endif /* !_NET_IF_TUN_H_ */
