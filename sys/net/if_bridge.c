@@ -1881,6 +1881,7 @@ static void
 bridge_dummynet(struct mbuf *m, struct ifnet *ifp)
 {
 	struct bridge_softc *sc;
+	int error = 0;
 
 	sc = ifp->if_bridge;
 
@@ -1894,18 +1895,30 @@ bridge_dummynet(struct mbuf *m, struct ifnet *ifp)
 		return;
 	}
 
+	BRIDGE_LOCK(sc);
+	BRIDGE_LOCK2REF(sc, error);
+	if (error) {
+		m_freem(m);
+		return;
+	}
+
 	if (PFIL_HOOKED(&V_inet_pfil_hook)
 #ifdef INET6
 	    || PFIL_HOOKED(&V_inet6_pfil_hook)
 #endif
 	    ) {
-		if (bridge_pfil(&m, sc->sc_ifp, ifp, PFIL_OUT) != 0)
+		if (bridge_pfil(&m, sc->sc_ifp, ifp, PFIL_OUT) != 0) {
+			BRIDGE_UNREF(sc);
 			return;
-		if (m == NULL)
+		}
+		if (m == NULL) {
+			BRIDGE_UNREF(sc);
 			return;
+		}
 	}
 
 	bridge_enqueue(sc, ifp, m);
+	BRIDGE_UNREF(sc);
 }
 
 /*
@@ -1926,6 +1939,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 	struct ifnet *dst_if;
 	struct bridge_softc *sc;
 	uint16_t vlan;
+	int error;
 
 	if (m->m_len < ETHER_HDR_LEN) {
 		m = m_pullup(m, ETHER_HDR_LEN);
@@ -2019,8 +2033,14 @@ sendunicast:
 		return (0);
 	}
 
-	BRIDGE_UNLOCK(sc);
+	error = 0;
+	BRIDGE_LOCK2REF(sc, error);
+	if (error) {
+		m_freem(m);
+		return (0);
+	}
 	bridge_enqueue(sc, dst_if, m);
+	BRIDGE_UNREF(sc);
 	return (0);
 }
 
@@ -2047,8 +2067,13 @@ bridge_transmit(struct ifnet *ifp, struct mbuf *m)
 	BRIDGE_LOCK(sc);
 	if (((m->m_flags & (M_BCAST|M_MCAST)) == 0) &&
 	    (dst_if = bridge_rtlookup(sc, eh->ether_dhost, 1)) != NULL) {
-		BRIDGE_UNLOCK(sc);
-		error = bridge_enqueue(sc, dst_if, m);
+		BRIDGE_LOCK2REF(sc, error);
+		if (error)
+			m_freem(m);
+		else {
+			error = bridge_enqueue(sc, dst_if, m);
+			BRIDGE_UNREF(sc);
+		}
 	} else
 		bridge_broadcast(sc, ifp, m, 0);
 
@@ -2192,20 +2217,30 @@ bridge_forward(struct bridge_softc *sc, struct bridge_iflist *sbif,
 	    dbif->bif_stp.bp_state == BSTP_IFSTATE_DISCARDING)
 		goto drop;
 
-	BRIDGE_UNLOCK(sc);
+	error = 0;
+	BRIDGE_LOCK2REF(sc, error);
+	if (error) {
+		m_freem(m);
+		return;
+	}
 
 	if (PFIL_HOOKED(&V_inet_pfil_hook)
 #ifdef INET6
 	    || PFIL_HOOKED(&V_inet6_pfil_hook)
 #endif
 	    ) {
-		if (bridge_pfil(&m, ifp, dst_if, PFIL_OUT) != 0)
+		if (bridge_pfil(&m, ifp, dst_if, PFIL_OUT) != 0) {
+			BRIDGE_UNREF(sc);
 			return;
-		if (m == NULL)
+		}
+		if (m == NULL) {
+			BRIDGE_UNREF(sc);
 			return;
+		}
 	}
 
 	bridge_enqueue(sc, dst_if, m);
+	BRIDGE_UNREF(sc);
 	return;
 
 drop:
