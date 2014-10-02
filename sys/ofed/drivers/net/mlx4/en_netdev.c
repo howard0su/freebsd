@@ -972,8 +972,8 @@ static void mlx4_en_do_set_rx_mode(struct work_struct *work)
 			 * change) */
 			if_link_state_change(priv->dev, LINK_STATE_UP);
 			en_dbg(HW, priv, "Link Up\n");
-			if_initbaudrate(priv->dev,
-			    IF_Mbps(priv->port_state.link_speed));
+			priv->dev->if_baudrate =
+			    IF_Mbps(priv->port_state.link_speed);
 			
 		}
 	}
@@ -1189,7 +1189,7 @@ static void mlx4_en_linkstate(struct work_struct *work)
 		if (linkstate == MLX4_DEV_EVENT_PORT_DOWN) {
 			en_info(priv, "Link Down\n");
 			if_link_state_change(priv->dev, LINK_STATE_DOWN);
-			if_initbaudrate(priv->dev, 0);			
+			priv->dev->if_baudrate = 0;			
 		/* make sure the port is up before notifying the OS. 
 		 * This is tricky since we get here on INIT_PORT and 
 		 * in such case we can't tell the OS the port is up.
@@ -1200,8 +1200,8 @@ static void mlx4_en_linkstate(struct work_struct *work)
 			en_info(priv, "Link Up\n");
 			if_link_state_change(priv->dev, LINK_STATE_UP);
 			(void)mlx4_en_QUERY_PORT(priv->mdev, priv->port);
-			if_initbaudrate(priv->dev,
-			    IF_Mbps(priv->port_state.link_speed));
+			priv->dev->if_baudrate =
+			    IF_Mbps(priv->port_state.link_speed);
 		}
 	}
 	priv->last_link_state = linkstate;

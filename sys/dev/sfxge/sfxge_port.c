@@ -220,7 +220,7 @@ sfxge_port_link_fc_handler(SYSCTL_HANDLER_ARGS)
 
 #endif /* SFXGE_HAVE_PAUSE_MEDIAOPTS */
 
-static const uintmax_t sfxge_link_baudrate[EFX_LINK_NMODES] = {
+static const uint64_t sfxge_link_baudrate[EFX_LINK_NMODES] = {
 	[EFX_LINK_10HDX]	= IF_Mbps(10),
 	[EFX_LINK_10FDX]	= IF_Mbps(10),
 	[EFX_LINK_100HDX]	= IF_Mbps(100),
@@ -246,7 +246,7 @@ sfxge_mac_link_update(struct sfxge_softc *sc, efx_link_mode_t mode)
 	/* Push link state update to the OS */
 	link_state = (port->link_mode != EFX_LINK_DOWN ?
 		      LINK_STATE_UP : LINK_STATE_DOWN);
-	if_initbaudrate(sc->ifnet, sfxge_link_baudrate[port->link_mode]);
+	sc->ifnet->if_baudrate = sfxge_link_baudrate[port->link_mode];
 	if_link_state_change(sc->ifnet, link_state);
 }
 
