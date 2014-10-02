@@ -974,7 +974,6 @@ static void mlx4_en_do_set_rx_mode(struct work_struct *work)
 			en_dbg(HW, priv, "Link Up\n");
 			priv->dev->if_baudrate =
 			    IF_Mbps(priv->port_state.link_speed);
-			
 		}
 	}
 
