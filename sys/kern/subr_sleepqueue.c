@@ -423,6 +423,9 @@ sleepq_catch_signals(void *wchan, int pri)
 	sc = SC_LOOKUP(wchan);
 	mtx_assert(&sc->sc_lock, MA_OWNED);
 	MPASS(wchan != NULL);
+	KASSERT(td->td_locks == 0 || td->td_pflags & TDP_KTHREAD ||
+	    td->td_flags & TDF_SBDRY,
+	    ("interruptible sleep with locks held does not defer SIGSTOP"));
 	if ((td->td_pflags & TDP_WAKEUP) != 0) {
 		td->td_pflags &= ~TDP_WAKEUP;
 		ret = EINTR;
