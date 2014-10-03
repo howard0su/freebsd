@@ -437,6 +437,32 @@ _sem_post(sem_t *sem)
 	if (sem_check_validity(sem) != 0)
 		return (-1);
 
+#ifdef __LP64__
+	if (((uintptr_t)&sem->_kern._count & 7) == 0) {
+		uint64_t oldval, newval;
+
+		while (!sem->_kern._has_waiters) {
+			count = sem->_kern._count;
+			if (count + 1 > SEM_VALUE_MAX)
+				return (EOVERFLOW);
+			/*
+			 * Expect _count == count and _has_waiters == 0.
+			 */
+#if BYTE_ORDER == LITTLE_ENDIAN
+			oldval = (uint64_t)count << 32;
+			newval = (uint64_t)(count + 1) << 32;
+#elif BYTE_ORDER == BIG_ENDIAN
+			oldval = (uint64_t)count;
+			newval = (uint64_t)(count + 1);
+#else
+#error Unknown byte order
+#endif
+			if (atomic_cmpset_rel_64((uint64_t *)&sem->_kern._count,
+			    oldval, newval))
+				return (0);
+		}
+	}
+#endif
 	do {
 		count = sem->_kern._count;
 		if (count + 1 > SEM_VALUE_MAX)
