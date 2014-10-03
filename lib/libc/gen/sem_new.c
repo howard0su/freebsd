@@ -457,7 +457,8 @@ _sem_post(sem_t *sem)
 #else
 #error Unknown byte order
 #endif
-			if (atomic_cmpset_rel_64((uint64_t *)&sem->_kern._count,
+			if (atomic_cmpset_rel_64(
+			    (uint64_t *)&sem->_kern._has_waiters,
 			    oldval, newval))
 				return (0);
 		}
