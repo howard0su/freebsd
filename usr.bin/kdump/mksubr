@@ -225,7 +225,7 @@ atfdname(int fd, int decimal)
 }
 
 /* MANUAL */
-extern char *signames[]; /* from kdump.c */
+extern const char *signames[]; /* from kdump.c */
 void
 signame(int sig)
 {
