@@ -56,7 +56,7 @@ __FBSDID("$FreeBSD$");
 #include "libc_private.h"
 #include "timelocal.h"
 #include "tzfile.h"
-#include <stdio.h>
+
 static char * _strptime(const char *, const char *, struct tm *, int *, locale_t);
 
 #define	asizeof(a)	(sizeof(a) / sizeof((a)[0]))
@@ -342,6 +342,7 @@ label:
 			if (i == asizeof(tptr->weekday))
 				return (NULL);
 
+			buf += len;
 			tm->tm_wday = i;
 			flags |= FLAG_WDAY;
 			break;
@@ -502,8 +503,11 @@ label:
 			}
 			errno = sverrno;
 			buf = cp;
-			gmtime_r(&t, tm);
+			if (gmtime_r(&t, tm) == NULL)
+				return (NULL);
 			*GMTp = 1;
+			flags |= FLAG_YDAY | FLAG_WDAY | FLAG_MONTH |
+			    FLAG_MDAY | FLAG_YEAR;
 			}
 			break;
 

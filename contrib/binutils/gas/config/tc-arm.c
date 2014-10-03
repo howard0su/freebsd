@@ -6571,6 +6571,7 @@ do_barrier (void)
   if (inst.operands[0].present)
     {
       constraint ((inst.instruction & 0xf0) != 0x40
+		  && (inst.instruction & 0xf0) != 0x50
 		  && inst.operands[0].imm != 0xf,
 		  "bad barrier type");
       inst.instruction |= inst.operands[0].imm;
@@ -14694,10 +14695,18 @@ static const struct asm_cond conds[] =
 
 static struct asm_barrier_opt barrier_opt_names[] =
 {
-  { "sy",   0xf },
-  { "un",   0x7 },
-  { "st",   0xe },
-  { "unst", 0x6 }
+  { "sy",    0xf },
+  { "un",    0x7 },
+  { "st",    0xe },
+  { "unst",  0x6 },
+  { "ish",   0xb },
+  { "sh",    0xb },
+  { "ishst", 0xa },
+  { "shst",  0xa },
+  { "nsh",   0x7 },
+  { "nshst", 0x6 },
+  { "osh",   0x3 },
+  { "oshst", 0x2 }
 };
 
 /* Table of ARM-format instructions.	*/
