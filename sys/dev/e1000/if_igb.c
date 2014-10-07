@@ -2292,8 +2292,10 @@ igb_update_link_status(struct adapter *adapter)
 		/* This can sleep */
 		if_link_state_change(ifp, LINK_STATE_DOWN);
 		/* Reset queue state */
-		for (int i = 0; i < adapter->num_queues; i++, txr++)
+		for (int i = 0; i < adapter->num_queues; i++, txr++) {
 			txr->queue_status = IGB_QUEUE_IDLE;
+			txr->watchdog_time = 0;
+		}
 	}
 }
 
@@ -4082,6 +4084,7 @@ igb_txeof(struct tx_ring *txr)
 
 	if (txr->tx_avail == txr->num_desc) {
 		txr->queue_status = IGB_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 		return FALSE;
 	}
 
