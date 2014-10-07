@@ -29,44 +29,28 @@
 .Os
 .Sh NAME
 .Nm gdb
-.Nd external kernel debugger
+.Nd GDB kernel debugger
 .Sh SYNOPSIS
 .Cd "makeoptions DEBUG=-g"
-.Cd "options DDB"
+.Cd "options KDB"
+.Cd "options GDB"
 .Sh DESCRIPTION
 The
 .Nm
-kernel debugger is a variation of
-.Xr gdb 1
-which understands some aspects of the
-.Fx
-kernel environment.
-It can be used in a number of ways:
-.Bl -bullet
-.It
-It can be used to examine the memory of the processor on which it runs.
-.It
-It can be used to analyse a processor dump after a panic.
-.It
-It can be used to debug another system interactively via a serial or firewire
-link.
-In this mode, the processor can be stopped and single stepped.
-.It
-With a firewire link, it can be used to examine the memory of a remote system
-without the participation of that system.
-In this mode, the processor cannot be stopped and single stepped, but it can be
-of use when the remote system has crashed and is no longer responding.
-.El
-.Pp
-When used for remote debugging,
+kernel debugger allows a machine to be debugged remotely using
+.Xr kgdb 1 .
+The kernel debugger can be configured to use
 .Nm
-requires the presence of the
+as the default debugger by setting the
+.Va debug.kdb.current
+sysctl to the value
+.Dq gdb
+.
+The GDB kernel debugger can also be enabled from the
 .Xr ddb 4
-kernel debugger.
-Commands exist to switch between
-.Nm
-and
-.Xr ddb 4 .
+kernel debugger via the
+.Dq gdb
+command.
 .Sh PREPARING FOR DEBUGGING
 When debugging kernels, it is practically essential to have built a kernel with
 debugging symbols
@@ -85,18 +69,10 @@ to adapt them to the local environment.
 To look at and change the contents of the memory of the system you are running
 on,
 .Pp
-.Dl "gdb -k -wcore kernel.debug /dev/mem"
+.Dl "kgdb -w kernel.debug /dev/mem"
 .Pp
-In this mode, you need the
-.Fl k
-flag to indicate to
-.Xr gdb 1
-that the
-.Dq "dump file"
-.Pa /dev/mem
-is a kernel data file.
 You can look at live data, and if you include the
-.Fl wcore
+.Fl w
 option, you can change it at your peril.
 The system does not stop (obviously), so a number of things will not work.
 You can set breakpoints, but you cannot
@@ -107,7 +83,7 @@ By default, crash dumps are stored in the directory
 .Pa /var/crash .
 Investigate them from the kernel build directory with:
 .Pp
-.Dl "gdb -k kernel.debug /var/crash/vmcore.29"
+.Dl "kgdb kernel.debug /var/crash/vmcore.29"
 .Pp
 In this mode, the system is obviously stopped, so you can only look at it.
 .Ss "Debugging a live system with a remote link"
@@ -118,8 +94,10 @@ refers to the system running the debugger, and
 refers to the live system being debugged.
 .Pp
 To debug a live system with a remote link, the kernel must be compiled with the
-option
-.Cd "options DDB" .
+options
+.Cd "options KDB"
+and
+.Cd "options GDB" .
 The option
 .Cd "options BREAK_TO_DEBUGGER"
 enables the debugging machine stop the debugged machine once a connection has
@@ -136,7 +114,7 @@ so the entry in
 .Pa /boot/device.hints
 should be:
 .Pp
-.Dl hint.sio.0.flags="0x90"
+.Dl hint.uart.0.flags="0x90"
 .Ss "Debugging a live system with a remote firewire link"
 As with serial debugging, to debug a live system with a firewire link, the
 kernel must be compiled with the option
@@ -248,19 +226,10 @@ good idea to start it in its own window.
 .It
 Finally, establish connection:
 .Bd -literal -offset indent
-# gdb kernel.debug
-GNU gdb 5.2.1 (FreeBSD)
+# kgdb kernel.debug
+GNU gdb 6.1.1 [FreeBSD]
 .Em "(political statements omitted)"
-Ready to go.  Enter 'tr' to connect to the remote target
-with /dev/cuau0, 'tr /dev/cuau1' to connect to a different port
-or 'trf portno' to connect to the remote target with the firewire
-interface.  portno defaults to 5556.
-
-Type 'getsyms' after connection to load kld symbols.
-
-If you are debugging a local system, you can use 'kldsyms' instead
-to load the kld symbols.  That is a less obnoxious interface.
-(gdb) trf
+(kgdb) trf
 0xc21bd378 in ?? ()
 .Ed
 .Pp
@@ -280,7 +249,7 @@ like this:
 .Pp
 Then establish connection with:
 .Bd -literal -offset indent
-(gdb) tr localhost:4711
+(kgdb) tr localhost:4711
 0xc21bd378 in ?? ()
 .Ed
 .El
@@ -319,8 +288,8 @@ hw.firewire.fwmem.eui64_lo: 0 -> 221739
 Note that the variables must be explicitly stated in hexadecimal.
 After this, you can examine the remote machine's state with the following input:
 .Bd -literal -offset indent
-# gdb -k kernel.debug /dev/fwmem0.0
-GNU gdb 5.2.1 (FreeBSD)
+# kgdb kernel.debug /dev/fwmem0.0
+GNU gdb 6.1.1 [FreeBSD]
 .Em "(messages omitted)"
 Reading symbols from /boot/kernel/dcons.ko...done.
 Loaded symbols for /boot/kernel/dcons.ko
@@ -336,9 +305,9 @@ The remote system continues to run.
 The user interface to
 .Nm
 is via
-.Xr gdb 1 ,
+.Xr kgdb 1 ,
 so
-.Xr gdb 1
+.Xr kgdb 1
 commands also work.
 This section discusses only the extensions for kernel debugging that get
 installed in the kernel build directory.
@@ -568,7 +537,7 @@ It does nothing else except to print a warning
 message to remind you to remove it again.
 .El
 .Sh SEE ALSO
-.Xr gdb 1 ,
+.Xr kgdb 1 ,
 .Xr ps 1 ,
 .Xr ddb 4 ,
 .Xr firewire 4 ,
@@ -580,10 +549,6 @@ message to remind you to remove it again.
 This man page was written by
 .An Greg Lehey Aq Mt grog@FreeBSD.org .
 .Sh BUGS
-The
-.Xr gdb 1
-debugger
-was never designed to debug kernels, and it is not a very good match.
 Many problems exist.
 .Pp
 The

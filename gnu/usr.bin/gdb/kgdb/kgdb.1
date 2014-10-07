@@ -43,9 +43,27 @@
 .Sh DESCRIPTION
 The
 .Nm
-utility is a debugger based on
+kernel debugger is a variation of
 .Xr gdb 1
-that allows debugging of kernel core files.
+which understands some aspects of the
+.Fx
+kernel environment.
+It can be used in a number of ways:
+.Bl -bullet
+.It
+It can be used to examine the memory of the processor on which it runs.
+.It
+It can be used to analyse a processor dump after a panic.
+.It
+It can be used to debug another system interactively via a serial or firewire
+link.
+In this mode, the processor can be stopped and single stepped.
+.It
+With a firewire link, it can be used to examine the memory of a remote system
+without the participation of that system.
+In this mode, the processor cannot be stopped and single stepped, but it can be
+of use when the remote system has crashed and is no longer responding.
+.El
 .Pp
 The options are as follows:
 .Bl -tag -width ".Fl d Ar crashdir"
