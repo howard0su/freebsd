@@ -767,7 +767,6 @@ loop:
 			/*
 			 * An otherwise runnable thread of a process
 			 * swapped out has only the TDI_SWAPPED bit set.
-			 * 
 			 */
 			thread_lock(td);
 			if (td->td_inhibitors == TDI_SWAPPED) {
@@ -1014,11 +1013,13 @@ swapclear(p)
 	PROC_LOCK_ASSERT(p, MA_OWNED);
 
 	FOREACH_THREAD_IN_PROC(p, td) {
+		if (td->td_flags & TDF_INMEM)
+			continue;
 		thread_lock(td);
 		td->td_flags |= TDF_INMEM;
 		td->td_flags &= ~TDF_SWAPINREQ;
 		TD_CLR_SWAPPED(td);
-		if (TD_CAN_RUN(td))
+		if (TD_CAN_RUN(td)) {
 			if (setrunnable(td)) {
 #ifdef INVARIANTS
 				/*
@@ -1029,6 +1030,13 @@ swapclear(p)
 				panic("not waking up swapper");
 #endif
 			}
+		} else {
+			KASSERT(TD_IS_SLEEPING(td),
+			    ("non-runnable thread from swap must be sleeping"));
+			KTR_STATE2(KTR_SCHED, "thread", sched_tdname(td),
+			    "sleep", "prio:%d", td->td_priority,
+			    "wmesg:\"%s\"", td->td_wmesg);
+		}
 		thread_unlock(td);
 	}
 	p->p_flag &= ~(P_SWAPPINGIN|P_SWAPPINGOUT);
@@ -1072,6 +1080,8 @@ swapout(p)
 		}
 		td->td_flags &= ~TDF_INMEM;
 		TD_SET_SWAPPED(td);
+		KTR_STATE2(KTR_SCHED, "thread", sched_tdname(td), "swapped",
+		    "prio:%d", td->td_priority, "wmesg:\"%s\"", td->td_wmesg);
 		thread_unlock(td);
 	}
 	td = FIRST_THREAD_IN_PROC(p);
