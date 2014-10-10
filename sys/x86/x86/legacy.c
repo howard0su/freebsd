@@ -108,7 +108,8 @@ static driver_t legacy_driver = {
 };
 static devclass_t legacy_devclass;
 
-DRIVER_MODULE(legacy, nexus, legacy_driver, legacy_devclass, 0, 0);
+EARLY_DRIVER_MODULE(legacy, nexus, legacy_driver, legacy_devclass, 0, 0,
+    BUS_PASS_BUS);
 
 static int
 legacy_probe(device_t dev)
