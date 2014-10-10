@@ -1857,42 +1857,54 @@ em_xmit(struct tx_ring *txr, struct mbuf **m_headp)
 		 * for IPv6 yet.
 		 */
 		ip_off = sizeof(struct ether_header);
-		m_head = m_pullup(m_head, ip_off);
-		if (m_head == NULL) {
-			*m_headp = NULL;
-			return (ENOBUFS);
-		}
-		eh = mtod(m_head, struct ether_header *);
-		if (eh->ether_type == htons(ETHERTYPE_VLAN)) {
-			ip_off = sizeof(struct ether_vlan_header);
+		if (m_head->m_len < ip_off) {
 			m_head = m_pullup(m_head, ip_off);
 			if (m_head == NULL) {
 				*m_headp = NULL;
 				return (ENOBUFS);
 			}
 		}
-		m_head = m_pullup(m_head, ip_off + sizeof(struct ip));
-		if (m_head == NULL) {
-			*m_headp = NULL;
-			return (ENOBUFS);
+		eh = mtod(m_head, struct ether_header *);
+		if (eh->ether_type == htons(ETHERTYPE_VLAN)) {
+			ip_off = sizeof(struct ether_vlan_header);
+			if (m_head->m_len < ip_off) {
+				m_head = m_pullup(m_head, ip_off);
+				if (m_head == NULL) {
+					*m_headp = NULL;
+					return (ENOBUFS);
+				}
+			}
+		}
+		if (m_head->m_len < ip_off + sizeof(struct ip)) {
+			m_head = m_pullup(m_head, ip_off + sizeof(struct ip));
+			if (m_head == NULL) {
+				*m_headp = NULL;
+				return (ENOBUFS);
+			}
 		}
 		ip = (struct ip *)(mtod(m_head, char *) + ip_off);
 		poff = ip_off + (ip->ip_hl << 2);
 		if (do_tso) {
-			m_head = m_pullup(m_head, poff + sizeof(struct tcphdr));
-			if (m_head == NULL) {
-				*m_headp = NULL;
-				return (ENOBUFS);
+			if (m_head->m_len < poff + sizeof(struct tcphdr)) {
+				m_head = m_pullup(m_head, poff +
+				    sizeof(struct tcphdr));
+				if (m_head == NULL) {
+					*m_headp = NULL;
+					return (ENOBUFS);
+				}
 			}
 			tp = (struct tcphdr *)(mtod(m_head, char *) + poff);
 			/*
 			 * TSO workaround:
 			 *   pull 4 more bytes of data into it.
 			 */
-			m_head = m_pullup(m_head, poff + (tp->th_off << 2) + 4);
-			if (m_head == NULL) {
-				*m_headp = NULL;
-				return (ENOBUFS);
+			if (m_head->m_len < poff + (tp->th_off << 2) + 4) {
+				m_head = m_pullup(m_head, poff +
+				    (tp->th_off << 2) + 4);
+				if (m_head == NULL) {
+					*m_headp = NULL;
+					return (ENOBUFS);
+				}
 			}
 			ip = (struct ip *)(mtod(m_head, char *) + ip_off);
 			ip->ip_len = 0;
@@ -1907,24 +1919,33 @@ em_xmit(struct tx_ring *txr, struct mbuf **m_headp)
 			tp->th_sum = in_pseudo(ip->ip_src.s_addr,
 			    ip->ip_dst.s_addr, htons(IPPROTO_TCP));
 		} else if (m_head->m_pkthdr.csum_flags & CSUM_TCP) {
-			m_head = m_pullup(m_head, poff + sizeof(struct tcphdr));
-			if (m_head == NULL) {
-				*m_headp = NULL;
-				return (ENOBUFS);
+			if (m_head->m_len < poff + sizeof(struct tcphdr)) {
+				m_head = m_pullup(m_head, poff +
+				    sizeof(struct tcphdr));
+				if (m_head == NULL) {
+					*m_headp = NULL;
+					return (ENOBUFS);
+				}
 			}
 			tp = (struct tcphdr *)(mtod(m_head, char *) + poff);
-			m_head = m_pullup(m_head, poff + (tp->th_off << 2));
-			if (m_head == NULL) {
-				*m_headp = NULL;
-				return (ENOBUFS);
+			if (m_head->m_len < poff + (tp->th_off << 2)) {
+				m_head = m_pullup(m_head, poff +
+				    (tp->th_off << 2));
+				if (m_head == NULL) {
+					*m_headp = NULL;
+					return (ENOBUFS);
+				}
 			}
 			ip = (struct ip *)(mtod(m_head, char *) + ip_off);
 			tp = (struct tcphdr *)(mtod(m_head, char *) + poff);
 		} else if (m_head->m_pkthdr.csum_flags & CSUM_UDP) {
-			m_head = m_pullup(m_head, poff + sizeof(struct udphdr));
-			if (m_head == NULL) {
-				*m_headp = NULL;
-				return (ENOBUFS);
+			if (m_head->m_len < poff + sizeof(struct udphdr)) {
+				m_head = m_pullup(m_head, poff +
+				    sizeof(struct udphdr));
+				if (m_head == NULL) {
+					*m_headp = NULL;
+					return (ENOBUFS);
+				}
 			}
 			ip = (struct ip *)(mtod(m_head, char *) + ip_off);
 		}
