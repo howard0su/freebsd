@@ -115,7 +115,7 @@ static void     ixv_free_receive_buffers(struct rx_ring *);
 
 static void     ixv_enable_intr(struct adapter *);
 static void     ixv_disable_intr(struct adapter *);
-static bool	ixv_txeof(struct tx_ring *);
+static void	ixv_txeof(struct tx_ring *);
 static bool	ixv_rxeof(struct ix_queue *, int);
 static void	ixv_rx_checksum(u32, struct mbuf *, u32);
 static void     ixv_set_multi(struct adapter *);
@@ -1005,7 +1005,7 @@ ixv_msix_que(void *arg)
 	struct adapter  *adapter = que->adapter;
 	struct tx_ring	*txr = que->txr;
 	struct rx_ring	*rxr = que->rxr;
-	bool		more_tx, more_rx;
+	bool		more_rx;
 	u32		newitr = 0;
 
 	ixv_disable_queue(adapter, que->msix);
@@ -1014,18 +1014,14 @@ ixv_msix_que(void *arg)
 	more_rx = ixv_rxeof(que, adapter->rx_process_limit);
 
 	IXV_TX_LOCK(txr);
-	more_tx = ixv_txeof(txr);
-	/*
-	** Make certain that if the stack
-	** has anything queued the task gets
-	** scheduled to handle it.
-	*/
-#if __FreeBSD_version < 800000
-	if (!IFQ_DRV_IS_EMPTY(&adapter->ifp->if_snd))
+	ixv_txeof(txr);
+#if __FreeBSD_version >= 800000
+	if (!drbr_empty(ifp, txr->br))
+		ixv_mq_start_locked(ifp, txr, NULL);
 #else
-	if (!drbr_empty(adapter->ifp, txr->br))
+	if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+		ixv_start_locked(txr, ifp);
 #endif
-                more_tx = 1;
 	IXV_TX_UNLOCK(txr);
 
 	more_rx = ixv_rxeof(que, adapter->rx_process_limit);
@@ -1079,7 +1075,7 @@ ixv_msix_que(void *arg)
         rxr->packets = 0;
 
 no_calc:
-	if (more_tx || more_rx)
+	if (more_rx)
 		taskqueue_enqueue(que->tq, &que->que_task);
 	else /* Reenable this interrupt */
 		ixv_enable_queue(adapter, que->msix);
@@ -2588,7 +2584,7 @@ ixv_tso_setup(struct tx_ring *txr, struct mbuf *mp, u32 *paylen)
  *  tx_buffer is put back on the free queue.
  *
  **********************************************************************/
-static bool
+static void
 ixv_txeof(struct tx_ring *txr)
 {
 	struct adapter	*adapter = txr->adapter;
@@ -2600,7 +2596,7 @@ ixv_txeof(struct tx_ring *txr)
 	mtx_assert(&txr->tx_mtx, MA_OWNED);
 
 	if (txr->tx_avail == adapter->num_tx_desc)
-		return FALSE;
+		return;
 
 	first = txr->next_to_clean;
 	tx_buffer = &txr->tx_buffers[first];
@@ -2608,7 +2604,7 @@ ixv_txeof(struct tx_ring *txr)
 	tx_desc = (struct ixgbe_legacy_tx_desc *)&txr->tx_base[first];
 	last = tx_buffer->eop_index;
 	if (last == -1)
-		return FALSE;
+		return;
 	eop_desc = (struct ixgbe_legacy_tx_desc *)&txr->tx_base[last];
 
 	/*
@@ -2683,11 +2679,8 @@ ixv_txeof(struct tx_ring *txr)
 #endif
 		if (txr->tx_avail == adapter->num_tx_desc) {
 			txr->watchdog_time = 0;
-			return FALSE;
 		}
 	}
-
-	return TRUE;
 }
 
 /*********************************************************************
