@@ -770,13 +770,14 @@ ixgbe_start_locked(struct tx_ring *txr, struct ifnet * ifp)
 		if (ixgbe_xmit(txr, &m_head)) {
 			if (m_head != NULL)
 				IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
+			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
 			break;
 		}
 		/* Send a copy of the frame to the BPF listener */
 		ETHER_BPF_MTAP(ifp, m_head);
 
 		/* Set watchdog on */
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IXGBE_WATCHDOG;
 		txr->queue_status = IXGBE_QUEUE_WORKING;
 
 	}
@@ -903,7 +904,7 @@ ixgbe_mq_start_locked(struct ifnet *ifp, struct tx_ring *txr)
 	if (enqueued > 0) {
 		/* Set watchdog on */
 		txr->queue_status = IXGBE_QUEUE_WORKING;
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IXGBE_WATCHDOG;
 	}
 
 	if (txr->tx_avail < IXGBE_TX_CLEANUP_THRESHOLD)
@@ -2071,7 +2072,7 @@ ixgbe_local_timer(void *arg)
 	device_t	dev = adapter->dev;
 	struct ix_queue *que = adapter->queues;
 	struct tx_ring	*txr = adapter->tx_rings;
-	int		hung = 0, paused = 0;
+	int		hung = 0;
 
 	mtx_assert(&adapter->core_mtx, MA_OWNED);
 
@@ -2088,21 +2089,27 @@ ixgbe_local_timer(void *arg)
 	 * then don't do the watchdog check
 	 */
 	if (IXGBE_READ_REG(&adapter->hw, IXGBE_TFCS) & IXGBE_TFCS_TXOFF)
-		paused = 1;
+		goto out;
 
 	/*
 	** Check the TX queues status
-	**      - watchdog only if all queues show hung
+	**      - watchdog if any queue hangs
 	*/          
 	for (int i = 0; i < adapter->num_queues; i++, que++, txr++) {
-		if ((txr->queue_status == IXGBE_QUEUE_HUNG) &&
-		    (paused == 0))
-			++hung;
-		else if (txr->queue_status == IXGBE_QUEUE_WORKING)
-			taskqueue_enqueue(que->tq, &txr->txq_task);
+		IXGBE_TX_LOCK(txr);
+		if (txr->watchdog_time == 1) {
+			/*
+			 * If this cleans any packets it will reset
+			 * watchdog_time to IXGBE_WATCHDOG or 0.
+			 */
+			ixgbe_txeof(txr);
+			if (txr->watchdog_time == 1)
+				++hung;
+		} else if (txr->watchdog_time != 0)
+			--txr->watchdog_time;
+		IXGBE_TX_UNLOCK(txr);
         }
-	/* Only truely watchdog if all queues show hung */
-        if (hung == adapter->num_queues)
+        if (hung != 0)
                 goto watchdog;
 
 out:
@@ -2117,7 +2124,7 @@ watchdog:
 	device_printf(dev,"TX(%d) desc avail = %d,"
 	    "Next TX to Clean = %d\n",
 	    txr->me, txr->tx_avail, txr->next_to_clean);
-	adapter->ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+	adapter->ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
 	adapter->watchdog_events++;
 	ixgbe_init_locked(adapter);
 }
@@ -2180,7 +2187,7 @@ ixgbe_stop(void *arg)
 	callout_stop(&adapter->timer);
 
 	/* Let the stack know...*/
-	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
+	ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
 
 	ixgbe_reset_hw(hw);
 	hw->adapter_stopped = FALSE;
@@ -3231,6 +3238,7 @@ ixgbe_initialize_transmit_units(struct adapter *adapter)
 		/* Setup Transmit Descriptor Cmd Settings */
 		txr->txd_cmd = IXGBE_TXD_CMD_IFCS;
 		txr->queue_status = IXGBE_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 
 		/* Set the processing limit */
 		txr->process_limit = ixgbe_tx_process_limit;
@@ -3720,6 +3728,7 @@ ixgbe_txeof(struct tx_ring *txr)
 
 	if (txr->tx_avail == txr->num_desc) {
 		txr->queue_status = IXGBE_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 		return;
 	}
 
@@ -3783,7 +3792,7 @@ ixgbe_txeof(struct tx_ring *txr)
 		}
 		++txr->packets;
 		++processed;
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IXGBE_WATCHDOG;
 
 		/* Try the next packet */
 		++txd;
@@ -3804,17 +3813,15 @@ ixgbe_txeof(struct tx_ring *txr)
 	work += txr->num_desc;
 	txr->next_to_clean = work;
 
-	/*
-	** Watchdog calculation, we know there's
-	** work outstanding or the first return
-	** would have been taken, so none processed
-	** for too long indicates a hang.
-	*/
-	if ((!processed) && ((ticks - txr->watchdog_time) > IXGBE_WATCHDOG))
-		txr->queue_status = IXGBE_QUEUE_HUNG;
+#ifdef IXGBE_LEGACY_TX
+	if (processed != 0)
+		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+#endif
 
-	if (txr->tx_avail == txr->num_desc)
+	if (txr->tx_avail == txr->num_desc) {
 		txr->queue_status = IXGBE_QUEUE_IDLE;
+		txr->watchdog_time = 0;
+	}
 
 	return;
 }

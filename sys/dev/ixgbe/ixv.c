@@ -529,18 +529,16 @@ ixv_start_locked(struct tx_ring *txr, struct ifnet * ifp)
 			break;
 
 		if (ixv_xmit(txr, &m_head)) {
-			if (m_head == NULL)
-				break;
+			if (m_head != NULL)
+				IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
 			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
-			IFQ_DRV_PREPEND(&ifp->if_snd, m_head);
 			break;
 		}
 		/* Send a copy of the frame to the BPF listener */
 		ETHER_BPF_MTAP(ifp, m_head);
 
 		/* Set watchdog on */
-		txr->watchdog_check = TRUE;
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IXV_WATCHDOG;
 
 	}
 	return;
@@ -649,8 +647,7 @@ ixv_mq_start_locked(struct ifnet *ifp, struct tx_ring *txr, struct mbuf *m)
 
 	if (enqueued > 0) {
 		/* Set watchdog on */
-		txr->watchdog_check = TRUE;
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = IXV_WATCHDOG;
 	}
 
 	return (err);
@@ -1426,7 +1423,7 @@ ixv_local_timer(void *arg)
 	struct adapter	*adapter = arg;
 	device_t	dev = adapter->dev;
 	struct tx_ring	*txr = adapter->tx_rings;
-	int		i;
+	int		hung = 0, i;
 
 	mtx_assert(&adapter->core_mtx, MA_OWNED);
 
@@ -1446,14 +1443,20 @@ ixv_local_timer(void *arg)
 	*/
         for (i = 0; i < adapter->num_queues; i++, txr++) {
 		IXV_TX_LOCK(txr);
-		if (txr->watchdog_check == FALSE) {
-			IXV_TX_UNLOCK(txr);
-			continue;
-		}
-		if ((ticks - txr->watchdog_time) > IXV_WATCHDOG)
-			goto hung;
+		if (txr->watchdog_time == 1) {
+			/*
+			 * If this cleans any packets it will reset
+			 * watchdog_time to IXV_WATCHDOG or 0.
+			 */
+			ixv_txeof(txr);
+			if (txr->watchdog_time == 1)
+				hung++;
+		} else if (txr->watchdog_time != 0)
+			--txr->watchdog_time;
 		IXV_TX_UNLOCK(txr);
 	}
+	if (hung != 0)
+		goto hung;
 out:
        	ixv_rearm_queues(adapter, adapter->que_mask);
 	callout_reset(&adapter->timer, hz, ixv_local_timer, adapter);
@@ -1503,7 +1506,7 @@ ixv_update_link_status(struct adapter *adapter)
 			adapter->link_active = FALSE;
 			for (int i = 0; i < adapter->num_queues;
 			    i++, txr++)
-				txr->watchdog_check = FALSE;
+				txr->watchdog_time = 0;
 		}
 	}
 
@@ -2275,7 +2278,7 @@ ixv_initialize_transmit_units(struct adapter *adapter)
 
 		/* Setup Transmit Descriptor Cmd Settings */
 		txr->txd_cmd = IXGBE_TXD_CMD_IFCS;
-		txr->watchdog_check = FALSE;
+		txr->watchdog_time = 0;
 
 		/* Set Ring parameters */
 		IXGBE_WRITE_REG(hw, IXGBE_VFTDBAL(i),
@@ -2642,7 +2645,7 @@ ixv_txeof(struct tx_ring *txr)
 				tx_buffer->map = NULL;
 			}
 			tx_buffer->eop_index = -1;
-			txr->watchdog_time = ticks;
+			txr->watchdog_time = IXV_WATCHDOG;
 
 			if (++first == adapter->num_tx_desc)
 				first = 0;
@@ -2675,9 +2678,11 @@ ixv_txeof(struct tx_ring *txr)
 	 * restart the timeout.
 	 */
 	if (txr->tx_avail > IXV_TX_CLEANUP_THRESHOLD) {
+#if __FreeBSD_version < 800000
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+#endif
 		if (txr->tx_avail == adapter->num_tx_desc) {
-			txr->watchdog_check = FALSE;
+			txr->watchdog_time = 0;
 			return FALSE;
 		}
 	}
