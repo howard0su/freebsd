@@ -735,7 +735,7 @@ em_attach(device_t dev)
 		em_get_hw_control(adapter);
 
 	/* Tell the stack that the interface is not active */
-	if_setdrvflagbits(adapter->ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+	if_setdrvflagbits(adapter->ifp, 0, IFF_DRV_OACTIVE | IFF_DRV_RUNNING);
 
 	adapter->led_dev = led_create(em_led_func, adapter,
 	    device_get_nameunit(dev));
@@ -910,7 +910,7 @@ em_mq_start_locked(if_t ifp, struct tx_ring *txr, struct mbuf *m)
         struct mbuf     *next;
         int             err = 0, enq = 0;
 
-	if ((if_getdrvflags(ifp) & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
+	if ((if_getdrvflags(ifp) & IFF_DRV_RUNNING) !=
 	    IFF_DRV_RUNNING || adapter->link_active == 0) {
 		if (m != NULL)
 			err = drbr_enqueue(ifp, txr->br, m);
@@ -946,13 +946,11 @@ em_mq_start_locked(if_t ifp, struct tx_ring *txr, struct mbuf *m)
 	if (enq > 0) {
                 /* Set the watchdog */
                 txr->queue_status = EM_QUEUE_WORKING;
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = EM_WATCHDOG;
 	}
 
 	if (txr->tx_avail < EM_MAX_SCATTER)
 		em_txeof(txr);
-	if (txr->tx_avail < EM_MAX_SCATTER)
-		if_setdrvflagbits(ifp, IFF_DRV_OACTIVE,0);
 	return (err);
 }
 
@@ -1036,7 +1034,7 @@ em_start_locked(if_t ifp, struct tx_ring *txr)
 		if_etherbpfmtap(ifp, m_head);
 
 		/* Set timeout in case hardware has problems transmitting. */
-		txr->watchdog_time = ticks;
+		txr->watchdog_time = EM_WATCHDOG;
                 txr->queue_status = EM_QUEUE_WORKING;
 	}
 
@@ -1369,7 +1367,7 @@ em_init_locked(struct adapter *adapter)
 	/* Don't lose promiscuous settings */
 	em_set_promisc(adapter);
 
-	/* Set the interface as ACTIVE */
+	/* Set the interface as RUNNING */
 	if_setdrvflagbits(ifp, IFF_DRV_RUNNING, IFF_DRV_OACTIVE);
 
 	callout_reset(&adapter->timer, hz, em_local_timer, adapter);
@@ -2100,7 +2098,7 @@ retry:
 	tx_buffer = &txr->tx_buffers[first];
 	tx_buffer->next_eop = last;
 	/* Update the watchdog time early and often */
-	txr->watchdog_time = ticks;
+	txr->watchdog_time = EM_WATCHDOG;
 
 	/*
 	 * Advance the Transmit Descriptor Tail (TDT), this tells the E1000
@@ -2221,6 +2219,7 @@ em_local_timer(void *arg)
 	struct tx_ring	*txr = adapter->tx_rings;
 	struct rx_ring	*rxr = adapter->rx_rings;
 	u32		trigger;
+	int		hung = 0;
 
 	EM_CORE_LOCK_ASSERT(adapter);
 
@@ -2239,20 +2238,36 @@ em_local_timer(void *arg)
 		trigger = E1000_ICS_RXDMT0;
 
 	/*
+	 * Don't check for any TX timeouts if the adapter received
+	 * pause frames since the last tick.
+	 */
+	if (adapter->pause_frames != 0)
+		goto skip;
+
+	/*
 	** Check on the state of the TX queue(s), this 
 	** can be done without the lock because its RO
 	** and the HUNG state will be static if set.
 	*/
 	for (int i = 0; i < adapter->num_queues; i++, txr++) {
-		if ((txr->queue_status == EM_QUEUE_HUNG) &&
-		    (adapter->pause_frames == 0))
-			goto hung;
-		/* Schedule a TX tasklet if needed */
-		if (txr->tx_avail <= EM_MAX_SCATTER)
-			taskqueue_enqueue(txr->tq, &txr->tx_task);
+		EM_TX_LOCK(txr);
+		if (txr->watchdog_time == 1) {
+			/*
+			 * If this cleans any packets it will reset
+			 * watchdog_time to EM_WATCHDOG or 0.
+			 */
+			em_txeof(txr);
+			if (txr->watchdog_time == 1)
+				++hung;
+		} else if (txr->watchdog_time != 0)
+			--txr->watchdog_time;
+		EM_TX_UNLOCK(txr);
 	}
-	
+	if (hung != 0)
+		goto hung;
+
 	adapter->pause_frames = 0;
+skip:
 	callout_reset(&adapter->timer, hz, em_local_timer, adapter);
 #ifndef DEVICE_POLLING
 	/* Trigger an RX interrupt to guarantee mbuf refresh */
@@ -2341,8 +2356,10 @@ em_update_link_status(struct adapter *adapter)
 			device_printf(dev, "Link is Down\n");
 		adapter->link_active = 0;
 		/* Link down, disable watchdog */
-		for (int i = 0; i < adapter->num_queues; i++, txr++)
+		for (int i = 0; i < adapter->num_queues; i++, txr++) {
 			txr->queue_status = EM_QUEUE_IDLE;
+			txr->watchdog_time = 0;
+		}
 		if_link_state_change(ifp, LINK_STATE_DOWN);
 	}
 }
@@ -2371,12 +2388,13 @@ em_stop(void *arg)
 	callout_stop(&adapter->timer);
 
 	/* Tell the stack that the interface is no longer active */
-	if_setdrvflagbits(ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+	if_setdrvflagbits(ifp, 0, IFF_DRV_OACTIVE | IFF_DRV_RUNNING);
 
         /* Unarm watchdog timer. */
 	for (int i = 0; i < adapter->num_queues; i++, txr++) {
 		EM_TX_LOCK(txr);
 		txr->queue_status = EM_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 		EM_TX_UNLOCK(txr);
 	}
 
@@ -3356,6 +3374,7 @@ em_setup_transmit_ring(struct tx_ring *txr)
 	/* Set number of descriptors available */
 	txr->tx_avail = adapter->num_tx_desc;
 	txr->queue_status = EM_QUEUE_IDLE;
+	txr->watchdog_time = 0;
 
 	/* Clear checksum offload context. */
 	txr->last_hw_offload = 0;
@@ -3417,6 +3436,7 @@ em_initialize_transmit_unit(struct adapter *adapter)
 		    E1000_READ_REG(&adapter->hw, E1000_TDLEN(i)));
 
 		txr->queue_status = EM_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 	}
 
 	/* Set the default values for the Tx Inter Packet Gap timer */
@@ -3802,6 +3822,7 @@ em_txeof(struct tx_ring *txr)
 	/* No work, make sure watchdog is off */
         if (txr->tx_avail == adapter->num_tx_desc) {
 		txr->queue_status = EM_QUEUE_IDLE;
+		txr->watchdog_time = 0;
                 return;
 	}
 
@@ -3844,7 +3865,7 @@ em_txeof(struct tx_ring *txr)
                         	tx_buffer->m_head = NULL;
                 	}
 			tx_buffer->next_eop = -1;
-			txr->watchdog_time = ticks;
+			txr->watchdog_time = EM_WATCHDOG;
 
 	                if (++first == adapter->num_tx_desc)
 				first = 0;
@@ -3868,16 +3889,7 @@ em_txeof(struct tx_ring *txr)
 
         txr->next_to_clean = first;
 
-	/*
-	** Watchdog calculation, we know there's
-	** work outstanding or the first return
-	** would have been taken, so none processed
-	** for too long indicates a hang. local timer
-	** will examine this and do a reset if needed.
-	*/
-	if ((!processed) && ((ticks - txr->watchdog_time) > EM_WATCHDOG))
-		txr->queue_status = EM_QUEUE_HUNG;
-
+#ifndef EM_MULTIQUEUE
         /*
          * If we have a minimum free, clear IFF_DRV_OACTIVE
          * to tell the stack that it is OK to send packets.
@@ -3887,10 +3899,12 @@ em_txeof(struct tx_ring *txr)
          */
         if (txr->tx_avail >= EM_MAX_SCATTER)
 		if_setdrvflagbits(ifp, 0, IFF_DRV_OACTIVE);
+#endif
 
 	/* Disable watchdog if all clean */
 	if (txr->tx_avail == adapter->num_tx_desc) {
 		txr->queue_status = EM_QUEUE_IDLE;
+		txr->watchdog_time = 0;
 	} 
 }
 
@@ -5748,10 +5762,12 @@ em_print_debug_info(struct adapter *adapter)
 	else
 		printf("Interface is NOT RUNNING\n");
 
+#ifndef EM_MULTIQUEUE
 	if (if_getdrvflags(adapter->ifp) & IFF_DRV_OACTIVE)
 		printf("and INACTIVE\n");
 	else
 		printf("and ACTIVE\n");
+#endif
 
 	device_printf(dev, "hw tdh = %d, hw tdt = %d\n",
 	    E1000_READ_REG(&adapter->hw, E1000_TDH(0)),
