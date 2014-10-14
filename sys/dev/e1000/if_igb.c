@@ -914,6 +914,7 @@ igb_start_locked(struct tx_ring *txr, struct ifnet *ifp)
 	while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
 		if (txr->tx_avail <= IGB_MAX_SCATTER) {
 			txr->queue_status |= IGB_QUEUE_DEPLETED;
+			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
 			break;
 		}
 		IFQ_DRV_DEQUEUE(&ifp->if_snd, m_head);
