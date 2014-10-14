@@ -2160,6 +2160,15 @@ igb_local_timer(void *arg)
 			igb_txeof(txr);
 			if (txr->watchdog_time == 1)
 				++hung;
+			else {
+#ifndef IGB_LEGACY_TX
+				if (!drbr_empty(ifp, txr->br))
+					igb_mq_start_locked(ifp, txr);
+#else
+				if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+					igb_start_locked(txr, ifp);
+#endif
+			}
 		} else if (txr->watchdog_time != 0)
 			--txr->watchdog_time;
 		IGB_TX_UNLOCK(txr);

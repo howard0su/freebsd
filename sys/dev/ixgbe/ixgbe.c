@@ -2105,6 +2105,15 @@ ixgbe_local_timer(void *arg)
 			ixgbe_txeof(txr);
 			if (txr->watchdog_time == 1)
 				++hung;
+			else {
+#ifndef IXGBE_LEGACY_TX
+				if (!drbr_empty(ifp, txr->br))
+					ixgbe_mq_start_locked(ifp, txr);
+#else
+				if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+					ixgbe_start_locked(txr, ifp);
+#endif
+			}
 		} else if (txr->watchdog_time != 0)
 			--txr->watchdog_time;
 		IXGBE_TX_UNLOCK(txr);

@@ -2259,6 +2259,15 @@ em_local_timer(void *arg)
 			em_txeof(txr);
 			if (txr->watchdog_time == 1)
 				++hung;
+			else {
+#ifdef EM_MULTIQUEUE
+				if (!drbr_empty(ifp, txr->br))
+					em_mq_start_locked(ifp, txr, NULL);
+#else
+				if (!if_sendq_empty(ifp))
+					em_start_locked(ifp, txr);
+#endif
+			}
 		} else if (txr->watchdog_time != 0)
 			--txr->watchdog_time;
 		EM_TX_UNLOCK(txr);

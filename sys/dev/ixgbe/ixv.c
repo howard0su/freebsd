@@ -1447,6 +1447,15 @@ ixv_local_timer(void *arg)
 			ixv_txeof(txr);
 			if (txr->watchdog_time == 1)
 				hung++;
+			else {
+#if __FreeBSD_version >= 800000
+				if (!drbr_empty(ifp, txr->br))
+					ixv_mq_start_locked(ifp, txr, NULL);
+#else
+				if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd))
+					ixv_start_locked(txr, ifp);
+#endif
+			}
 		} else if (txr->watchdog_time != 0)
 			--txr->watchdog_time;
 		IXV_TX_UNLOCK(txr);
