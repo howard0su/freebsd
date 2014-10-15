@@ -67,6 +67,7 @@ extern	char	sigcode[];
 extern	int	szsigcode;
 extern	uint64_t *vm_page_dump;
 extern	int	vm_page_dump_size;
+extern	char	vm_vendor[];
 extern	int	workaround_erratum383;
 extern	int	_udatasel;
 extern	int	_ucodesel;

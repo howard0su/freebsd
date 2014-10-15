@@ -119,6 +119,10 @@ static int hw_clockrate;
 SYSCTL_INT(_hw, OID_AUTO, clockrate, CTLFLAG_RD,
     &hw_clockrate, 0, "CPU instruction clock rate");
 
+char vm_vendor[16];
+SYSCTL_STRING(_kern, OID_AUTO, vm_vendor, CTLFLAG_RD, vm_vendor, 0,
+    "Virtual machine vendor");
+
 static eventhandler_tag tsc_post_tag;
 
 static char cpu_brand[48];
@@ -945,7 +949,6 @@ printcpuinfo(void)
 				if (tsc_perf_stat)
 					printf(", performance statistics");
 			}
-
 		}
 #ifdef __i386__
 	} else if (cpu_vendor_id == CPU_VENDOR_CYRIX) {
@@ -1208,6 +1211,17 @@ identify_cpu(void)
 	cpu_feature = regs[3];
 	cpu_feature2 = regs[2];
 #endif
+
+	if (cpu_feature2 & CPUID2_HV) {
+		vm_guest = VM_GUEST_VM;
+		do_cpuid(0x40000000, regs);
+		if (regs[0] >= 0x40000000) {
+			((u_int *)&vm_vendor)[0] = regs[1];
+			((u_int *)&vm_vendor)[1] = regs[3];
+			((u_int *)&vm_vendor)[2] = regs[2];
+			vm_vendor[12] = '\0';
+		}
+	}
 
 	cpu_vendor_id = find_cpu_vendor_id();
 
