@@ -2732,7 +2732,7 @@ do_sem_wait(struct thread *td, struct _usem *sem, struct _umtx_time *timeout)
 	umtxq_busy(&uq->uq_key);
 	umtxq_insert(uq);
 	umtxq_unlock(&uq->uq_key);
-	casuword32(__DEVOLATILE(uint32_t *, &sem->_has_waiters), 0, 1);
+	casuword32(&sem->_has_waiters, 0, 1);
 	count = fuword32(__DEVOLATILE(uint32_t *, &sem->_count));
 	if (count != 0) {
 		umtxq_lock(&uq->uq_key);
@@ -2819,7 +2819,7 @@ do_sem_wait2(struct thread *td, struct _usem2 *sem, struct _umtx_time *timeout)
 	umtxq_busy(&uq->uq_key);
 	umtxq_insert(uq);
 	umtxq_unlock(&uq->uq_key);
-	count = fuword32(&sem->_count);
+	count = fuword32(__DEVOLATILE(uint32_t *, &sem->_count));
 	if (count == -1) {
 		umtxq_lock(&uq->uq_key);
 		umtxq_unbusy(&uq->uq_key);
@@ -2878,7 +2878,11 @@ do_sem_wake2(struct thread *td, struct _usem2 *sem)
 {
 	struct umtx_key key;
 	int error, cnt;
-	uint32_t count, flags, old;
+#if 0
+	uint32_t count, flags;
+#else
+	uint32_t flags;
+#endif
 
 	flags = fuword32(&sem->_flags);
 	if ((error = umtx_key_get(sem, TYPE_SEM, GET_SHARE(flags), &key)) != 0)
@@ -2890,9 +2894,8 @@ do_sem_wake2(struct thread *td, struct _usem2 *sem)
 		umtxq_signal(&key, 1);
 #if 0
 		/*
-		 * Check if count is greater than 0, this means the memory is
-		 * still being referenced by user code, so we can safely
-		 * update the waiters flag in _count.
+		 * If this was the last sleeping thread, clear the waiters
+		 * flag in _count.
 		 */
 		if (cnt == 1) {
 			umtxq_unlock(&key);
@@ -3215,6 +3218,31 @@ __umtx_op_wake2_umutex(struct thread *td, struct _umtx_op_args *uap)
 	return do_wake2_umutex(td, uap->obj, uap->val);
 }
 
+static int
+__umtx_op_sem_wait2(struct thread *td, struct _umtx_op_args *uap)
+{
+	struct _umtx_time *tm_p, timeout;
+	int error;
+
+	/* Allow a null timespec (wait forever). */
+	if (uap->uaddr2 == NULL)
+		tm_p = NULL;
+	else {
+		error = umtx_copyin_umtx_time(
+		    uap->uaddr2, (size_t)uap->uaddr1, &timeout);
+		if (error != 0)
+			return (error);
+		tm_p = &timeout;
+	}
+	return (do_sem_wait2(td, uap->obj, tm_p));
+}
+
+static int
+__umtx_op_sem_wake2(struct thread *td, struct _umtx_op_args *uap)
+{
+	return do_sem_wake2(td, uap->obj);
+}
+
 typedef int (*_umtx_op_func)(struct thread *td, struct _umtx_op_args *uap);
 
 static _umtx_op_func op_table[] = {
@@ -3245,7 +3273,7 @@ static _umtx_op_func op_table[] = {
 	__umtx_op_unimpl,		/* UMTX_OP_SEM_WAKE */
 #endif
 	__umtx_op_nwake_private,	/* UMTX_OP_NWAKE_PRIVATE */
-	__umtx_op_wake2_umutex		/* UMTX_OP_MUTEX_WAKE2 */
+	__umtx_op_wake2_umutex,		/* UMTX_OP_MUTEX_WAKE2 */
 	__umtx_op_sem_wait2,		/* UMTX_OP_SEM_WAIT2 */
 	__umtx_op_sem_wake2,		/* UMTX_OP_SEM_WAKE2 */
 };
@@ -3539,7 +3567,7 @@ static _umtx_op_func op_table_compat32[] = {
 	__umtx_op_unimpl,		/* UMTX_OP_SEM_WAKE */
 #endif
 	__umtx_op_nwake_private32,	/* UMTX_OP_NWAKE_PRIVATE */
-	__umtx_op_wake2_umutex		/* UMTX_OP_MUTEX_WAKE2 */
+	__umtx_op_wake2_umutex,		/* UMTX_OP_MUTEX_WAKE2 */
 	__umtx_op_sem_wait2_compat32,	/* UMTX_OP_SEM_WAIT2 */
 	__umtx_op_sem_wake2,		/* UMTX_OP_SEM_WAKE2 */
 };

@@ -63,7 +63,7 @@ __weak_reference(_sem_wait, sem_wait);
 #define SEM_PREFIX	"/tmp/SEMD"
 #define SEM_MAGIC	((u_int32_t)0x73656d32)
 
-_Static_Assert(SEM_VALUE_MAX <= USEM_MAX_COUNT, "SEM_VALUE_MAX too large");
+_Static_assert(SEM_VALUE_MAX <= USEM_MAX_COUNT, "SEM_VALUE_MAX too large");
 
 struct sem_nameinfo {
 	int open_count;
