@@ -339,7 +339,7 @@ _sem_getvalue(sem_t * __restrict sem, int * __restrict sval)
 static __inline int
 usem_wake(struct _usem2 *sem)
 {
-	return _umtx_op(sem, UMTX_OP_SEM_WAKE2, 0, NULL, NULL);
+	return _umtx_op(sem, UMTX_OP_SEM2_WAKE, 0, NULL, NULL);
 }
 
 static __inline int
@@ -358,7 +358,7 @@ usem_wait(struct _usem2 *sem, const struct timespec *abstime)
 		tm_p = &timeout;
 		tm_size = sizeof(timeout);
 	}
-	return _umtx_op(sem, UMTX_OP_SEM_WAIT2, 0, 
+	return _umtx_op(sem, UMTX_OP_SEM2_WAIT, 0, 
 		    (void *)tm_size, __DECONST(void*, tm_p));
 }
 

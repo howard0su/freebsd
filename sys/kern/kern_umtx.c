@@ -2799,7 +2799,7 @@ do_sem_wake(struct thread *td, struct _usem *sem)
 #endif
 
 static int
-do_sem_wait2(struct thread *td, struct _usem2 *sem, struct _umtx_time *timeout)
+do_sem2_wait(struct thread *td, struct _usem2 *sem, struct _umtx_time *timeout)
 {
 	struct abs_timeout timo;
 	struct umtx_q *uq;
@@ -2874,7 +2874,7 @@ do_sem_wait2(struct thread *td, struct _usem2 *sem, struct _umtx_time *timeout)
  * Signal a userland semaphore.
  */
 static int
-do_sem_wake2(struct thread *td, struct _usem2 *sem)
+do_sem2_wake(struct thread *td, struct _usem2 *sem)
 {
 	struct umtx_key key;
 #if 0
@@ -3223,7 +3223,7 @@ __umtx_op_wake2_umutex(struct thread *td, struct _umtx_op_args *uap)
 }
 
 static int
-__umtx_op_sem_wait2(struct thread *td, struct _umtx_op_args *uap)
+__umtx_op_sem2_wait(struct thread *td, struct _umtx_op_args *uap)
 {
 	struct _umtx_time *tm_p, timeout;
 	int error;
@@ -3238,13 +3238,13 @@ __umtx_op_sem_wait2(struct thread *td, struct _umtx_op_args *uap)
 			return (error);
 		tm_p = &timeout;
 	}
-	return (do_sem_wait2(td, uap->obj, tm_p));
+	return (do_sem2_wait(td, uap->obj, tm_p));
 }
 
 static int
-__umtx_op_sem_wake2(struct thread *td, struct _umtx_op_args *uap)
+__umtx_op_sem2_wake(struct thread *td, struct _umtx_op_args *uap)
 {
-	return do_sem_wake2(td, uap->obj);
+	return do_sem2_wake(td, uap->obj);
 }
 
 typedef int (*_umtx_op_func)(struct thread *td, struct _umtx_op_args *uap);
@@ -3278,8 +3278,8 @@ static _umtx_op_func op_table[] = {
 #endif
 	__umtx_op_nwake_private,	/* UMTX_OP_NWAKE_PRIVATE */
 	__umtx_op_wake2_umutex,		/* UMTX_OP_MUTEX_WAKE2 */
-	__umtx_op_sem_wait2,		/* UMTX_OP_SEM_WAIT2 */
-	__umtx_op_sem_wake2,		/* UMTX_OP_SEM_WAKE2 */
+	__umtx_op_sem2_wait,		/* UMTX_OP_SEM2_WAIT */
+	__umtx_op_sem2_wake,		/* UMTX_OP_SEM2_WAKE */
 };
 
 int
@@ -3499,7 +3499,7 @@ __umtx_op_sem_wait_compat32(struct thread *td, struct _umtx_op_args *uap)
 #endif
 
 static int
-__umtx_op_sem_wait2_compat32(struct thread *td, struct _umtx_op_args *uap)
+__umtx_op_sem2_wait_compat32(struct thread *td, struct _umtx_op_args *uap)
 {
 	struct _umtx_time *tm_p, timeout;
 	int error;
@@ -3514,7 +3514,7 @@ __umtx_op_sem_wait2_compat32(struct thread *td, struct _umtx_op_args *uap)
 			return (error);
 		tm_p = &timeout;
 	}
-	return (do_sem_wait2(td, uap->obj, tm_p));
+	return (do_sem2_wait(td, uap->obj, tm_p));
 }
 
 static int
@@ -3572,8 +3572,8 @@ static _umtx_op_func op_table_compat32[] = {
 #endif
 	__umtx_op_nwake_private32,	/* UMTX_OP_NWAKE_PRIVATE */
 	__umtx_op_wake2_umutex,		/* UMTX_OP_MUTEX_WAKE2 */
-	__umtx_op_sem_wait2_compat32,	/* UMTX_OP_SEM_WAIT2 */
-	__umtx_op_sem_wake2,		/* UMTX_OP_SEM_WAKE2 */
+	__umtx_op_sem2_wait_compat32,	/* UMTX_OP_SEM2_WAIT */
+	__umtx_op_sem2_wake,		/* UMTX_OP_SEM2_WAKE */
 };
 
 int
