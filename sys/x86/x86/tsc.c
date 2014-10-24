@@ -57,8 +57,7 @@ int		tsc_perf_stat;
 static eventhandler_tag tsc_levels_tag, tsc_pre_tag, tsc_post_tag;
 
 SYSCTL_INT(_kern_timecounter, OID_AUTO, invariant_tsc, CTLFLAG_RDTUN,
-    &tsc_is_invariant, 0,
-    "Indicates whether the TSC is P- and T-state invariant");
+    &tsc_is_invariant, 0, "Indicates whether the TSC is P-state invariant");
 
 #ifdef SMP
 int	smp_tsc;
@@ -583,10 +582,10 @@ init_TSC_tc(void)
 
 	/*
 	 * We cannot use the TSC if it stops incrementing while idle.
-	 * Intel CPUs without a fully invariant TSC can stop the TSC
-	 * even in C1 if C1E is enabled in the BIOS.  There is no way
-	 * to detect that on older CPUs that support C1E, so disable
-	 * the TSC to be safe.
+	 * Intel CPUs without a C-state invariant TSC can stop the TSC
+	 * in C1 if C1E is enabled in the BIOS.  There is no way to
+	 * detect if C1E is enabled on these CPUs, so disable the TSC
+	 * to be safe.
 	 */
 	if (cpu_vendor_id == CPU_VENDOR_INTEL &&
 	    (amd_pminfo & AMDPM_TSC_INVARIANT) == 0) {
