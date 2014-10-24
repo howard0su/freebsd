@@ -64,6 +64,8 @@ extern	u_int	cyrix_did;
 #if defined(I586_CPU) && !defined(NO_F00F_HACK)
 extern	int	has_f00f_bug;
 #endif
+extern	u_int	hv_high;
+extern	char	hv_vendor[];
 extern	char	kstack[];
 extern	char	sigcode[];
 extern	int	szsigcode;
@@ -75,7 +77,6 @@ extern	int	szosigcode;
 #endif
 extern	uint32_t *vm_page_dump;
 extern	int	vm_page_dump_size;
-extern	char	vm_vendor[];
 extern	int	workaround_erratum383;
 
 typedef void alias_for_inthand_t(u_int cs, u_int ef, u_int esp, u_int ss);

@@ -63,6 +63,7 @@ __FBSDID("$FreeBSD$");
 
 #include <amd64/vmm/intel/vmx_controls.h>
 #include <x86/isa/icu.h>
+#include <x86/vmware.h>
 
 #ifdef __i386__
 #define	IDENTBLUE_CYRIX486	0
@@ -76,6 +77,7 @@ static u_int find_cpu_vendor_id(void);
 static void print_AMD_info(void);
 static void print_INTEL_info(void);
 static void print_INTEL_TLB(u_int data);
+static void print_hv_info(void);
 static void print_via_padlock_info(void);
 static void print_vmx_info(void);
 
@@ -119,9 +121,9 @@ static int hw_clockrate;
 SYSCTL_INT(_hw, OID_AUTO, clockrate, CTLFLAG_RD,
     &hw_clockrate, 0, "CPU instruction clock rate");
 
-char vm_vendor[16];
-SYSCTL_STRING(_kern, OID_AUTO, vm_vendor, CTLFLAG_RD, vm_vendor, 0,
-    "Virtual machine vendor");
+char hv_vendor[16];
+SYSCTL_STRING(_hw, OID_AUTO, hv_vendor, CTLFLAG_RD, hv_vendor, 0,
+    "Hypervisor vendor");
 
 static eventhandler_tag tsc_post_tag;
 
@@ -936,6 +938,9 @@ printcpuinfo(void)
 			if (cpu_feature2 & CPUID2_VMX)
 				print_vmx_info();
 
+			if (cpu_feature2 & CPUID2_HV)
+				print_hv_info();
+
 			if ((cpu_feature & CPUID_HTT) &&
 			    cpu_vendor_id == CPU_VENDOR_AMD)
 				cpu_feature &= ~CPUID_HTT;
@@ -1181,6 +1186,98 @@ hook_tsc_freq(void *arg __unused)
 
 SYSINIT(hook_tsc_freq, SI_SUB_CONFIGURE, SI_ORDER_ANY, hook_tsc_freq, NULL);
 
+#ifndef XEN
+static const char *const vm_bnames[] = {
+	"QEMU",				/* QEMU */
+	"Plex86",			/* Plex86 */
+	"Bochs",			/* Bochs */
+	"Xen",				/* Xen */
+	"BHYVE",			/* bhyve */
+	"Seabios",			/* KVM */
+	NULL
+};
+
+static const char *const vm_pnames[] = {
+	"VMware Virtual Platform",	/* VMWare VM */
+	"Virtual Machine",		/* Microsoft VirtualPC */
+	"VirtualBox",			/* Sun xVM VirtualBox */
+	"Parallels Virtual Platform",	/* Parallels VM */
+	"KVM",				/* KVM */
+	NULL
+};
+
+static void
+identify_hypervisor(void)
+{
+	u_int regs[4];
+	char *p;
+
+	/*
+	 * [RFC] CPUID usage for interaction between Hypervisors and Linux.
+	 * http://lkml.org/lkml/2008/10/1/246
+	 *
+	 * KB1009458: Mechanisms to determine if software is running in
+	 * a VMware virtual machine
+	 * http://kb.vmware.com/kb/1009458
+	 */
+	if (cpu_feature2 & CPUID2_HV) {
+		vm_guest = VM_GUEST_VM;
+		do_cpuid(0x40000000, regs);
+		if (regs[0] >= 0x40000000) {
+			hv_high = regs[0];
+			((u_int *)&hv_vendor)[0] = regs[1];
+			((u_int *)&hv_vendor)[1] = regs[3];
+			((u_int *)&hv_vendor)[2] = regs[2];
+			hv_vendor[12] = '\0';
+			if (strcmp(hv_vendor, "VMwareVMware", 12) == 0)
+				vm_guest = VM_GUEST_VMWARE;
+		}
+		return;
+	}
+
+	/*
+	 * Examine SMBIOS strings for older hypervisors.
+	 */
+	p = kern_getenv("smbios.system.serial");
+	if (p != NULL) {
+		if (strncmp(p, "VMware-", 7) == 0 || strncmp(p, "VMW", 3) == 0) {
+			vmware_hvcall(VMW_HVCMD_GETVERSION, regs);
+			if (regs[1] == VMW_HVMAGIC) {
+				vm_guest = VM_GUEST_VMWARE;			
+				freeenv(p);
+				return;
+			}
+		}
+		freeenv(p);
+	}
+
+	/*
+	 * XXX: Some of these entries may not be needed since they were
+	 * added to FreeBSD before the checks above.
+	 */
+	p = kern_getenv("smbios.bios.vendor");
+	if (p != NULL) {
+		for (i = 0; vm_bnames[i] != NULL; i++)
+			if (strcmp(p, vm_bnames[i]) == 0) {
+				vm_guest = VM_GUEST_VM;
+				freeenv(p);
+				return;
+			}
+		freeenv(p);
+	}
+	p = kern_getenv("smbios.system.product");
+	if (p != NULL) {
+		for (i = 0; vm_pnames[i] != NULL; i++)
+			if (strcmp(p, vm_pnames[i]) == 0) {
+				vm_guest = VM_GUEST_VM;
+				freeenv(p);
+				return;
+			}
+		freeenv(p);
+	}
+}
+#endif
+
 /*
  * Final stage of CPU identification.
  */
@@ -1212,17 +1309,9 @@ identify_cpu(void)
 	cpu_feature2 = regs[2];
 #endif
 
-	if (cpu_feature2 & CPUID2_HV) {
-		vm_guest = VM_GUEST_VM;
-		do_cpuid(0x40000000, regs);
-		if (regs[0] >= 0x40000000) {
-			((u_int *)&vm_vendor)[0] = regs[1];
-			((u_int *)&vm_vendor)[1] = regs[3];
-			((u_int *)&vm_vendor)[2] = regs[2];
-			vm_vendor[12] = '\0';
-		}
-	}
-
+#ifdef XEN
+	identify_hypervisor();
+#endif
 	cpu_vendor_id = find_cpu_vendor_id();
 
 	/*
@@ -1994,4 +2083,11 @@ print_vmx_info(void)
 		"\014single-globals"
 		);
 	}
+}
+
+static void
+print_hv_info(void)
+{
+
+	if (hv_high
 }
