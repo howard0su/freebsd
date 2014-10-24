@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/bus.h>
 #include <sys/cpu.h>
 #include <sys/eventhandler.h>
+#include <sys/limits.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
@@ -121,6 +122,7 @@ static int hw_clockrate;
 SYSCTL_INT(_hw, OID_AUTO, clockrate, CTLFLAG_RD,
     &hw_clockrate, 0, "CPU instruction clock rate");
 
+u_int hv_high;
 char hv_vendor[16];
 SYSCTL_STRING(_hw, OID_AUTO, hv_vendor, CTLFLAG_RD, hv_vendor, 0,
     "Hypervisor vendor");
@@ -1209,6 +1211,7 @@ identify_hypervisor(void)
 {
 	u_int regs[4];
 	char *p;
+	int i;
 
 	/*
 	 * [RFC] CPUID usage for interaction between Hypervisors and Linux.
@@ -1227,7 +1230,7 @@ identify_hypervisor(void)
 			((u_int *)&hv_vendor)[1] = regs[3];
 			((u_int *)&hv_vendor)[2] = regs[2];
 			hv_vendor[12] = '\0';
-			if (strcmp(hv_vendor, "VMwareVMware", 12) == 0)
+			if (strcmp(hv_vendor, "VMwareVMware") == 0)
 				vm_guest = VM_GUEST_VMWARE;
 		}
 		return;

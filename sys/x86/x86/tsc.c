@@ -106,6 +106,7 @@ static struct timecounter tsc_timecounter = {
 static void
 tsc_freq_vmware(void)
 {
+	u_int regs[4];
 
 	if (hv_high >= 0x40000010) {
 		do_cpuid(0x40000010, regs);
