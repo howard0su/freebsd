@@ -437,20 +437,11 @@ _sem_post(sem_t *sem)
 	if (sem_check_validity(sem) != 0)
 		return (-1);
 
-#if 0
 	do {
 		count = sem->_kern._count;
 		if (USEM_COUNT(count) + 1 > SEM_VALUE_MAX)
 			return (EOVERFLOW);
 	} while (!atomic_cmpset_rel_int(&sem->_kern._count, count, count + 1));
-#else
-	do {
-		count = sem->_kern._count;
-		if (USEM_COUNT(count) + 1 > SEM_VALUE_MAX)
-			return (EOVERFLOW);
-	} while (!atomic_cmpset_rel_int(&sem->_kern._count, count,
-		USEM_COUNT(count) + 1));
-#endif
 	if (count & USEM_HAS_WAITERS)
 		usem_wake(&sem->_kern);
 	return (0);

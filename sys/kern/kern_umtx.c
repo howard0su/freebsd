@@ -2877,19 +2877,13 @@ static int
 do_sem2_wake(struct thread *td, struct _usem2 *sem)
 {
 	struct umtx_key key;
-#if 0
 	int error, cnt;
 	uint32_t count, flags;
-#else
-	int error;
-	uint32_t flags;
-#endif
 
 	flags = fuword32(&sem->_flags);
 	if ((error = umtx_key_get(sem, TYPE_SEM, GET_SHARE(flags), &key)) != 0)
 		return (error);	
 	umtxq_lock(&key);
-#if 0
 	umtxq_busy(&key);
 	cnt = umtxq_count(&key);
 	if (cnt > 0) {
@@ -2911,9 +2905,6 @@ do_sem2_wake(struct thread *td, struct _usem2 *sem)
 		}
 	}
 	umtxq_unbusy(&key);
-#else
-	umtxq_signal(&key, INT_MAX);
-#endif
 	umtxq_unlock(&key);
 	umtx_key_release(&key);
 	return (error);
