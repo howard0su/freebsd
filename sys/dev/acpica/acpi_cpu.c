@@ -711,7 +711,6 @@ acpi_cpu_generic_cx_probe(struct acpi_cpu_softc *sc)
 	    cx_ptr->trans_lat = AcpiGbl_FADT.C3Latency;
 	    cx_ptr++;
 	    sc->cpu_cx_count++;
-	    cpu_can_deep_sleep = 1;
 	}
     }
 }
@@ -803,8 +802,7 @@ acpi_cpu_cx_cst(struct acpi_cpu_softc *sc)
 				 "acpi_cpu%d: C3[%d] not available.\n",
 				 device_get_unit(sc->cpu_dev), i));
 		continue;
-	    } else
-		cpu_can_deep_sleep = 1;
+	    }
 	    break;
 	}
 

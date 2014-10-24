@@ -824,6 +824,13 @@ cpu_idle(int busy)
 #ifdef MP_WATCHDOG
 	ap_watchdog(PCPU_GET(cpuid));
 #endif
+	/*
+	 * Don't sleep at all on Intel CPUs without a C-state invariant TSC
+	 * if the TSC is being used as a timecounter.
+	 */
+	if (cpu_vendor_id == CPU_VENDOR_INTEL && cpu_disable_deep_sleep)
+		goto out;
+
 	/* If we are busy - try to use fast methods. */
 	if (busy) {
 		if ((cpu_feature2 & CPUID2_MON) && idle_mwait) {

@@ -57,7 +57,8 @@ int		tsc_perf_stat;
 static eventhandler_tag tsc_levels_tag, tsc_pre_tag, tsc_post_tag;
 
 SYSCTL_INT(_kern_timecounter, OID_AUTO, invariant_tsc, CTLFLAG_RDTUN,
-    &tsc_is_invariant, 0, "Indicates whether the TSC is P-state invariant");
+    &tsc_is_invariant, 0,
+    "Indicates whether the TSC is P- and T-state invariant");
 
 #ifdef SMP
 int	smp_tsc;
@@ -581,16 +582,18 @@ init_TSC_tc(void)
 	}
 
 	/*
-	 * We cannot use the TSC if it stops incrementing in deep sleep.
-	 * Currently only Intel CPUs are known for this problem unless
-	 * the invariant TSC bit is set.
+	 * We cannot use the TSC if it stops incrementing while idle.
+	 * Intel CPUs without a fully invariant TSC can stop the TSC
+	 * even in C1 if C1E is enabled in the BIOS.  There is no way
+	 * to detect that on older CPUs that support C1E, so disable
+	 * the TSC to be safe.
 	 */
-	if (cpu_can_deep_sleep && cpu_vendor_id == CPU_VENDOR_INTEL &&
+	if (cpu_vendor_id == CPU_VENDOR_INTEL &&
 	    (amd_pminfo & AMDPM_TSC_INVARIANT) == 0) {
 		tsc_timecounter.tc_quality = -1000;
-		tsc_timecounter.tc_flags |= TC_FLAGS_C3STOP;
+		tsc_timecounter.tc_flags |= TC_FLAGS_CxSTOP;
 		if (bootverbose)
-			printf("TSC timecounter disabled: C3 enabled.\n");
+			printf("TSC timecounter disabled: C-states may halt it.\n");
 		goto init;
 	}
 
