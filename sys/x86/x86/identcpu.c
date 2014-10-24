@@ -77,7 +77,7 @@ static u_int find_cpu_vendor_id(void);
 static void print_AMD_info(void);
 static void print_INTEL_info(void);
 static void print_INTEL_TLB(u_int data);
-static void print_hv_info(void);
+static void print_hypervisor_info(void);
 static void print_via_padlock_info(void);
 static void print_vmx_info(void);
 
@@ -938,9 +938,6 @@ printcpuinfo(void)
 			if (cpu_feature2 & CPUID2_VMX)
 				print_vmx_info();
 
-			if (cpu_feature2 & CPUID2_HV)
-				print_hv_info();
-
 			if ((cpu_feature & CPUID_HTT) &&
 			    cpu_vendor_id == CPU_VENDOR_AMD)
 				cpu_feature &= ~CPUID_HTT;
@@ -971,17 +968,18 @@ printcpuinfo(void)
 	if (*cpu_vendor || cpu_id)
 		printf("\n");
 
-	if (!bootverbose)
-		return;
-
-	if (cpu_vendor_id == CPU_VENDOR_AMD)
-		print_AMD_info();
-	else if (cpu_vendor_id == CPU_VENDOR_INTEL)
-		print_INTEL_info();
+	if (bootverbose) {
+		if (cpu_vendor_id == CPU_VENDOR_AMD)
+			print_AMD_info();
+		else if (cpu_vendor_id == CPU_VENDOR_INTEL)
+			print_INTEL_info();
 #ifdef __i386__
-	else if (cpu_vendor_id == CPU_VENDOR_TRANSMETA)
-		print_transmeta_info();
+		else if (cpu_vendor_id == CPU_VENDOR_TRANSMETA)
+			print_transmeta_info();
 #endif
+	}
+
+	print_hypervisor_info();
 }
 
 void
@@ -2086,8 +2084,9 @@ print_vmx_info(void)
 }
 
 static void
-print_hv_info(void)
+print_hypervisor_info(void)
 {
 
-	if (hv_high
+	if (*hv_vendor)
+		printf("Hypervisor: Origin = \"%s\"\n", hv_vendor);
 }
