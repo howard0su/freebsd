@@ -1227,8 +1227,8 @@ identify_hypervisor(void)
 		if (regs[0] >= 0x40000000) {
 			hv_high = regs[0];
 			((u_int *)&hv_vendor)[0] = regs[1];
-			((u_int *)&hv_vendor)[1] = regs[3];
-			((u_int *)&hv_vendor)[2] = regs[2];
+			((u_int *)&hv_vendor)[1] = regs[2];
+			((u_int *)&hv_vendor)[2] = regs[3];
 			hv_vendor[12] = '\0';
 			if (strcmp(hv_vendor, "VMwareVMware") == 0)
 				vm_guest = VM_GUEST_VMWARE;
@@ -1310,7 +1310,7 @@ identify_cpu(void)
 	cpu_feature2 = regs[2];
 #endif
 
-#ifdef XEN
+#ifndef XEN
 	identify_hypervisor();
 #endif
 	cpu_vendor_id = find_cpu_vendor_id();
