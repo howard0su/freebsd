@@ -1052,7 +1052,7 @@ npxsetxstate(struct thread *td, char *xfpustate, size_t xfpustate_size)
 	len = xfpustate_size;
 	if (len < sizeof(struct xstate_hdr))
 		return (EINVAL);
-	max_len = cpu_max_ext_state_size - sizeof(struct savefpu);
+	max_len = cpu_max_ext_state_size - sizeof(union savefpu);
 	if (len > max_len)
 		return (EINVAL);
 

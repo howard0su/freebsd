@@ -56,11 +56,11 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 		fpugetregs(td);
 		savefpu = (char *)(get_pcb_user_save_td(td) + 1);
 		error = copyout(savefpu, addr,
-		    cpu_max_ext_state_size - sizeof(struct savefpu));
+		    cpu_max_ext_state_size - sizeof(union savefpu));
 		break;
 
 	case PT_SETXSTATE:
-		if (data > cpu_max_ext_state_size - sizeof(struct savefpu)) {
+		if (data > cpu_max_ext_state_size - sizeof(union savefpu)) {
 			error = EINVAL;
 			break;
 		}
