@@ -3816,6 +3816,8 @@ get_mcontext(struct thread *td, mcontext_t *mcp, int flags)
 	sdp = &td->td_pcb->pcb_gsd;
 	mcp->mc_gsbase = sdp->sd_hibase << 24 | sdp->sd_lobase;
 	mcp->mc_flags = 0;
+	mcp->mc_xfpustate = 0;
+	mcp->mc_xfpustate_len = 0;
 	bzero(mcp->mc_spare2, sizeof(mcp->mc_spare2));
 	return (0);
 }
