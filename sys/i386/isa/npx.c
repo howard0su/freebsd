@@ -1070,7 +1070,7 @@ npxsetxstate(struct thread *td, char *xfpustate, size_t xfpustate_size)
 	return (0);
 }
 
-void
+int
 npxsetregs(struct thread *td, union savefpu *addr, char *xfpustate,
 	size_t xfpustate_size)
 {
@@ -1078,7 +1078,7 @@ npxsetregs(struct thread *td, union savefpu *addr, char *xfpustate,
 	int error;
 
 	if (!hw_float)
-		return;
+		return (ENXIO);
 
 	pcb = td->td_pcb;
 	critical_enter();
