@@ -1645,7 +1645,7 @@ exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 			 */
 		        reset_dbregs();
                 }
-                pcb->pcb_flags &= ~PCB_DBREGS;
+		clear_pcb_flags(pcb, PCB_DBREGS);
         }
 
 	pcb->pcb_initial_npxcw = __INITIAL_NPXCW__;
@@ -4060,7 +4060,7 @@ set_dbregs(struct thread *td, struct dbreg *dbregs)
 		pcb->pcb_dr6 = dbregs->dr[6];
 		pcb->pcb_dr7 = dbregs->dr[7];
 
-		pcb->pcb_flags |= PCB_DBREGS;
+		set_pcb_flags(pcb, PCB_DBREGS);
 	}
 
 	return (0);
