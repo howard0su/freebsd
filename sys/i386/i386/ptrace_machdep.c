@@ -32,6 +32,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/ptrace.h>
 #include <machine/md_var.h>
@@ -53,7 +54,7 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 
 	switch (req) {
 	case PT_GETXSTATE:
-		fpugetregs(td);
+		npxgetregs(td);
 		savefpu = (char *)(get_pcb_user_save_td(td) + 1);
 		error = copyout(savefpu, addr,
 		    cpu_max_ext_state_size - sizeof(union savefpu));
@@ -67,8 +68,8 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 		savefpu = malloc(data, M_TEMP, M_WAITOK);
 		error = copyin(addr, savefpu, data);
 		if (error == 0) {
-			fpugetregs(td);
-			error = fpusetxstate(td, savefpu, data);
+			npxgetregs(td);
+			error = npxsetxstate(td, savefpu, data);
 		}
 		free(savefpu, M_TEMP);
 		break;

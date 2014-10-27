@@ -49,6 +49,8 @@ struct fpu_kern_ctx;
 
 #define	PCB_USER_FPU(pcb) (((pcb)->pcb_flags & PCB_KERNNPX) == 0)
 
+#define	XSAVE_AREA_ALIGN	64
+
 int	npxdna(void);
 void	npxdrop(void);
 void	npxexit(struct thread *td);
@@ -57,7 +59,10 @@ int	npxgetregs(struct thread *td);
 void	npxinit(bool bsp);
 void	npxresume(union savefpu *addr);
 void	npxsave(union savefpu *addr);
-void	npxsetregs(struct thread *td, union savefpu *addr);
+int	npxsetregs(struct thread *td, union savefpu *addr,
+	    char *xfpustate, size_t xfpustate_size);
+int	npxsetxstate(struct thread *td, char *xfpustate,
+	    size_t xfpustate_size);
 void	npxsuspend(union savefpu *addr);
 int	npxtrap_x87(void);
 int	npxtrap_sse(void);

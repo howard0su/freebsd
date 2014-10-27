@@ -1043,12 +1043,15 @@ sys_sigreturn(td, uap)
 	} */ *uap;
 {
 	ucontext_t uc;
+	struct proc *p;
 	struct trapframe *regs;
 	ucontext_t *ucp;
 	char *xfpustate;
 	size_t xfpustate_len;
 	int cs, eflags, error, ret;
 	ksiginfo_t ksi;
+
+	p = td->td_proc;
 
 	error = copyin(uap->sigcntxp, &uc, sizeof(uc));
 	if (error != 0)
@@ -3749,7 +3752,7 @@ fill_fpregs(struct thread *td, struct fpreg *fpregs)
 		    (struct save87 *)fpregs);
 	else
 #endif /* CPU_ENABLE_SSE */
-		bcopy(get_pcb_user_save_td(td), fpregs,
+		bcopy(&get_pcb_user_save_td(td)->sv_87, fpregs,
 		    sizeof(*fpregs));
 	return (0);
 }
@@ -3761,7 +3764,7 @@ set_fpregs(struct thread *td, struct fpreg *fpregs)
 #ifdef CPU_ENABLE_SSE
 	if (cpu_fxsr)
 		set_fpregs_xmm((struct save87 *)fpregs,
-		    get_pcb_user_save_td(td));
+		    &get_pcb_user_save_td(td)->sv_xmm);
 	else
 #endif /* CPU_ENABLE_SSE */
 		bcopy(fpregs, &get_pcb_user_save_td(td)->sv_87,
@@ -3876,6 +3879,7 @@ static void
 get_fpcontext(struct thread *td, mcontext_t *mcp, char *xfpusave,
     size_t xfpusave_len)
 {
+	size_t max_len, len;
 
 #ifndef DEV_NPX
 	mcp->mc_fpformat = _MC_FPFMT_NODEV;

@@ -51,13 +51,13 @@ struct pcb {
 	int	pcb_esp;
 	int	pcb_ebx;
 	int	pcb_eip;
+	struct segment_descriptor pcb_fsd;
+	struct segment_descriptor pcb_gsd;
 	int	pcb_ds;
 	int	pcb_es;
 	int	pcb_fs;
 	int	pcb_gs;
 	int	pcb_ss;
-	struct segment_descriptor pcb_fsd;
-	struct segment_descriptor pcb_gsd;
 	int	pcb_cr0;
 	int	pcb_cr2;
 	int	pcb_cr3;
@@ -88,6 +88,8 @@ struct pcb {
 	int	pcb_psl;	/* process status long */
 	u_long	pcb_vm86[2];	/* vm86bios scratch space */
 	union	savefpu *pcb_save;
+
+	uint32_t pcb_pad[10];
 };
 
 /* Per-CPU state saved during suspend and resume. */

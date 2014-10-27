@@ -124,5 +124,6 @@ int     user_dbreg_trap(void);
 int	minidumpsys(struct dumperinfo *);
 union savefpu *get_pcb_user_save_td(struct thread *td);
 union savefpu *get_pcb_user_save_pcb(struct pcb *pcb);
+struct pcb *get_pcb_td(struct thread *td);
 
 #endif /* !_MACHINE_MD_VAR_H_ */
