@@ -123,6 +123,17 @@ xsave(char *addr, uint64_t mask)
 	__asm __volatile("xsave %0" : "=m" (*addr) : "a" (low), "d" (hi) :
 	    "memory");
 }
+
+static __inline void
+xsaveopt(char *addr, uint64_t mask)
+{
+	uint32_t low, hi;
+
+	low = mask;
+	hi = mask >> 32;
+	__asm __volatile("xsaveopt %0" : "=m" (*addr) : "a" (low), "d" (hi) :
+	    "memory");
+}
 #endif
 #else	/* !(__GNUCLIKE_ASM && !lint) */
 
@@ -141,6 +152,7 @@ void	ldmxcsr(u_int csr);
 void	stmxcsr(u_int *csr);
 void	xrstor(char *addr, uint64_t mask);
 void	xsave(char *addr, uint64_t mask);
+void	xsaveopt(char *addr, uint64_t mask);
 #endif
 
 #endif	/* __GNUCLIKE_ASM && !lint */
@@ -211,6 +223,8 @@ struct xsave_area_elm_descr {
 	u_int	offset;
 	u_int	size;
 } *xsave_area_desc;
+
+static int use_xsaveopt;
 
 static	volatile u_int		npx_traps_while_probing;
 
@@ -357,17 +371,9 @@ npxinit_bsp1(void)
 	if ((xsave_mask & XFEATURE_MPX) != XFEATURE_MPX)
 		xsave_mask &= ~XFEATURE_MPX;
 
-#ifdef notyet
 	cpuid_count(0xd, 0x1, cp);
-	if ((cp[0] & CPUID_EXTSTATE_XSAVEOPT) != 0) {
-		/*
-		 * Patch the XSAVE instruction in the cpu_switch code
-		 * to XSAVEOPT.  We assume that XSAVE encoding used
-		 * REX byte, and set the bit 4 of the r/m byte.
-		 */
-		ctx_switch_xsave[3] |= 0x10;
-	}
-#endif
+	if ((cp[0] & CPUID_EXTSTATE_XSAVEOPT) != 0)
+		use_xsaveopt = 1;
 }
 
 /*
@@ -534,8 +540,12 @@ npxexit(td)
 {
 
 	critical_enter();
-	if (curthread == PCPU_GET(fpcurthread))
-		npxsave(curpcb->pcb_save);
+	if (curthread == PCPU_GET(fpcurthread)) {
+		stop_emulating();
+		fpusave(curpcb->pcb_save);
+		start_emulating();
+		PCPU_SET(fpcurthread, NULL);
+	}
 	critical_exit();
 #ifdef NPX_DEBUG
 	if (hw_float) {
@@ -891,7 +901,10 @@ npxsave(addr)
 {
 
 	stop_emulating();
-	fpusave(addr);
+	if (use_xsaveopt)
+		xsaveopt((char *)addr, xsave_mask);
+	else
+		fpusave(addr);
 	start_emulating();
 	PCPU_SET(fpcurthread, NULL);
 }
