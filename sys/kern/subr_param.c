@@ -102,7 +102,7 @@ long	maxpipekva;			/* Limit on pipe KVA */
 #ifdef XEN
 int	vm_guest = VM_GUEST_XEN;
 #else
-int 	vm_guest = VM_GUEST_NO;		/* Running as virtual machine guest? */
+int	vm_guest = VM_GUEST_NO;		/* Running as virtual machine guest? */
 #endif
 u_long	maxtsiz;			/* max text size */
 u_long	dfldsiz;			/* initial data size limit */
