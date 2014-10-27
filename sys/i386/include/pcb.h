@@ -75,7 +75,6 @@ struct pcb {
 	uint16_t	pcb_tr;
 
 	u_int	pcb_flags;
-#define	FP_SOFTFP	0x01	/* process using software fltng pnt emulator */
 #define	PCB_DBREGS	0x02	/* process using debug registers */
 #define	PCB_NPXINITDONE	0x08	/* fpu state is initialized */
 #define	PCB_VM86CALL	0x10	/* in vm86 call */
