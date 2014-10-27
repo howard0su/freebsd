@@ -41,6 +41,47 @@ __FBSDID("$FreeBSD$");
 #define CPU_ENABLE_SSE
 #endif
 
+#ifdef CPU_ENABLE_SSE
+static int
+cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
+{
+	char *savefpu;
+	int error;
+
+	if (!use_xsave)
+		return (EOPNOTSUPP);
+
+	switch (req) {
+	case PT_GETXSTATE:
+		fpugetregs(td);
+		savefpu = (char *)(get_pcb_user_save_td(td) + 1);
+		error = copyout(savefpu, addr,
+		    cpu_max_ext_state_size - sizeof(struct savefpu));
+		break;
+
+	case PT_SETXSTATE:
+		if (data > cpu_max_ext_state_size - sizeof(struct savefpu)) {
+			error = EINVAL;
+			break;
+		}
+		savefpu = malloc(data, M_TEMP, M_WAITOK);
+		error = copyin(addr, savefpu, data);
+		if (error == 0) {
+			fpugetregs(td);
+			error = fpusetxstate(td, savefpu, data);
+		}
+		free(savefpu, M_TEMP);
+		break;
+
+	default:
+		error = EINVAL;
+		break;
+	}
+
+	return (error);
+}
+#endif
+
 int
 cpu_ptrace(struct thread *td, int req, void *addr, int data)
 {
@@ -51,7 +92,7 @@ cpu_ptrace(struct thread *td, int req, void *addr, int data)
 	if (!cpu_fxsr)
 		return (EINVAL);
 
-	fpstate = &td->td_pcb->pcb_user_save.sv_xmm;
+	fpstate = &get_pcb_user_save_td(td)->sv_xmm;
 	switch (req) {
 	case PT_GETXMMREGS:
 		npxgetregs(td);
@@ -62,6 +103,11 @@ cpu_ptrace(struct thread *td, int req, void *addr, int data)
 		npxgetregs(td);
 		error = copyin(addr, fpstate, sizeof(*fpstate));
 		fpstate->sv_env.en_mxcsr &= cpu_mxcsr_mask;
+		break;
+
+	case PT_GETXSTATE:
+	case PT_SETXSTATE:
+		error = cpu_ptrace_xstate(td, req, addr, data);
 		break;
 
 	default:
