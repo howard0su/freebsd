@@ -219,7 +219,9 @@ cpu_fork(td1, p2, td2, flags)
 	bcopy(td1->td_pcb, pcb2, sizeof(*pcb2));
 
 	/* Properly initialize pcb_save */
-	pcb2->pcb_save = &pcb2->pcb_user_save;
+	pcb2->pcb_save = get_pcb_user_save_pcb(pcb2);
+	bcopy(get_pcb_user_save_td(td1), get_pcb_user_save_pcb(pcb2),
+	    cpu_max_ext_state_size);
 
 	/* Point mdproc and then copy over td1's contents */
 	mdp2 = &p2->p_md;
@@ -396,12 +398,18 @@ cpu_thread_swapout(struct thread *td)
 void
 cpu_thread_alloc(struct thread *td)
 {
+	struct pcb *pcb;
+	struct xstate_hdr *xhdr;
 
-	td->td_pcb = (struct pcb *)(td->td_kstack +
-	    td->td_kstack_pages * PAGE_SIZE) - 1;
-	td->td_frame = (struct trapframe *)((caddr_t)td->td_pcb - 16) - 1;
-	td->td_pcb->pcb_ext = NULL; 
-	td->td_pcb->pcb_save = &td->td_pcb->pcb_user_save;
+	td->td_pcb = pcb = get_pcb_td(td);
+	td->td_frame = (struct trapframe *)((caddr_t)pcb - 16) - 1;
+	pcb->pcb_ext = NULL; 
+	pcb->pcb_save = get_pcb_user_save_pcb(pcb);
+	if (use_xsave) {
+		xhdr = (struct xstate_hdr *)(pcb->pcb_save + 1);
+		bzero(xhdr, sizeof(*xhdr));
+		xhdr->xstate_bv = xsave_mask;
+	}
 }
 
 void
@@ -469,7 +477,9 @@ cpu_set_upcall(struct thread *td, struct thread *td0)
 	bcopy(td0->td_pcb, pcb2, sizeof(*pcb2));
 	clear_pcb_flags(pcb2, PCB_NPXINITDONE | PCB_NPXUSERINITDONE |
 	    PCB_KERNNPX);
-	pcb2->pcb_save = &pcb2->pcb_user_save;
+	pcb2->pcb_save = get_pcb_user_save_pcb(pcb2);
+	bcopy(get_pcb_user_save_td(td0), pcb2->pcb_save,
+	    cpu_max_ext_state_size);
 
 	/*
 	 * Create a new fresh stack for the new thread.
