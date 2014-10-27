@@ -749,7 +749,7 @@ init_secondary(void)
 	initializecpu();
 
 	/* set up FPU state on the AP */
-	npxinit();
+	npxinit(false);
 
 	if (cpu_ops.cpu_init)
 		cpu_ops.cpu_init();

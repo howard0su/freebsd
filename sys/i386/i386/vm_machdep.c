@@ -118,8 +118,50 @@ static u_int	cpu_reset_proxyid;
 static volatile u_int	cpu_reset_proxy_active;
 #endif
 
-extern int	_ucodesel, _udatasel;
+union savefpu *
+get_pcb_user_save_td(struct thread *td)
+{
+	vm_offset_t p;
 
+	p = td->td_kstack + td->td_kstack_pages * PAGE_SIZE -
+	    cpu_max_ext_state_size;
+	KASSERT((p % 64) == 0, ("Unaligned pcb_user_save area"));
+	return ((union savefpu *)p);
+}
+
+union savefpu *
+get_pcb_user_save_pcb(struct pcb *pcb)
+{
+	vm_offset_t p;
+
+	p = (vm_offset_t)(pcb + 1);
+	return ((union savefpu *)p);
+}
+
+struct pcb *
+get_pcb_td(struct thread *td)
+{
+	vm_offset_t p;
+
+	p = td->td_kstack + td->td_kstack_pages * PAGE_SIZE -
+	    cpu_max_ext_state_size - sizeof(struct pcb);
+	return ((struct pcb *)p);
+}
+
+void *
+alloc_fpusave(int flags)
+{
+	void *res;
+	struct savefpu_ymm *sf;
+
+	res = malloc(cpu_max_ext_state_size, M_DEVBUF, flags);
+	if (use_xsave) {
+		sf = (struct savefpu_ymm *)res;
+		bzero(&sf->sv_xstate.sx_hd, sizeof(sf->sv_xstate.sx_hd));
+		sf->sv_xstate.sx_hd.xstate_bv = xsave_mask;
+	}
+	return (res);
+}
 /*
  * Finish a fork operation, with process p2 nearly set up.
  * Copy and update the pcb, set up the stack so that the child

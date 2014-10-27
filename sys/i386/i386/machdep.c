@@ -3079,6 +3079,10 @@ init386(first)
 	/* now running on new page tables, configured,and u/iom is accessible */
 
 	msgbufinit(msgbufp, msgbufsize);
+#ifdef DEV_NPX
+	npxinit(true);
+#endif
+
 	/* transfer to user mode */
 
 	_ucodesel = GSEL(GUCODE_SEL, SEL_UPL);
