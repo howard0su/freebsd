@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 1998-2003 Poul-Henning Kamp
+ * Copyright (c) 2011-2014 Jung-uk Kim <jkim@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
