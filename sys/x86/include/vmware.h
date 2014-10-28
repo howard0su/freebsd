@@ -26,10 +26,6 @@
  * $FreeBSD$
  */
 
-/*
- * XXX: Ask jkim about license
- */
-
 #ifndef _X86_VMWARE_H_
 #define	_X86_VMWARE_H_
 
