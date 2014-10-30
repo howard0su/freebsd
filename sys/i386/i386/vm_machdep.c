@@ -211,8 +211,7 @@ cpu_fork(td1, p2, td2, flags)
 #endif
 
 	/* Point the pcb to the top of the stack */
-	pcb2 = (struct pcb *)(td2->td_kstack +
-	    td2->td_kstack_pages * PAGE_SIZE) - 1;
+	pcb2 = get_pcb_td(td2);
 	td2->td_pcb = pcb2;
 
 	/* Copy td1's pcb */
