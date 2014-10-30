@@ -181,7 +181,7 @@ extern unsigned long physfree;
 /* Sanity check for __curthread() */
 CTASSERT(offsetof(struct pcpu, pc_curthread) == 0);
 
-extern void init386(int first);
+extern int init386(int first);
 extern void dblfault_handler(void);
 
 #define	CS_SECURE(cs)		(ISPL(cs) == SEL_UPL)
@@ -2902,7 +2902,7 @@ do_next:
 #ifdef XEN
 #define MTOPSIZE (1<<(14 + PAGE_SHIFT))
 
-void
+int
 init386(first)
 	int first;
 {
@@ -3150,10 +3150,13 @@ init386(first)
 	thread0.td_pcb->pcb_gsd = PCPU_GET(fsgs_gdt)[1];
 
 	cpu_probe_amdc1e();
+
+	/* Location of kernel stack for locore */
+	return ((int)thread0.td_pcb);
 }
 
 #else
-void
+int
 init386(first)
 	int first;
 {
@@ -3429,6 +3432,7 @@ init386(first)
 	PCPU_SET(tss_gdt, &gdt[GPROC0_SEL].sd);
 	PCPU_SET(common_tssd, *PCPU_GET(tss_gdt));
 	PCPU_SET(common_tss.tss_ioopt, (sizeof (struct i386tss)) << 16);
+	printf("Before ltr()\n");
 	ltr(gsel_tss);
 
 	/* make a call gate to reenter kernel with */
@@ -3468,6 +3472,9 @@ init386(first)
 #ifdef FDT
 	x86_init_fdt();
 #endif
+
+	/* Location of kernel stack for locore */
+	return ((int)thread0.td_pcb);
 }
 #endif
 
@@ -3923,8 +3930,8 @@ set_fpcontext(struct thread *td, const mcontext_t *mcp, char *xfpustate,
 	} else if (mcp->mc_ownedfp == _MC_FPOWNED_FPU ||
 	    mcp->mc_ownedfp == _MC_FPOWNED_PCB) {
 #ifdef DEV_NPX
-#ifdef CPU_ENABLE_SSE
 		fpstate = (union savefpu *)&mcp->mc_fpstate;
+#ifdef CPU_ENABLE_SSE
 		if (cpu_fxsr)
 			fpstate->sv_xmm.sv_env.en_mxcsr &= cpu_mxcsr_mask;
 #endif
