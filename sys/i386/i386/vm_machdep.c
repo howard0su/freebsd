@@ -362,7 +362,7 @@ cpu_thread_exit(struct thread *td)
 	/* Disable any hardware breakpoints. */
 	if (td->td_pcb->pcb_flags & PCB_DBREGS) {
 		reset_dbregs();
-		clear_pcb_flags(td->td_pcb, PCB_DBREGS);
+		td->td_pcb->pcb_flags &= ~PCB_DBREGS;
 	}
 }
 
@@ -474,7 +474,7 @@ cpu_set_upcall(struct thread *td, struct thread *td0)
 	 * values here.
 	 */
 	bcopy(td0->td_pcb, pcb2, sizeof(*pcb2));
-	clear_pcb_flags(pcb2, PCB_NPXINITDONE | PCB_NPXUSERINITDONE |
+	pcb2->pcb_flags &= ~(PCB_NPXINITDONE | PCB_NPXUSERINITDONE |
 	    PCB_KERNNPX);
 	pcb2->pcb_save = get_pcb_user_save_pcb(pcb2);
 	bcopy(get_pcb_user_save_td(td0), pcb2->pcb_save,

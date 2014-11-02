@@ -1648,7 +1648,7 @@ exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 			 */
 		        reset_dbregs();
                 }
-		clear_pcb_flags(pcb, PCB_DBREGS);
+		pcb->pcb_flags &= ~PCB_DBREGS;
         }
 
 	pcb->pcb_initial_npxcw = __INITIAL_NPXCW__;
@@ -3964,8 +3964,8 @@ fpstate_drop(struct thread *td)
 	 * sendsig() is the only caller of npxgetregs()... perhaps we just
 	 * have too many layers.
 	 */
-	clear_pcb_flags(curthread->td_pcb,
-	    PCB_NPXINITDONE | PCB_NPXUSERINITDONE);
+	curthread->td_pcb->pcb_flags &= ~(PCB_NPXINITDONE |
+	    PCB_NPXUSERINITDONE);
 	critical_exit();
 }
 
@@ -4073,7 +4073,7 @@ set_dbregs(struct thread *td, struct dbreg *dbregs)
 		pcb->pcb_dr6 = dbregs->dr[6];
 		pcb->pcb_dr7 = dbregs->dr[7];
 
-		set_pcb_flags(pcb, PCB_DBREGS);
+		pcb->pcb_flags |= PCB_DBREGS;
 	}
 
 	return (0);
