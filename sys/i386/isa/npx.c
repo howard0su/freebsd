@@ -198,8 +198,6 @@ CTASSERT(sizeof(struct savefpu_ymm) == 832);
  * This requirement is to make it easier for asm code to calculate
  * offset of the fpu save area from the pcb address. FPU save area
  * must be 64-byte aligned.
- *
- * XXX: Not sure if this is needed.
  */
 CTASSERT(sizeof(struct pcb) % XSAVE_AREA_ALIGN == 0);
 
@@ -867,7 +865,7 @@ npxdna(void)
 		 *
 		 * We prefer to restore the state from the actual save
 		 * area in PCB instead of directly loading from
-		 * fpu_initialstate, to ignite the XSAVEOPT
+		 * npx_initialstate, to ignite the XSAVEOPT
 		 * tracking engine.
 		 */
 		bcopy(npx_initialstate, curpcb->pcb_save, cpu_max_ext_state_size);
