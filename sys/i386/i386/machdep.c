@@ -181,7 +181,7 @@ extern unsigned long physfree;
 /* Sanity check for __curthread() */
 CTASSERT(offsetof(struct pcpu, pc_curthread) == 0);
 
-extern int init386(int first);
+extern register_t init386(int first);
 extern void dblfault_handler(void);
 
 #define	CS_SECURE(cs)		(ISPL(cs) == SEL_UPL)
@@ -2902,7 +2902,7 @@ do_next:
 #ifdef XEN
 #define MTOPSIZE (1<<(14 + PAGE_SHIFT))
 
-int
+register_t
 init386(first)
 	int first;
 {
@@ -3152,11 +3152,11 @@ init386(first)
 	cpu_probe_amdc1e();
 
 	/* Location of kernel stack for locore */
-	return ((int)thread0.td_pcb);
+	return ((register_t)thread0.td_pcb);
 }
 
 #else
-int
+register_t
 init386(first)
 	int first;
 {
@@ -3474,7 +3474,7 @@ init386(first)
 #endif
 
 	/* Location of kernel stack for locore */
-	return ((int)thread0.td_pcb);
+	return ((register_t)thread0.td_pcb);
 }
 #endif
 
