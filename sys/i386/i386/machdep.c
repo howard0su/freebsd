@@ -699,7 +699,6 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	sdp = &td->td_pcb->pcb_gsd;
 	sf.sf_uc.uc_mcontext.mc_gsbase = sdp->sd_hibase << 24 |
 	    sdp->sd_lobase;
-	sf.sf_uc.uc_mcontext.mc_flags = 0;
 	bzero(sf.sf_uc.uc_mcontext.mc_spare2,
 	    sizeof(sf.sf_uc.uc_mcontext.mc_spare2));
 	bzero(sf.sf_uc.__spare__, sizeof(sf.sf_uc.__spare__));
@@ -3432,7 +3431,6 @@ init386(first)
 	PCPU_SET(tss_gdt, &gdt[GPROC0_SEL].sd);
 	PCPU_SET(common_tssd, *PCPU_GET(tss_gdt));
 	PCPU_SET(common_tss.tss_ioopt, (sizeof (struct i386tss)) << 16);
-	printf("Before ltr()\n");
 	ltr(gsel_tss);
 
 	/* make a call gate to reenter kernel with */
