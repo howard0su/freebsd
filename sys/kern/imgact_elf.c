@@ -1593,6 +1593,44 @@ register_note(struct note_info_list *list, int type, outfunc_t out, void *arg)
 	return (notesize);
 }
 
+static size_t
+append_note_data(void *src, void *dst, size_t len)
+{
+	size_t pad;
+
+	pad = ELF_NOTE_ROUNDSIZE - len % ELF_NOTE_ROUNDSIZE;
+	if (dst != NULL) {
+		bcopy(src, dst, len);
+		bzero((char *)dst + len, pad);
+	}
+	return (len + pad);
+}
+
+size_t
+__elfN(populate_note)(int type, void *src, void *dst, size_t size)
+{
+	Elf_Note *note;
+	char *buf;
+	size_t notesize;
+
+	buf = dst;
+	if (buf != NULL) {
+		note = (Elf_Note *)buf;
+		note->n_namesz = 8; /* strlen("FreeBSD") + 1 */
+		note->n_descsz = size;
+		note->n_type = type;
+		buf += sizeof(*note);
+		buf += append_note_data("FreeBSD", buf, strlen("FreeBSD") + 1);
+		append_note_data(src, buf, size);
+	}
+
+	notesize = sizeof(Elf_Note) +		/* note header */
+	    roundup2(8, ELF_NOTE_ROUNDSIZE) +	/* note name ("FreeBSD") */
+	    roundup2(size, ELF_NOTE_ROUNDSIZE);	/* note description */
+
+	return (notesize);
+}
+
 static void
 __elfN(putnote)(struct note_info *ninfo, struct sbuf *sb)
 {
