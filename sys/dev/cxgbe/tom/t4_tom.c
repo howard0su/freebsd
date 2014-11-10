@@ -1095,6 +1095,7 @@ t4_tom_mod_load(void)
 	bcopy(tcp_protosw->pr_usrreqs, &ddp_usrreqs, sizeof(ddp_usrreqs));
 	ddp_usrreqs.pru_soreceive = t4_soreceive_ddp;
 	ddp_protosw.pr_usrreqs = &ddp_usrreqs;
+	ddp_protosw.pr_ctloutput = t4_tcp_ctloutput_ddp;
 
 	tcp6_protosw = pffindproto(PF_INET6, IPPROTO_TCP, SOCK_STREAM);
 	if (tcp6_protosw == NULL)
@@ -1103,6 +1104,7 @@ t4_tom_mod_load(void)
 	bcopy(tcp6_protosw->pr_usrreqs, &ddp6_usrreqs, sizeof(ddp6_usrreqs));
 	ddp6_usrreqs.pru_soreceive = t4_soreceive_ddp;
 	ddp6_protosw.pr_usrreqs = &ddp6_usrreqs;
+	ddp6_protosw.pr_ctloutput = t4_tcp_ctloutput_ddp;
 
 	TIMEOUT_TASK_INIT(taskqueue_thread, &clip_task, 0, t4_clip_task, NULL);
 	ifaddr_evhandler = EVENTHANDLER_REGISTER(ifaddr_event,

@@ -74,7 +74,11 @@ enum {
 	DDP_ON		= (1 << 2),	/* DDP is turned on */
 	DDP_BUF0_ACTIVE	= (1 << 3),	/* buffer 0 in use (not invalidated) */
 	DDP_BUF1_ACTIVE	= (1 << 4),	/* buffer 1 in use (not invalidated) */
+	DDP_STATIC_BUF	= (1 << 5),	/* using static buffers */
 };
+
+struct sockopt;
+struct vm_object;
 
 struct ofld_tx_sdesc {
 	uint32_t plen;		/* payload length */
@@ -126,6 +130,7 @@ struct toepcb {
 	struct ddp_buffer *db[2];
 	time_t ddp_disabled;
 	uint8_t ddp_score;
+	struct vm_object *db_static; /* split into two equal-sized buffers */
 
 	/* Tx software descriptor */
 	uint8_t txsd_total;
@@ -292,6 +297,7 @@ void t4_init_ddp(struct adapter *, struct tom_data *);
 void t4_uninit_ddp(struct adapter *, struct tom_data *);
 int t4_soreceive_ddp(struct socket *, struct sockaddr **, struct uio *,
     struct mbuf **, struct mbuf **, int *);
+int t4_tcp_ctloutput_ddp(struct socket *, struct sockopt *);
 struct mbuf *get_ddp_mbuf(int);
 void enable_ddp(struct adapter *, struct toepcb *toep);
 void release_ddp_resources(struct toepcb *toep);

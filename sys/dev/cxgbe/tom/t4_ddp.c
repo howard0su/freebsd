@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/protosw.h>
 #include <sys/proc.h>
 #include <sys/domain.h>
+#include <sys/resourcevar.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/uio.h>
@@ -57,6 +58,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_map.h>
 #include <vm/vm_page.h>
 #include <vm/vm_object.h>
+#include <vm/vm_pager.h>
 
 #ifdef TCP_OFFLOAD
 #include "common/common.h"
@@ -203,6 +205,8 @@ release_ddp_resources(struct toepcb *toep)
 			toep->db[i] = NULL;
 		}
 	}
+	if (toep->db_static != NULL)
+		vm_object_deallocate(toep->db_static);
 }
 
 /* XXX: handle_ddp_data code duplication */
@@ -1290,6 +1294,217 @@ out:
 	SBLASTMBUFCHK(sb);
 	SOCKBUF_UNLOCK(sb);
 	sbunlock(sb);
+	return (error);
+}
+
+/*
+ * tcp_ctloutput() must drop the inpcb lock before performing copyin on
+ * socket option arguments.  When it re-acquires the lock after the copy, it
+ * has to revalidate that the connection is still valid for the socket
+ * option.
+ */
+#define INP_WLOCK_RECHECK(inp) do {					\
+	INP_WLOCK(inp);							\
+	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {		\
+		INP_WUNLOCK(inp);					\
+		return (ECONNRESET);					\
+	}								\
+	tp = intotcpcb(inp);						\
+} while(0)
+
+static vm_object_t
+create_object(vm_size_t size, struct ucred *cred)
+{
+	vm_pindex_t idx, pages;
+	vm_object_t obj;
+	vm_page_t m;
+
+	obj = vm_pager_allocate(OBJT_PHYS, NULL, size,
+	    VM_PROT_DEFAULT, 0, cred);
+	VM_OBJECT_WLOCK(obj);
+	vm_object_set_flag(obj, OBJ_COLORED);
+
+	/* Fault in pages. */
+	KASSERT((size & PAGE_MASK) == 0, ("bad size %zu", (size_t)size));
+	pages = OFF_TO_IDX(size);
+	KASSERT(obj->size == pages, ("bad object size"));
+	for (idx = 0; idx < pages; idx++) {
+		m = vm_page_grab(obj, idx, VM_ALLOC_NORMAL |
+		    VM_ALLOC_COUNT(pages - idx - 1) | VM_ALLOC_WIRED |
+		    VM_ALLOC_ZERO);
+		vm_page_xunbusy(m);
+	}
+	VM_OBJECT_WUNLOCK(obj);
+	return (obj);
+}
+
+static int
+map_object(vm_object_t obj, vm_offset_t *vaddr)
+{
+	struct vmspace *vms;
+	struct thread *td;
+	struct proc *p;
+	int rv;
+
+	td = curthread;
+	p = td->td_proc;
+	vms = curthread->td_proc->p_vmspace;
+	PROC_LOCK(p);
+	*vaddr = round_page((vm_offset_t)vms->vm_daddr +
+	    lim_max(p, RLIMIT_DATA));
+	PROC_UNLOCK(p);
+	rv = vm_map_find(&vms->vm_map, obj, 0, vaddr, obj->size * PAGE_SIZE, 0,
+	    VMFS_OPTIMAL_SPACE, VM_PROT_READ, VM_PROT_READ, MAP_PREFAULT |
+	    MAP_DISABLE_SYNCER | MAP_INHERIT_SHARE);
+	if (rv == KERN_SUCCESS)
+		return (0);
+	vm_object_deallocate(obj);
+	return (vm_mmap_to_errno(rv));
+}
+
+int
+t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
+{
+	struct inpcb *inp;
+	struct tcpcb *tp;
+	struct toepcb *toep;
+	vm_offset_t vaddr;
+	vm_object_t obj;
+	vm_size_t size;
+	int error, old, optval;
+
+	/*
+	 * XXX: Cannot block SO_RCVBUF changes, so depending on newly-added
+	 * SB_FIXEDSIZE.  (Eventually we could choose to cope by adjusting
+	 * the buffers).
+	 */
+#ifdef INVARIANTS
+	if (sopt->sopt_level == SOL_SOCKET && sopt->sopt_dir == SOPT_SET &&
+	    sopt->sopt_name == SO_RCVBUF) {
+		inp = sotoinpcb(so);
+		KASSERT(inp != NULL, ("t4_tcp_ctloutput: inp == NULL"));
+		INP_WLOCK(inp);
+		if (!(inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED))) {
+			tp = intotcpcb(inp);
+			toep = tp->t_toe;
+			if (toep->ddp_flags & DDP_STATIC_BUF)
+				panic(
+			    "Cannot change socket buffer of DDP connection");
+		}
+	}
+#endif
+	if (sopt->sopt_level != IPPROTO_TCP)
+		return (tcp_ctloutput(so, sopt));
+
+	switch (sopt->sopt_name) {
+	case TCP_DDP_STATIC:
+	case TCP_DDP_MAP:
+		break;
+	default:
+		return (tcp_ctloutput(so, sopt));
+	}
+
+	inp = sotoinpcb(so);
+	KASSERT(inp != NULL, ("t4_tcp_ctloutput: inp == NULL"));
+	INP_WLOCK(inp);
+	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+		INP_WUNLOCK(inp);
+		return (ECONNRESET);
+	}
+	tp = intotcpcb(inp);
+	toep = tp->t_toe;
+	switch (sopt->sopt_dir) {
+	case SOPT_SET:
+		switch (sopt->sopt_name) {
+		case TCP_DDP_STATIC:
+			old = (toep->ddp_flags & DDP_STATIC_BUF) != 0;
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+			    sizeof optval);
+			if (error)
+				return (error);
+			if ((optval != 0) == old)
+				return (0);
+			if (optval == 0)
+				/* Disabling static buffers is not supported. */
+				return (EBUSY);
+
+			SOCKBUF_LOCK(&so->so_rcv);
+			size = roundup2(so->so_rcv.sb_hiwat, PAGE_SIZE) * 2;
+			SOCKBUF_UNLOCK(&so->so_rcv);
+
+		retry:
+			/* Create a new VM object of the appropriate size. */
+			obj = create_object(size, so->so_cred);
+
+			/*
+			 * Relock everything and see if the VM object still
+			 * works.
+			 */
+			INP_WLOCK(inp);
+			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+				INP_WUNLOCK(inp);
+				vm_object_deallocate(obj);
+				return (ECONNRESET);
+			}
+			tp = intotcpcb(inp);
+			toep = tp->t_toe;
+			if (toep->ddp_flags & DDP_STATIC_BUF) {
+				/*
+				 * Raced with another thread to create
+				 * the VM object.
+				 */
+				INP_WUNLOCK(inp);
+				vm_object_deallocate(obj);
+				return (0);
+			}
+			SOCKBUF_LOCK(&so->so_rcv);
+			size = roundup2(so->so_rcv.sb_hiwat, PAGE_SIZE) * 2;
+			if (OFF_TO_IDX(size) != obj->size) {
+				SOCKBUF_UNLOCK(&so->so_rcv);
+				INP_WUNLOCK(inp);
+				vm_object_deallocate(obj);
+				goto retry;
+			}
+			so->so_rcv.sb_flags |= SB_FIXEDSIZE;
+			SOCKBUF_UNLOCK(&so->so_rcv);
+			toep->ddp_flags |= DDP_STATIC_BUF;
+			toep->db_static = obj;
+
+			/* XXX: Need to setup ppods, etc. */
+			INP_WUNLOCK(inp);
+			error = 0;
+			break;
+		case TCP_DDP_MAP:
+			INP_WUNLOCK(inp);
+			error = EINVAL;
+			break;
+		}
+	case SOPT_GET:
+		switch (sopt->sopt_name) {
+		case TCP_DDP_STATIC:
+			optval = (toep->ddp_flags & DDP_STATIC_BUF) != 0;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+		case TCP_DDP_MAP:
+			if (toep->ddp_flags & DDP_STATIC_BUF) {
+				obj = toep->db_static;
+				vm_object_reference(obj);
+			} else
+				obj = NULL;
+			INP_WUNLOCK(inp);
+			if (obj == NULL) {
+				error = ENXIO;
+				break;
+			}
+			error = map_object(obj, &vaddr);
+			if (error == 0)
+				error = sooptcopyout(sopt, &vaddr,
+				    sizeof vaddr);
+			break;
+		}
+	}
 	return (error);
 }
 

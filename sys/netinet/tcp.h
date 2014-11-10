@@ -169,6 +169,10 @@ struct tcphdr {
 /* Start of reserved space for third-party user-settable options. */
 #define	TCP_VENDOR	SO_VENDOR
 
+/* XXX: Temporary values or location */
+#define	TCP_DDP_STATIC	TCP_VENDOR /* Use static buffers for DDP */
+#define	TCP_DDP_MAP	(TCP_VENDOR + 1)
+
 #define	TCP_CA_NAME_MAX	16	/* max congestion control name length */
 
 #define	TCPI_OPT_TIMESTAMPS	0x01
