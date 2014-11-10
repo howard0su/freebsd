@@ -44,6 +44,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_param.h>
 
 #include <machine/elf.h>
+#include <machine/fpu.h>
 #include <machine/md_var.h>
 
 struct sysentvec elf64_freebsd_sysvec = {
@@ -133,11 +134,34 @@ SYSINIT(kelf64, SI_SUB_EXEC, SI_ORDER_ANY,
 	&kfreebsd_brand_info);
 
 void
-elf64_dump_thread(struct thread *td __unused, void *dst __unused,
-    size_t *off __unused)
+elf64_dump_thread(struct thread *td, void *dst, size_t *off)
 {
-}
+	char *buf, *savefpu;
+	size_t len;
 
+	len = 0;
+	buf = dst;
+	if (use_xsave) {
+		if (buf != NULL) {
+			fpugetregs(td);
+			savefpu = (char *)get_pcb_user_save_td(td);
+
+			/*
+			 * The thread should not use the FPU again since
+			 * it is dumping core, so it is ok to modify the
+			 * saved state in the PCB in-place.
+			 */
+			*(uint64_t *)(savefpu + X86_XSTATE_XCR0_OFFSET) =
+			    xsave_mask;
+			len += elf64_populate_note(NT_X86_XSTATE, savefpu,
+			    buf, cpu_max_ext_state_size);
+			buf += len;
+		} else
+			len += elf64_populate_note(NT_X86_XSTATE, NULL, NULL,
+			    cpu_max_ext_state_size);
+	}
+	*off = len;
+}
 
 /* Process one elf relocation with addend. */
 static int
