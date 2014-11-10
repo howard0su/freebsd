@@ -300,7 +300,7 @@ sbreserve_locked(struct sockbuf *sb, u_long cc, struct socket *so,
 	 * appropriate thread resource limits are available.  In that case,
 	 * we don't apply a process limit.
 	 */
-	if (cc > sb_max_adj)
+	if (cc > sb_max_adj || sb->sb_flags & SB_FIXEDSIZE)
 		return (0);
 	if (td != NULL) {
 		PROC_LOCK(td->td_proc);

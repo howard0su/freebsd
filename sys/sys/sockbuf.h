@@ -53,6 +53,7 @@
 #define	SB_IN_TOE	0x400		/* socket buffer is in the middle of an operation */
 #define	SB_AUTOSIZE	0x800		/* automatically size socket buffer */
 #define	SB_STOP		0x1000		/* backpressure indicator */
+#define	SB_FIXEDSIZE	0x2000		/* resizing not permitted */
 
 #define	SBS_CANTSENDMORE	0x0010	/* can't send more data to peer */
 #define	SBS_CANTRCVMORE		0x0020	/* can't receive more data from peer */
