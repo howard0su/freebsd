@@ -1596,14 +1596,14 @@ register_note(struct note_info_list *list, int type, outfunc_t out, void *arg)
 static size_t
 append_note_data(void *src, void *dst, size_t len)
 {
-	size_t pad;
+	size_t padded_len;
 
-	pad = ELF_NOTE_ROUNDSIZE - len % ELF_NOTE_ROUNDSIZE;
+	padded_len = roundup2(len, ELF_NOTE_ROUNDSIZE);
 	if (dst != NULL) {
 		bcopy(src, dst, len);
-		bzero((char *)dst + len, pad);
+		bzero((char *)dst + len, padded_len - len);
 	}
-	return (len + pad);
+	return (padded_len);
 }
 
 size_t
