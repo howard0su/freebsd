@@ -131,6 +131,7 @@ struct toepcb {
 	time_t ddp_disabled;
 	uint8_t ddp_score;
 	struct vm_object *db_static; /* split into two equal-sized buffers */
+	int db_static_index;
 
 	/* Tx software descriptor */
 	uint8_t txsd_total;

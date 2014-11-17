@@ -1118,6 +1118,12 @@ t4_soreceive_ddp(struct socket *so, struct sockaddr **psa, struct uio *uio,
 		goto out;
 	SOCKBUF_LOCK(sb);
 
+	/* If a static buffer is active, fail attempts to use read/recv. */
+	if (sb->sb_flags & SB_FIXEDSIZE) {
+		error = EINVAL;
+		goto out;
+	}
+	    
 	/* Easy one, no space to copyout anything. */
 	if (uio->uio_resid == 0) {
 		error = EINVAL;
@@ -1312,30 +1318,68 @@ out:
 	tp = intotcpcb(inp);						\
 } while(0)
 
-static vm_object_t
-create_object(vm_size_t size, struct ucred *cred)
+struct ddp_static_buf {
+	vm_object_t obj;
+	/* XXX: This should use nitems(toep->db) or similar */
+	struct ddp_buffer *db[2];
+};
+
+static int
+create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
+    struct ucred *cred, struct ddp_static_buf *dsb)
 {
 	vm_pindex_t idx, pages;
-	vm_object_t obj;
-	vm_page_t m;
+	vm_page_t m, *pp[nitems(dsb->db)];
+	int bucket;
 
-	obj = vm_pager_allocate(OBJT_PHYS, NULL, size,
+	bzero(dsb, sizeof(*dsb));
+	dsb->obj = vm_pager_allocate(OBJT_PHYS, NULL, size * nitems(dsb->db),
 	    VM_PROT_DEFAULT, 0, cred);
-	VM_OBJECT_WLOCK(obj);
-	vm_object_set_flag(obj, OBJ_COLORED);
+	VM_OBJECT_WLOCK(dsb->obj);
+	vm_object_set_flag(dsb->obj, OBJ_COLORED);
 
 	/* Fault in pages. */
 	KASSERT((size & PAGE_MASK) == 0, ("bad size %zu", (size_t)size));
 	pages = OFF_TO_IDX(size);
-	KASSERT(obj->size == pages, ("bad object size"));
-	for (idx = 0; idx < pages; idx++) {
-		m = vm_page_grab(obj, idx, VM_ALLOC_NORMAL |
-		    VM_ALLOC_COUNT(pages - idx - 1) | VM_ALLOC_WIRED |
-		    VM_ALLOC_ZERO);
+	KASSERT(dsb->obj->size == pages * nitems(dsb->db), ("bad object size"));
+	for (bucket = 0; bucket < nitems(dsb->db); bucket++)
+		pp[bucket] = malloc(pages * sizeof(vm_page_t), M_CXGBE,
+		    M_WAITOK);
+	for (idx = 0; idx < pages * nitems(dsb->db); idx++) {
+		m = vm_page_grab(dsb->obj, idx, VM_ALLOC_NORMAL |
+		    VM_ALLOC_COUNT(pages * nitems(dsb->db) - idx - 1) |
+		    VM_ALLOC_WIRED | VM_ALLOC_ZERO);
+		pp[idx / pages][idx % pages] = m;
 		vm_page_xunbusy(m);
 	}
-	VM_OBJECT_WUNLOCK(obj);
-	return (obj);
+	VM_OBJECT_WUNLOCK(dsb->obj);
+
+	for (bucket = 0; bucket < nitems(dsb->db); bucket++) {
+		dsb->db[bucket] = alloc_ddp_buffer(td, pp[bucket], pages, 0,
+		    size);
+		if (dsb->db[bucket] == NULL) {
+			for (bucket = 0; bucket < nitems(dsb->db); bucket++)
+				if (dsb->db[bucket] != NULL)
+					free_ddp_buffer(td, dsb->db[bucket]);
+				else
+					free(pp[bucket], M_CXGBE);
+			vm_object_deallocate(dsb->obj);
+			return (ENOMEM);
+		}
+	}
+
+	return (0);
+}
+
+static void
+free_static_ddp_buffer(struct tom_data *td, struct ddp_static_buf *dsb)
+{
+	int i;
+
+	for (i = 0; i < nitems(dsb->db); i++)
+		free_ddp_buffer(td, dsb->db[i]);
+	if (dsb->obj != NULL)
+		vm_object_deallocate(dsb->obj);
 }
 
 static int
@@ -1362,16 +1406,55 @@ map_object(vm_object_t obj, vm_offset_t *vaddr)
 	return (vm_mmap_to_errno(rv));
 }
 
+static int
+setup_static_ddp(struct socket *so, struct toepcb *toep)
+{
+	struct adapter *sc = td_adapter(toep->td);
+	struct ddp_buffer *db;
+	int buf_flag, db_idx;
+	struct wrqe *wr;
+	uint64_t ddp_flags;
+
+	db_idx = toep->db_static_index;
+	db = toep->db[db_idx];
+	buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
+
+	/*
+	 * Build the compound work request that tells the chip where to DMA the
+	 * payload.
+	 *
+	 * XXX: flags of 0 here isn't really ideal.  What we kind of
+	 * want is to use MSG_WAITALL by default I think, but have a
+	 * way to see how much data is pending and flip buffers for a
+	 * non-blocking "read" if there is a partial buffer
+	 */
+	ddp_flags = select_ddp_flags(so, 0, db_idx);
+
+	/*
+	 * XXX: I think offset of 0 is wrong once data is arriving.
+	 */
+	wr = mk_update_tcb_for_ddp(sc, toep, db_idx, 0, ddp_flags);
+	if (wr == NULL)
+		/*
+		 * We don't really cope with this failing.
+		 */
+		return (ENOMEM);
+	t4_wrq_tx(sc, wr);
+	toep->ddp_flags |= buf_flag;
+	return (0);
+}
+
 int
 t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 {
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	struct toepcb *toep;
+	struct ddp_static_buf dsb;
 	vm_offset_t vaddr;
 	vm_object_t obj;
 	vm_size_t size;
-	int error, old, optval;
+	int error, i, old, optval;
 
 	/*
 	 * XXX: Cannot block SO_RCVBUF changes, so depending on newly-added
@@ -1430,12 +1513,16 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				return (EBUSY);
 
 			SOCKBUF_LOCK(&so->so_rcv);
-			size = roundup2(so->so_rcv.sb_hiwat, PAGE_SIZE) * 2;
+			size = round_page(so->so_rcv.sb_hiwat);
 			SOCKBUF_UNLOCK(&so->so_rcv);
 
 		retry:
+			if (size > MAX_DDP_BUFFER_SIZE)
+				return (E2BIG);
+
 			/* Create a new VM object of the appropriate size. */
-			obj = create_object(size, so->so_cred);
+			create_static_ddp_buffer(toep->td, size, so->so_cred,
+			    &dsb);
 
 			/*
 			 * Relock everything and see if the VM object still
@@ -1444,34 +1531,58 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			INP_WLOCK(inp);
 			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
 				INP_WUNLOCK(inp);
-				vm_object_deallocate(obj);
+				free_static_ddp_buffer(toep->td, &dsb);
 				return (ECONNRESET);
 			}
 			tp = intotcpcb(inp);
 			toep = tp->t_toe;
+			
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
 				/*
 				 * Raced with another thread to create
 				 * the VM object.
 				 */
 				INP_WUNLOCK(inp);
-				vm_object_deallocate(obj);
+				free_static_ddp_buffer(toep->td, &dsb);
 				return (0);
 			}
+
+			/*
+			 * XXX: For now, don't permit this if there are
+			 * any active DDP buffers.
+			 */
+			for (i = 0; i < nitems(toep->db); i++) {
+				if (toep->db[i] != NULL) {
+					INP_WUNLOCK(inp);
+					free_static_ddp_buffer(toep->td, &dsb);
+					return (EBUSY);
+				}
+			}
+
 			SOCKBUF_LOCK(&so->so_rcv);
-			size = roundup2(so->so_rcv.sb_hiwat, PAGE_SIZE) * 2;
-			if (OFF_TO_IDX(size) != obj->size) {
+
+			/*
+			 * XXX: Fail for so_error or SBS_CANTRCVMORE?  Also
+			 * fail if there is data in the socket buffer already?
+			 */
+
+			size = round_page(so->so_rcv.sb_hiwat);
+			if (OFF_TO_IDX(size * nitems(toep->db)) !=
+			    dsb.obj->size) {
 				SOCKBUF_UNLOCK(&so->so_rcv);
 				INP_WUNLOCK(inp);
-				vm_object_deallocate(obj);
+				free_static_ddp_buffer(toep->td, &dsb);
 				goto retry;
 			}
 			so->so_rcv.sb_flags |= SB_FIXEDSIZE;
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			toep->ddp_flags |= DDP_STATIC_BUF;
-			toep->db_static = obj;
+			toep->db_static = dsb.obj;
+			toep->db_static_index = 0;
+			for (i = 0; i < nitems(toep->db); i++)
+				toep->db[i] = dsb.db[i];
 
-			/* XXX: Need to setup ppods, etc. */
+			setup_static_ddp(so, toep);
 			INP_WUNLOCK(inp);
 			error = 0;
 			break;
