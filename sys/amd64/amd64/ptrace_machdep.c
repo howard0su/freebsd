@@ -164,7 +164,7 @@ cpu_ptrace(struct thread *td, int req, void *addr, int data)
 	switch (req) {
 	case PT_GETXSTATE_OLD:
 	case PT_SETXSTATE_OLD:
-	case PT_GETXSTATE_LEN:
+	case PT_GETXSTATE_INFO:
 	case PT_GETXSTATE:
 	case PT_SETXSTATE:
 		error = cpu_ptrace_xstate(td, req, addr, data);
