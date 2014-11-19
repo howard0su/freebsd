@@ -77,7 +77,7 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 	case PT_GETXSTATE_INFO:
 		error = copyout(&xsave_mask, addr, sizeof(xsave_mask));
 		if (error == 0)
-			td->td_retval[0] = cpu_max_ext_state_size;
+			curthread->td_retval[0] = cpu_max_ext_state_size;
 		break;
 
 	case PT_GETXSTATE:
