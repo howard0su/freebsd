@@ -92,7 +92,7 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 		if (error == 0)
 			error = fpusetregs(td, (struct savefpu *)savefpu,
 			    savefpu + sizeof(struct savefpu), data -
-			    cpu_max_ext_state_size);
+			    sizeof(struct savefpu));
 		free(savefpu, M_TEMP);
 		break;
 

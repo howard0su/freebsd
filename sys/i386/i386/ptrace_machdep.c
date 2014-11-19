@@ -96,7 +96,7 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 		if (error == 0)
 			error = npxsetregs(td, (union savefpu *)savefpu,
 			    savefpu + sizeof(union savefpu), data -
-			    cpu_max_ext_state_size);
+			    sizeof(union savefpu));
 		free(savefpu, M_TEMP);
 		break;
 
