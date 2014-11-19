@@ -53,14 +53,14 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 		return (EOPNOTSUPP);
 
 	switch (req) {
-	case PT_GETXSTATE:
+	case PT_GETXSTATE_OLD:
 		npxgetregs(td);
 		savefpu = (char *)(get_pcb_user_save_td(td) + 1);
 		error = copyout(savefpu, addr,
 		    cpu_max_ext_state_size - sizeof(union savefpu));
 		break;
 
-	case PT_SETXSTATE:
+	case PT_SETXSTATE_OLD:
 		if (data > cpu_max_ext_state_size - sizeof(union savefpu)) {
 			error = EINVAL;
 			break;
@@ -71,6 +71,31 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 			npxgetregs(td);
 			error = npxsetxstate(td, savefpu, data);
 		}
+		free(savefpu, M_TEMP);
+		break;
+
+	case PT_GETXSTATE_LEN:
+		td->td_retval[0] = cpu_max_ext_state_size;
+		error = 0;
+		break;
+
+	case PT_GETXSTATE:
+		npxgetregs(td);
+		savefpu = (char *)(get_pcb_user_save_td(td));
+		error = copyout(savefpu, addr, cpu_max_ext_state_size);
+		break;
+
+	case PT_SETXSTATE:
+		if (data > cpu_max_ext_state_size) {
+			error = EINVAL;
+			break;
+		}
+		savefpu = malloc(data, M_TEMP, M_WAITOK);
+		error = copyin(addr, savefpu, data);
+		if (error == 0)
+			error = npxsetregs(td, (union savefpu *)savefpu,
+			    savefpu + sizeof(union savefpu), data -
+			    cpu_max_ext_state_size);
 		free(savefpu, M_TEMP);
 		break;
 
@@ -106,6 +131,9 @@ cpu_ptrace(struct thread *td, int req, void *addr, int data)
 		fpstate->sv_env.en_mxcsr &= cpu_mxcsr_mask;
 		break;
 
+	case PT_GETXSTATE_OLD:
+	case PT_SETXSTATE_OLD:
+	case PT_GETXSTATE_LEN:
 	case PT_GETXSTATE:
 	case PT_SETXSTATE:
 		error = cpu_ptrace_xstate(td, req, addr, data);

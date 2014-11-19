@@ -37,14 +37,17 @@
 
 /*
  * On amd64 (PT_FIRSTMACH + 0) and (PT_FIRSTMACH + 1) are old values for
- * PT_GETXSTATE and PT_SETXSTATE.  They should not be (re)used.
+ * PT_GETXSTATE_OLD and PT_SETXSTATE_OLD.  They should not be (re)used.
  */
 
 #ifdef __i386__
 #define	PT_GETXMMREGS	(PT_FIRSTMACH + 0)
 #define	PT_SETXMMREGS	(PT_FIRSTMACH + 1)
 #endif
-#define	PT_GETXSTATE	(PT_FIRSTMACH + 2)
-#define	PT_SETXSTATE	(PT_FIRSTMACH + 3)
+#define	PT_GETXSTATE_OLD (PT_FIRSTMACH + 2)
+#define	PT_SETXSTATE_OLD (PT_FIRSTMACH + 3)
+#define	PT_GETXSTATE_LEN (PT_FIRSTMACH + 4)
+#define	PT_GETXSTATE	(PT_FIRSTMACH + 5)
+#define	PT_SETXSTATE	(PT_FIRSTMACH + 6)
 
 #endif
