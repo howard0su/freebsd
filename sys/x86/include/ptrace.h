@@ -52,4 +52,10 @@
 #define	PT_GETXSTATE	(PT_FIRSTMACH + 5)
 #define	PT_SETXSTATE	(PT_FIRSTMACH + 6)
 
+/* Argument structure for PT_GETXSTATE_INFO. */
+struct ptrace_xstate_info {
+	uint32_t	xsave_len;
+	uint64_t	xsave_mask;
+};
+
 #endif

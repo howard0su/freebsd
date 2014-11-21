@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 static int
 cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 {
+	struct ptrace_xstate_info info;
 	char *savefpu;
 	int error;
 
@@ -71,9 +72,13 @@ cpu_ptrace_xstate(struct thread *td, int req, void *addr, int data)
 		break;
 
 	case PT_GETXSTATE_INFO:
-		error = copyout(&xsave_mask, addr, sizeof(xsave_mask));
-		if (error == 0)
-			curthread->td_retval[0] = cpu_max_ext_state_size;
+		if (data != sizeof(info)) {
+			error  = EINVAL;
+			break;
+		}
+		info.xsave_len = cpu_max_ext_state_size;
+		info.xsave_mask = xsave_mask;
+		error = copyout(&info, addr, data);
 		break;
 
 	case PT_GETXSTATE:
