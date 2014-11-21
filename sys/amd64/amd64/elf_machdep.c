@@ -136,7 +136,7 @@ SYSINIT(kelf64, SI_SUB_EXEC, SI_ORDER_ANY,
 void
 elf64_dump_thread(struct thread *td, void *dst, size_t *off)
 {
-	char *buf;
+	void *buf;
 	size_t len;
 
 	len = 0;
@@ -146,7 +146,7 @@ elf64_dump_thread(struct thread *td, void *dst, size_t *off)
 			len += elf64_populate_note(NT_X86_XSTATE,
 			    get_pcb_user_save_td(td), dst,
 			    cpu_max_ext_state_size, &buf);
-			*(uint64_t *)(buf + X86_XSTATE_XCR0_OFFSET) =
+			*(uint64_t *)((char *)buf + X86_XSTATE_XCR0_OFFSET) =
 			    xsave_mask;
 		} else
 			len += elf64_populate_note(NT_X86_XSTATE, NULL, NULL,

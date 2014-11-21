@@ -1595,7 +1595,7 @@ register_note(struct note_info_list *list, int type, outfunc_t out, void *arg)
 }
 
 static size_t
-append_note_data(void *src, void *dst, size_t len)
+append_note_data(const void *src, void *dst, size_t len)
 {
 	size_t padded_len;
 
