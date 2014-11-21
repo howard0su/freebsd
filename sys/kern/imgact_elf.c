@@ -1587,7 +1587,8 @@ register_note(struct note_info_list *list, int type, outfunc_t out, void *arg)
 		return (size);
 
 	notesize = sizeof(Elf_Note) +		/* note header */
-	    roundup2(8, ELF_NOTE_ROUNDSIZE) +	/* note name ("FreeBSD") */
+	    roundup2(sizeof(FREEBSD_ABI_VENDOR), ELF_NOTE_ROUNDSIZE) +
+						/* note name */
 	    roundup2(size, ELF_NOTE_ROUNDSIZE);	/* note description */
 
 	return (notesize);
@@ -1607,7 +1608,7 @@ append_note_data(void *src, void *dst, size_t len)
 }
 
 size_t
-__elfN(populate_note)(int type, void *src, void *dst, size_t size)
+__elfN(populate_note)(int type, void *src, void *dst, size_t size, void **descp)
 {
 	Elf_Note *note;
 	char *buf;
@@ -1616,16 +1617,18 @@ __elfN(populate_note)(int type, void *src, void *dst, size_t size)
 	buf = dst;
 	if (buf != NULL) {
 		note = (Elf_Note *)buf;
-		note->n_namesz = 8; /* strlen("FreeBSD") + 1 */
+		note->n_namesz = sizeof(FREEBSD_ABI_VENDOR);
 		note->n_descsz = size;
 		note->n_type = type;
 		buf += sizeof(*note);
-		buf += append_note_data("FreeBSD", buf, strlen("FreeBSD") + 1);
+		buf += append_note_data(FREEBSD_ABI_VENDOR, buf,
+		    sizeof(FREEBSD_ABI_VENDOR));
 		append_note_data(src, buf, size);
 	}
 
 	notesize = sizeof(Elf_Note) +		/* note header */
-	    roundup2(8, ELF_NOTE_ROUNDSIZE) +	/* note name ("FreeBSD") */
+	    roundup2(sizeof(FREEBSD_ABI_VENDOR), ELF_NOTE_ROUNDSIZE) +
+						/* note name */
 	    roundup2(size, ELF_NOTE_ROUNDSIZE);	/* note description */
 
 	return (notesize);
@@ -1642,13 +1645,13 @@ __elfN(putnote)(struct note_info *ninfo, struct sbuf *sb)
 		return;
 	}
 
-	note.n_namesz = 8; /* strlen("FreeBSD") + 1 */
+	note.n_namesz = sizeof(FREEBSD_ABI_VENDOR);
 	note.n_descsz = ninfo->outsize;
 	note.n_type = ninfo->type;
 
 	sbuf_bcat(sb, &note, sizeof(note));
 	sbuf_start_section(sb, &old_len);
-	sbuf_bcat(sb, "FreeBSD", note.n_namesz);
+	sbuf_bcat(sb, FREEBSD_ABI_VENDOR, sizeof(FREEBSD_ABI_VENDOR));
 	sbuf_end_section(sb, old_len, ELF_NOTE_ROUNDSIZE, 0);
 	if (note.n_descsz == 0)
 		return;
