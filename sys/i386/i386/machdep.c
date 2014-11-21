@@ -3858,7 +3858,8 @@ set_mcontext(struct thread *td, const mcontext_t *mcp)
 	int eflags, ret;
 
 	tp = td->td_frame;
-	if (mcp->mc_len != sizeof(*mcp))
+	if (mcp->mc_len != sizeof(*mcp) ||
+	    (mcp->mc_flags & ~_MC_FLAG_MASK) != 0)
 		return (EINVAL);
 	eflags = (mcp->mc_eflags & PSL_USERCHANGE) |
 	    (tp->tf_eflags & ~PSL_USERCHANGE);
