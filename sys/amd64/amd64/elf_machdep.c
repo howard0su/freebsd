@@ -136,29 +136,21 @@ SYSINIT(kelf64, SI_SUB_EXEC, SI_ORDER_ANY,
 void
 elf64_dump_thread(struct thread *td, void *dst, size_t *off)
 {
-	char *buf, *savefpu;
+	char *buf;
 	size_t len;
 
 	len = 0;
-	buf = dst;
 	if (use_xsave) {
-		if (buf != NULL) {
+		if (dst != NULL) {
 			fpugetregs(td);
-			savefpu = (char *)get_pcb_user_save_td(td);
-
-			/*
-			 * The thread should not use the FPU again since
-			 * it is dumping core, so it is ok to modify the
-			 * saved state in the PCB in-place.
-			 */
-			*(uint64_t *)(savefpu + X86_XSTATE_XCR0_OFFSET) =
+			len += elf64_populate_note(NT_X86_XSTATE,
+			    get_pcb_user_save_td(td), dst,
+			    cpu_max_ext_state_size, &buf);
+			*(uint64_t *)(buf + X86_XSTATE_XCR0_OFFSET) =
 			    xsave_mask;
-			len += elf64_populate_note(NT_X86_XSTATE, savefpu,
-			    buf, cpu_max_ext_state_size);
-			buf += len;
 		} else
 			len += elf64_populate_note(NT_X86_XSTATE, NULL, NULL,
-			    cpu_max_ext_state_size);
+			    cpu_max_ext_state_size, NULL);
 	}
 	*off = len;
 }

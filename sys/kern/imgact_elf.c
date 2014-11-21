@@ -1624,6 +1624,8 @@ __elfN(populate_note)(int type, void *src, void *dst, size_t size, void **descp)
 		buf += append_note_data(FREEBSD_ABI_VENDOR, buf,
 		    sizeof(FREEBSD_ABI_VENDOR));
 		append_note_data(src, buf, size);
+		if (descp != NULL)
+			*descp = buf;
 	}
 
 	notesize = sizeof(Elf_Note) +		/* note header */
