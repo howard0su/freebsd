@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD$");
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -627,23 +628,24 @@ elf_note_x86_xstate(void *arg, size_t *sizep)
 {
 	lwpid_t tid;
 	char *xstate;
-	static int xstate_len = -1;
-	static uint64_t xcr0;
+	static bool xsave_checked = false;
+	static struct ptrace_xstate_info info;
 
 	tid = *(lwpid_t *)arg;
-	if (xstate_len == -1) {
-		xstate_len = ptrace(PT_GETXSTATE_INFO, tid, (void *)&xcr0, 0);
-		if (xstate_len == -1)
-			xstate_len = 0;
+	if (!xsave_checked) {
+		if (ptrace(PT_GETXSTATE_INFO, tid, (void *)&info,
+		    sizeof(info)) != 0)
+			info.xsave_len = 0;
+		xsave_checked = true;
 	}
-	if (xstate_len == 0) {
+	if (info.xsave_len == 0) {
 		*sizep = 0;
 		return (NULL);
 	}
-	xstate = calloc(1, xstate_len);
+	xstate = calloc(1, info.xsave_len);
 	ptrace(PT_GETXSTATE, tid, xstate, 0);
-	*(uint64_t *)(xstate + X86_XSTATE_XCR0_OFFSET) = xcr0;
-	*sizep = xstate_len;
+	*(uint64_t *)(xstate + X86_XSTATE_XCR0_OFFSET) = info.xsave_mask;
+	*sizep = info.xsave_len;
 	return (xstate);
 }
 #endif
