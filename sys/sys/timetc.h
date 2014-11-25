@@ -58,7 +58,7 @@ struct timecounter {
 		 * means "only use at explicit request".
 		 */
 	u_int			tc_flags;
-#define	TC_FLAGS_CxSTOP		1	/* Timer dies in C-states. */
+#define	TC_FLAGS_C2STOP		1	/* Timer dies in C2+. */
 #define	TC_FLAGS_SUSPEND_SAFE	2	/*
 					 * Timer functional across
 					 * suspend/resume.

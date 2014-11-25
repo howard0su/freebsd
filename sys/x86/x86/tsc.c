@@ -583,14 +583,12 @@ init_TSC_tc(void)
 	/*
 	 * We cannot use the TSC if it stops incrementing while idle.
 	 * Intel CPUs without a C-state invariant TSC can stop the TSC
-	 * in C1 if C1E is enabled in the BIOS.  There is no way to
-	 * detect if C1E is enabled on these CPUs, so disable the TSC
-	 * to be safe.
+	 * in either C2 or C3.
 	 */
-	if (cpu_vendor_id == CPU_VENDOR_INTEL &&
+	if (cpu_deepest_sleep >= 2 && cpu_vendor_id == CPU_VENDOR_INTEL &&
 	    (amd_pminfo & AMDPM_TSC_INVARIANT) == 0) {
 		tsc_timecounter.tc_quality = -1000;
-		tsc_timecounter.tc_flags |= TC_FLAGS_CxSTOP;
+		tsc_timecounter.tc_flags |= TC_FLAGS_C2STOP;
 		if (bootverbose)
 			printf("TSC timecounter disabled: C-states may halt it.\n");
 		goto init;

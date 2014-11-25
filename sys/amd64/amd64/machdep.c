@@ -824,13 +824,6 @@ cpu_idle(int busy)
 #ifdef MP_WATCHDOG
 	ap_watchdog(PCPU_GET(cpuid));
 #endif
-	/*
-	 * Don't sleep at all on Intel CPUs without a C-state invariant TSC
-	 * if the TSC is being used as a timecounter.
-	 */
-	if (cpu_vendor_id == CPU_VENDOR_INTEL && cpu_disable_deep_sleep)
-		goto out;
-
 	/* If we are busy - try to use fast methods. */
 	if (busy) {
 		if ((cpu_feature2 & CPUID2_MON) && idle_mwait) {
@@ -846,7 +839,7 @@ cpu_idle(int busy)
 	}
 
 	/* Apply AMD APIC timer C1E workaround. */
-	if (cpu_ident_amdc1e && cpu_disable_deep_sleep) {
+	if (cpu_ident_amdc1e && cpu_disable_c3_sleep) {
 		msr = rdmsr(MSR_AMDK8_IPM);
 		if (msr & AMDK8_CMPHALT)
 			wrmsr(MSR_AMDK8_IPM, msr & ~AMDK8_CMPHALT);
