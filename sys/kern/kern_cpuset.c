@@ -56,6 +56,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/interrupt.h>
 
 #include <vm/uma.h>
+#include <vm/vm.h>
+#include <vm/vm_page.h>
+#include <vm/vm_param.h>
+#include <vm/vm_phys.h>
 
 #ifdef DDB
 #include <ddb/ddb.h>
@@ -858,7 +862,7 @@ cpuset_thread0(void)
 	 */
 	cpuset_unr = new_unrhdr(2, INT_MAX, NULL);
 
-	/* MD Code is responsible for initializing sets if vm_ndomain > 1. */
+	/* MD Code is responsible for initializing sets if vm_ndomains > 1. */
 	if (vm_ndomains == 1)
 		CPU_COPY(&all_cpus, &cpuset_domain[0]);
 
