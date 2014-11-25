@@ -812,9 +812,8 @@ acpi_cpu_cx_cst(struct acpi_cpu_softc *sc)
 				 "acpi_cpu%d: C3[%d] not available.\n",
 				 device_get_unit(sc->cpu_dev), i));
 		continue;
-	    } else {
+	    } else
 		cpu_deepest_sleep = 3;
-	    }
 	    break;
 	}
 
