@@ -163,7 +163,7 @@ printset(cpuset_t *mask)
 }
 
 static const char *whichnames[] = { NULL, "tid", "pid", "cpuset", "irq", "jail",
-    "domain" };
+				    "domain" };
 static const char *levelnames[] = { NULL, " root", " cpuset", "" };
 
 static void
