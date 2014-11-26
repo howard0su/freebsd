@@ -462,6 +462,7 @@ cpuset_which(cpuwhich_t which, id_t id, struct proc **pp, struct thread **tdp,
 		return (0);
 	}
 	case CPU_WHICH_IRQ:
+	case CPU_WHICH_DOMAIN:
 		return (0);
 	default:
 		return (EINVAL);
@@ -1200,6 +1201,7 @@ sys_cpuset_setaffinity(struct thread *td, struct cpuset_setaffinity_args *uap)
 		case CPU_WHICH_JAIL:
 			break;
 		case CPU_WHICH_IRQ:
+		case CPU_WHICH_DOMAIN:
 			error = EINVAL;
 			goto out;
 		}
