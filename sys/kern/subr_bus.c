@@ -49,6 +49,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/rman.h>
 #include <sys/selinfo.h>
 #include <sys/signalvar.h>
+#include <sys/smp.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
@@ -4622,6 +4623,20 @@ root_child_present(device_t dev, device_t child)
 	return (-1);
 }
 
+static int
+root_get_cpus(device_t dev, device_t child, enum cpu_sets op, cpuset_t *cpuset)
+{
+
+	switch (op) {
+	case INTR_CPUS:
+		/* Default to returning the set of all CPUs. */
+		*cpuset = all_cpus;
+		return (0);
+	default:
+		return (EINVAL);
+	}
+}
+
 static kobj_method_t root_methods[] = {
 	/* Device interface */
 	KOBJMETHOD(device_shutdown,	bus_generic_shutdown),
@@ -4634,6 +4649,7 @@ static kobj_method_t root_methods[] = {
 	KOBJMETHOD(bus_write_ivar,	bus_generic_write_ivar),
 	KOBJMETHOD(bus_setup_intr,	root_setup_intr),
 	KOBJMETHOD(bus_child_present,	root_child_present),
+	KOBJMETHOD(bus_get_cpus,	root_get_cpus),
 
 	KOBJMETHOD_END
 };

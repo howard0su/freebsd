@@ -617,13 +617,11 @@ nexus_get_cpus(device_t dev, device_t child, enum cpu_sets op, cpuset_t *cpuset)
 {
 
 	switch (op) {
-	case INTR_CPUS:
 #ifdef SMP
+	case INTR_CPUS:
 		*cpuset = intr_cpus;
-#else
-		*cpuset = all_cpus;
-#endif
 		return (0);
+#endif
 	default:
 		return (bus_generic_get_cpus(dev, child, op, cpuset));
 	}
