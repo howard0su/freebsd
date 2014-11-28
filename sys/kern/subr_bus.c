@@ -4048,6 +4048,23 @@ bus_generic_describe_intr(device_t dev, device_t child, struct resource *irq,
 }
 
 /**
+ * @brief Helper function for implementing BUS_GET_CPUS().
+ *
+ * This simple implementation of BUS_GET_CPUS() simply calls the
+ * BUS_GET_CPUS() method of the parent of @p dev.
+ */
+int
+bus_generic_get_cpus(device_t dev, device_t child, enum cpu_sets op,
+    cpuset_t *cpuset)
+{
+
+	/* Propagate up the bus hierarchy until someone handles it. */
+	if (dev->parent != NULL)
+		return (BUS_GET_CPUS(dev->parent, child, op, cpuset));
+	return (EINVAL);
+}
+
+/**
  * @brief Helper function for implementing BUS_GET_DMA_TAG().
  *
  * This simple implementation of BUS_GET_DMA_TAG() simply calls the
@@ -4523,6 +4540,23 @@ bus_child_location_str(device_t child, char *buf, size_t buflen)
 		return (0);
 	}
 	return (BUS_CHILD_LOCATION_STR(parent, child, buf, buflen));
+}
+
+/**
+ * @brief Wrapper function for BUS_GET_CPUS().
+ *
+ * This function simply calls the BUS_GET_CPUS() method of the
+ * parent of @p dev.
+ */
+int
+bus_get_cpus(device_t dev, enum cpu_sets op, cpuset_t *cpuset)
+{
+	device_t parent;
+
+	parent = device_get_parent(dev);
+	if (parent == NULL)
+		return (EINVAL);
+	return (BUS_GET_CPUS(parent, dev, op, cpuset));
 }
 
 /**
