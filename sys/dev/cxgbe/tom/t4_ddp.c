@@ -220,6 +220,8 @@ insert_ddp_data(struct toepcb *toep, uint32_t n)
 
 	INP_WLOCK_ASSERT(inp);
 	SOCKBUF_LOCK_ASSERT(sb);
+	KASSERT(!(toep->ddp_flags & DDP_STATIC_BUF),
+	    ("%s: static DDP not handled", __func__));
 
 	m = get_ddp_mbuf(n);
 	tp->rcv_nxt += n;
@@ -413,6 +415,29 @@ discourage_ddp(struct toepcb *toep)
 	}
 }
 
+static void
+static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
+{
+#ifdef INVARIANTS
+	size_t cc;
+	int i;
+
+	cc = 0;
+	for (i = 0; i < nitems(toep->db); i++)
+		if (toep->db_static_data[i] > 0)
+			cc += toep->db_static_data[i];
+	KASSERT(toep->db_first_data == -1 ||
+	    toep->db_static_data[toep->db_first_data] > 0,
+	    ("static DDP socket buffer has no data in first %d",
+	    toep->db_first_data));
+	KASSERT((cc == 0) == (toep->db_first_data == -1),
+	    ("static DDP socket buffer has data mismatch (cc %zu first %d)", cc,
+	    toep->db_first_data));
+	KASSERT(cc == sb->sb_cc,
+	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc, sb->sb_cc));
+#endif
+}
+
 static int
 handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 {
@@ -465,6 +490,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
 		int db_idx;
 
+		SOCKBUF_LOCK(sb);
 		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
 		if (toep->db_first_data == -1)
 			toep->db_first_data = db_idx;
@@ -473,7 +499,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		toep->db_static_data[db_idx] = len;
 
 		/* XXX: Too much duplication. */
-		SOCKBUF_LOCK(sb);
 		KASSERT(toep->sb_cc >= sb->sb_cc,
 		    ("%s: sb %p has more data (%d) than last time (%d).",
 		    __func__, sb, sb->sb_cc, toep->sb_cc));
@@ -482,6 +507,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
 #endif
 		sb->sb_cc += len;
+		static_ddp_sbcheck(toep, sb);
 		toep->sb_cc = sb->sb_cc;
 		goto wakeup;
 	}
@@ -1144,9 +1170,9 @@ t4_soreceive_ddp(struct socket *so, struct sockaddr **psa, struct uio *uio,
 
 	/* Prevent other readers from entering the socket. */
 	error = sblock(sb, SBLOCKWAIT(flags));
+	SOCKBUF_LOCK(sb);
 	if (error)
 		goto out;
-	SOCKBUF_LOCK(sb);
 
 	/* If a static buffer is active, fail attempts to use read/recv. */
 	if (sb->sb_flags & SB_FIXEDSIZE) {
@@ -1455,7 +1481,8 @@ queue_static_ddp(struct socket *so, struct toepcb *toep, int db_idx)
 	 * XXX: flags of 0 here isn't really ideal.  What we kind of
 	 * want is to use MSG_WAITALL by default I think, but have a
 	 * way to see how much data is pending and flip buffers for a
-	 * non-blocking "read" if there is a partial buffer
+	 * non-blocking "read" if there is a partial buffer of more than
+	 * the low water mark.
 	 */
 	ddp_flags = select_ddp_flags(so, 0, db_idx);
 
@@ -1473,12 +1500,103 @@ queue_static_ddp(struct socket *so, struct toepcb *toep, int db_idx)
 	return (0);
 }
 
+static int
+read_static_data(struct socket *so, struct toepcb *toep,
+    struct tcp_ddp_read *tdr)
+{
+	struct sockbuf *sb;
+	int error, i;
+
+	sb = &so->so_rcv;
+
+	/* Prevent other readers from entering the socket. */
+	error = sblock(sb, SBLOCKWAIT(0));
+	SOCKBUF_LOCK(sb);
+	if (error)
+		goto out;
+
+	/*
+	 * Assume any buffers previously returned to userland can now
+	 * be re-used.
+	 */
+	for (i = 0; i < nitems(toep->db); i++)
+		if (toep->db_static_data[i] == -1) {
+			queue_static_ddp(so, toep, i);
+			toep->db_static_data[i] = 0;
+		}
+
+	/* We will never ever get anything unless we are or were connected. */
+	if (!(so->so_state & (SS_ISCONNECTED|SS_ISDISCONNECTED))) {
+		error = ENOTCONN;
+		goto out;
+	}
+
+restart:
+	/* Abort if socket has reported problems. */
+	if (so->so_error != 0) {
+		if (sb->sb_cc > 0)
+			goto deliver;
+		error = so->so_error;
+		so->so_error = 0;
+		goto out;
+	}
+
+	/* Door is closed.  Deliver what is left, if any. */
+	if (sb->sb_state & SBS_CANTRCVMORE) {
+		if (sb->sb_cc > 0)
+			goto deliver;
+		else {
+			tdr->offset = 0;
+			tdr->length = 0;
+			goto out;
+		}
+	}
+
+	/* Socket buffer is empty and we shall not block. */
+	if (sb->sb_cc == 0 && (so->so_state & SS_NBIO)) {
+		error = EAGAIN;
+		goto out;
+	}
+
+	/*
+	 * Wait and block until data comes in.
+	 * NB: Drops the sockbuf lock during wait.
+	 */
+	error = sbwait(sb);
+	if (error)
+		goto out;
+	goto restart;
+
+deliver:
+	SOCKBUF_LOCK_ASSERT(&so->so_rcv);
+	KASSERT(sb->sb_cc > 0, ("%s: sockbuf empty", __func__));
+	KASSERT(toep->db_first_data == 0 || toep->db_first_data == 1,
+	    ("%s: db_first_data wrong (%d)", __func__, toep->db_first_data));
+
+	tdr->offset = toep->db_first_data * toep->db_static_size;
+	tdr->length = toep->db_static_data[toep->db_first_data];
+	toep->db_static_data[toep->db_first_data] = -1;
+	sb->sb_cc -= tdr->length;
+
+	toep->db_first_data ^= 1;
+	if (toep->db_static_data[toep->db_first_data] <= 0)
+		toep->db_first_data = -1;
+
+out:
+	SOCKBUF_LOCK_ASSERT(sb);
+	static_ddp_sbcheck(toep, sb);
+	SOCKBUF_UNLOCK(sb);
+	sbunlock(sb);
+	return (error);
+}
+
 int
 t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 {
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	struct toepcb *toep;
+	struct tcp_ddp_read tdr;
 	struct ddp_static_buf dsb;
 	vm_offset_t vaddr;
 	vm_object_t obj;
@@ -1511,6 +1629,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	switch (sopt->sopt_name) {
 	case TCP_DDP_STATIC:
 	case TCP_DDP_MAP:
+	case TCP_DDP_READ:
 		break;
 	default:
 		return (tcp_ctloutput(so, sopt));
@@ -1531,8 +1650,8 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 		case TCP_DDP_STATIC:
 			old = (toep->ddp_flags & DDP_STATIC_BUF) != 0;
 			INP_WUNLOCK(inp);
-			error = sooptcopyin(sopt, &optval, sizeof optval,
-			    sizeof optval);
+			error = sooptcopyin(sopt, &optval, sizeof(optval),
+			    sizeof(optval));
 			if (error)
 				return (error);
 			if ((optval != 0) == old)
@@ -1604,18 +1723,19 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				goto retry;
 			}
 			so->so_rcv.sb_flags |= SB_FIXEDSIZE;
-			SOCKBUF_UNLOCK(&so->so_rcv);
 			toep->ddp_flags |= DDP_STATIC_BUF;
 			toep->db_static = dsb.obj;
+			toep->db_static_size = size;
 			toep->db_first_data = -1;
 			for (i = 0; i < nitems(toep->db); i++) {
 				toep->db[i] = dsb.db[i];
 				queue_static_ddp(so, toep, i);
 			}
+			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
 			error = 0;
 			break;
-		case TCP_DDP_MAP:
+		default:
 			INP_WUNLOCK(inp);
 			error = EINVAL;
 			break;
@@ -1625,7 +1745,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 		case TCP_DDP_STATIC:
 			optval = (toep->ddp_flags & DDP_STATIC_BUF) != 0;
 			INP_WUNLOCK(inp);
-			error = sooptcopyout(sopt, &optval, sizeof optval);
+			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;
 		case TCP_DDP_MAP:
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
@@ -1641,7 +1761,18 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			error = map_object(obj, &vaddr);
 			if (error == 0)
 				error = sooptcopyout(sopt, &vaddr,
-				    sizeof vaddr);
+				    sizeof(vaddr));
+			break;
+		case TCP_DDP_READ:
+			if (!(toep->ddp_flags & DDP_STATIC_BUF)) {
+				INP_WUNLOCK(inp);
+				error = EINVAL;
+				break;
+			}
+			INP_WUNLOCK(inp);
+			error = read_static_data(so, toep, &tdr);
+			if (error == 0)
+				error = sooptcopyout(sopt, &tdr, sizeof(tdr));
 			break;
 		}
 	}

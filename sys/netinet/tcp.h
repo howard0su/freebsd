@@ -170,8 +170,14 @@ struct tcphdr {
 #define	TCP_VENDOR	SO_VENDOR
 
 /* XXX: Temporary values or location */
+struct tcp_ddp_read {
+	size_t offset;
+	size_t length;
+};
+
 #define	TCP_DDP_STATIC	TCP_VENDOR /* Use static buffers for DDP */
 #define	TCP_DDP_MAP	(TCP_VENDOR + 1)
+#define	TCP_DDP_READ	(TCP_VENDOR + 2)
 
 #define	TCP_CA_NAME_MAX	16	/* max congestion control name length */
 

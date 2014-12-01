@@ -131,9 +131,9 @@ struct toepcb {
 	time_t ddp_disabled;
 	uint8_t ddp_score;
 	struct vm_object *db_static; /* split into two equal-sized buffers */
-	int db_static_index;
+	vm_size_t db_static_size;
 	int db_first_data;	/* If both have data, which is first */
-	u_int db_static_data[2]; /* valid data at start of each buffer */
+	int db_static_data[2];	/* 0 when queued, > 0 for pending data, -1 while userland reads */
 
 	/* Tx software descriptor */
 	uint8_t txsd_total;
