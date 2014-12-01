@@ -132,6 +132,8 @@ struct toepcb {
 	uint8_t ddp_score;
 	struct vm_object *db_static; /* split into two equal-sized buffers */
 	int db_static_index;
+	int db_first_data;	/* If both have data, which is first */
+	u_int db_static_data[2]; /* valid data at start of each buffer */
 
 	/* Tx software descriptor */
 	uint8_t txsd_total;

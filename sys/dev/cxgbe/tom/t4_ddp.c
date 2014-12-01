@@ -448,6 +448,13 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	}
 
 	tp = intotcpcb(inp);
+
+	/*
+	 * XXX: jhb: I don't understand this part.  Does this have to do
+	 * with data buffered in the card's RAM?  I want to know how much
+	 * of the current buffer was used which I think is the passed-in
+	 * length?
+	 */
 	len += be32toh(rcv_nxt) - tp->rcv_nxt;
 	tp->rcv_nxt += len;
 	tp->t_rcvtime = ticks;
@@ -455,6 +462,29 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	KASSERT(tp->rcv_wnd >= len, ("%s: negative window size", __func__));
 	tp->rcv_wnd -= len;
 #endif
+	if (toep->ddp_flags & DDP_STATIC_BUF) {
+		int db_idx;
+
+		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
+		if (toep->db_first_data == -1)
+			toep->db_first_data = db_idx;
+		KASSERT(toep->db_static_data[db_idx] == 0,
+		    ("%s: static buffer %d has pending data", __func__, db_idx));
+		toep->db_static_data[db_idx] = len;
+
+		/* XXX: Too much duplication. */
+		SOCKBUF_LOCK(sb);
+		KASSERT(toep->sb_cc >= sb->sb_cc,
+		    ("%s: sb %p has more data (%d) than last time (%d).",
+		    __func__, sb, sb->sb_cc, toep->sb_cc));
+		toep->rx_credits += toep->sb_cc - sb->sb_cc;
+#ifdef USE_DDP_RX_FLOW_CONTROL
+		toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
+#endif
+		sb->sb_cc += len;
+		toep->sb_cc = sb->sb_cc;
+		goto wakeup;
+	}
 	m = get_ddp_mbuf(len);
 
 	SOCKBUF_LOCK(sb);
@@ -1407,15 +1437,14 @@ map_object(vm_object_t obj, vm_offset_t *vaddr)
 }
 
 static int
-setup_static_ddp(struct socket *so, struct toepcb *toep)
+queue_static_ddp(struct socket *so, struct toepcb *toep, int db_idx)
 {
 	struct adapter *sc = td_adapter(toep->td);
 	struct ddp_buffer *db;
-	int buf_flag, db_idx;
+	int buf_flag;
 	struct wrqe *wr;
 	uint64_t ddp_flags;
 
-	db_idx = toep->db_static_index;
 	db = toep->db[db_idx];
 	buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
 
@@ -1578,11 +1607,11 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			toep->ddp_flags |= DDP_STATIC_BUF;
 			toep->db_static = dsb.obj;
-			toep->db_static_index = 0;
-			for (i = 0; i < nitems(toep->db); i++)
+			toep->db_first_data = -1;
+			for (i = 0; i < nitems(toep->db); i++) {
 				toep->db[i] = dsb.db[i];
-
-			setup_static_ddp(so, toep);
+				queue_static_ddp(so, toep, i);
+			}
 			INP_WUNLOCK(inp);
 			error = 0;
 			break;
