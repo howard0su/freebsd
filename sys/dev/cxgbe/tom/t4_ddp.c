@@ -1359,21 +1359,6 @@ out:
 	return (error);
 }
 
-/*
- * tcp_ctloutput() must drop the inpcb lock before performing copyin on
- * socket option arguments.  When it re-acquires the lock after the copy, it
- * has to revalidate that the connection is still valid for the socket
- * option.
- */
-#define INP_WLOCK_RECHECK(inp) do {					\
-	INP_WLOCK(inp);							\
-	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {		\
-		INP_WUNLOCK(inp);					\
-		return (ECONNRESET);					\
-	}								\
-	tp = intotcpcb(inp);						\
-} while(0)
-
 struct ddp_static_buf {
 	vm_object_t obj;
 	/* XXX: This should use nitems(toep->db) or similar */
