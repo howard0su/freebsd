@@ -387,6 +387,9 @@ struct adapter {
 	int			msix;
 	int			if_flags;
 	int			pause_frames;
+#if 1
+	cpuset_t		cpus;
+#endif
 
 	struct mtx		core_mtx;
 
