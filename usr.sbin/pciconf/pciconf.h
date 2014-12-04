@@ -35,6 +35,7 @@
 
 void	list_caps(int fd, struct pci_conf *p);
 void	list_errors(int fd, struct pci_conf *p);
+void	list_slot(struct pci_conf *p);
 uint8_t	pci_find_cap(int fd, struct pci_conf *p, uint8_t id);
 uint16_t pcie_find_cap(int fd, struct pci_conf *p, uint16_t id);
 uint32_t read_config(int fd, struct pcisel *sel, long reg, int width);

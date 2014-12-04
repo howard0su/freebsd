@@ -33,7 +33,7 @@
 .Nd diagnostic utility for the PCI bus
 .Sh SYNOPSIS
 .Nm
-.Fl l Oo Fl bcevV Oc Op Ar device
+.Fl l Oo Fl bcesvV Oc Op Ar device
 .Nm
 .Fl a Ar device
 .Nm
@@ -174,6 +174,16 @@ will list any errors reported for this device in standard PCI error registers.
 Errors are checked for in the PCI status register,
 the PCI-express device status register,
 and the Advanced Error Reporting status registers.
+.Pp
+If the
+.Fl s
+option is supplied,
+.Nm
+will list the physical slot a device is using.
+If a device is embedded into the mainboard or
+.Nm
+is unable to determine the physical slot used by a device,
+nothing is output.
 .Pp
 If the
 .Fl v

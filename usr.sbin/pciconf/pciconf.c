@@ -71,7 +71,7 @@ TAILQ_HEAD(,pci_vendor_info)	pci_vendors;
 static struct pcisel getsel(const char *str);
 static void list_bars(int fd, struct pci_conf *p);
 static void list_devs(const char *name, int verbose, int bars, int caps,
-    int errors, int vpd);
+    int errors, int vpd, int slots);
 static void list_verbose(struct pci_conf *p);
 static void list_vpd(int fd, struct pci_conf *p);
 static const char *guess_class(struct pci_conf *p);
@@ -87,7 +87,7 @@ static void
 usage(void)
 {
 	fprintf(stderr, "%s\n%s\n%s\n%s\n",
-		"usage: pciconf -l [-bcevV] [device]",
+		"usage: pciconf -l [-bcesvV] [device]",
 		"       pciconf -a device",
 		"       pciconf -r [-b | -h] device addr[:addr2]",
 		"       pciconf -w [-b | -h] device addr value");
@@ -99,13 +99,13 @@ main(int argc, char **argv)
 {
 	int c;
 	int listmode, readmode, writemode, attachedmode;
-	int bars, caps, errors, verbose, vpd;
+	int bars, caps, errors, slots, verbose, vpd;
 	int byte, isshort;
 
 	listmode = readmode = writemode = attachedmode = 0;
-	bars = caps = errors = verbose = vpd = byte = isshort = 0;
+	bars = caps = errors = slots = verbose = vpd = byte = isshort = 0;
 
-	while ((c = getopt(argc, argv, "abcehlrwvV")) != -1) {
+	while ((c = getopt(argc, argv, "abcehlrswvV")) != -1) {
 		switch(c) {
 		case 'a':
 			attachedmode = 1;
@@ -136,6 +136,10 @@ main(int argc, char **argv)
 			readmode = 1;
 			break;
 
+		case 's':
+			slots = 1;
+			break;
+
 		case 'w':
 			writemode = 1;
 			break;
@@ -161,7 +165,7 @@ main(int argc, char **argv)
 
 	if (listmode) {
 		list_devs(optind + 1 == argc ? argv[optind] : NULL, verbose,
-		    bars, caps, errors, vpd);
+		    bars, caps, errors, vpd, slots);
 	} else if (attachedmode) {
 		chkattached(argv[optind]);
 	} else if (readmode) {
@@ -179,7 +183,7 @@ main(int argc, char **argv)
 
 static void
 list_devs(const char *name, int verbose, int bars, int caps, int errors,
-    int vpd)
+    int vpd, int slots)
 {
 	int fd;
 	struct pci_conf_io pc;
@@ -246,6 +250,8 @@ list_devs(const char *name, int verbose, int bars, int caps, int errors,
 			    p->pc_revid, p->pc_hdr);
 			if (verbose)
 				list_verbose(p);
+			if (slots)
+				list_slot(p);
 			if (bars)
 				list_bars(fd, p);
 			if (caps)

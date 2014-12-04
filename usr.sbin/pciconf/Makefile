@@ -2,7 +2,7 @@
 # $FreeBSD$
 
 PROG=	pciconf
-SRCS=	pciconf.c cap.c err.c
+SRCS=	pciconf.c cap.c err.c slot.c
 MAN=	pciconf.8
 
 WARNS?=	3
