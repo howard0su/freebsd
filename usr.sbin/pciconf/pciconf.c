@@ -80,9 +80,7 @@ static const char *guess_subclass(struct pci_conf *p);
 static int load_vendors(void);
 static void readit(const char *, const char *, int);
 static void writeit(const char *, const char *, const char *, int);
-static void chkattached(const char *);
-
-static int exitstatus = 0;
+static int chkattached(const char *);
 
 static void
 usage(void)
@@ -100,22 +98,29 @@ int
 main(int argc, char **argv)
 {
 	int c;
-	int listmode, readmode, writemode, attachedmode, slotmode;
+	enum { NONE, LIST, READ, WRITE, ATTACHED, SLOT } mode;
 	int bars, caps, errors, slots, verbose, vpd;
-	int byte, isshort;
+	int width;
 
-	listmode = readmode = writemode = attachedmode = slotmode = 0;
-	bars = caps = errors = slots = verbose = vpd = byte = isshort = 0;
+	mode = NONE;
+	width = 4;
+	bars = caps = errors = slots = verbose = vpd = 0;
+
+#define	SET_MODE(m) do {						\
+	if (mode != NONE)						\
+		usage();						\
+	mode = (m);							\
+} while (0)
 
 	while ((c = getopt(argc, argv, "abcehlrsSwvV")) != -1) {
 		switch(c) {
 		case 'a':
-			attachedmode = 1;
+			SET_MODE(ATTACHED);
 			break;
 
 		case 'b':
 			bars = 1;
-			byte = 1;
+			width = 1;
 			break;
 
 		case 'c':
@@ -127,15 +132,15 @@ main(int argc, char **argv)
 			break;
 
 		case 'h':
-			isshort = 1;
+			width = 2;
 			break;
 
 		case 'l':
-			listmode = 1;
+			SET_MODE(LIST);
 			break;
 
 		case 'r':
-			readmode = 1;
+			SET_MODE(READ);
 			break;
 
 		case 's':
@@ -143,11 +148,11 @@ main(int argc, char **argv)
 			break;
 
 		case 'S':
-			slotmode = 1;
+			SET_MODE(SLOT);
 			break;
 
 		case 'w':
-			writemode = 1;
+			SET_MODE(WRITE);
 			break;
 
 		case 'v':
@@ -162,32 +167,40 @@ main(int argc, char **argv)
 			usage();
 		}
 	}
+	argc -= optind;
+	argv += optind;
 
-	if ((listmode && optind >= argc + 1)
-	    || (slotmode && optind != argc)
-	    || (writemode && optind + 3 != argc)
-	    || (readmode && optind + 2 != argc)
-	    || (attachedmode && optind + 1 != argc))
-		usage();
-
-	if (listmode) {
-		list_devs(optind + 1 == argc ? argv[optind] : NULL, verbose,
+	switch (mode) {
+	case LIST:
+		if (argc > 1)
+			usage();
+		list_devs(argc == 1 ? argv[0] : NULL, verbose,
 		    bars, caps, errors, vpd, slots);
-	} else if (attachedmode) {
-		chkattached(argv[optind]);
-	} else if (readmode) {
-		readit(argv[optind], argv[optind + 1],
-		    byte ? 1 : isshort ? 2 : 4);
-	} else if (writemode) {
-		writeit(argv[optind], argv[optind + 1], argv[optind + 2],
-		    byte ? 1 : isshort ? 2 : 4);
-	} else if (slotmode) {
+		break;
+	case ATTACHED:
+		if (argc != 1)
+			usage();
+		return (chkattached(argv[0]));
+	case READ:
+		if (argc != 2)
+			usage();
+		readit(argv[0], argv[1], width);
+		break;
+	case WRITE:
+		if (argc != 3)
+			usage();
+		writeit(argv[0], argv[1], argv[2], width);
+		break;
+	case SLOT:
+		if (optind != argc)
+			usage();
 		list_slots();
-	} else {
+		break;
+	default:
 		usage();
 	}
 
-	return exitstatus;
+	return (0);
 }
 
 static void
@@ -233,17 +246,10 @@ list_devs(const char *name, int verbose, int bars, int caps, int errors,
 		 * beginning of the list, and print things twice, which may
 		 * not be desirable.
 		 */
-		if (pc.status == PCI_GETCONF_LIST_CHANGED) {
-			warnx("PCI device list changed, please try again");
-			exitstatus = 1;
-			close(fd);
-			return;
-		} else if (pc.status ==  PCI_GETCONF_ERROR) {
-			warnx("error returned from PCIOCGETCONF ioctl");
-			exitstatus = 1;
-			close(fd);
-			return;
-		}
+		if (pc.status == PCI_GETCONF_LIST_CHANGED)
+			errx(1, "PCI device list changed, please try again");
+		else if (pc.status ==  PCI_GETCONF_ERROR)
+			errx(1, "error returned from PCIOCGETCONF ioctl");
 		for (p = conf; p < &conf[pc.num_matches]; p++) {
 			printf("%s%d@pci%d:%d:%d:%d:\tclass=0x%06x card=0x%08x "
 			    "chip=0x%08x rev=0x%02x hdr=0x%02x\n",
@@ -820,7 +826,7 @@ writeit(const char *name, const char *reg, const char *data, int width)
 		err(1, "ioctl(PCIOCWRITE)");
 }
 
-static void
+static int
 chkattached(const char *name)
 {
 	int fd;
@@ -835,6 +841,8 @@ chkattached(const char *name)
 	if (ioctl(fd, PCIOCATTACHED, &pi) < 0)
 		err(1, "ioctl(PCIOCATTACHED)");
 
-	exitstatus = pi.pi_data ? 0 : 2; /* exit(2), if NOT attached */
 	printf("%s: %s%s\n", name, pi.pi_data == 0 ? "not " : "", "attached");
+	if (pi.pi_data == 0)
+		return (2);
+	return (0);
 }
