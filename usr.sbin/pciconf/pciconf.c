@@ -39,6 +39,7 @@ static const char rcsid[] =
 #include <ctype.h>
 #include <err.h>
 #include <inttypes.h>
+#include <libutil.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -88,6 +89,7 @@ usage(void)
 {
 	fprintf(stderr, "%s\n%s\n%s\n%s\n",
 		"usage: pciconf -l [-bcesvV] [device]",
+		"       pciconf -S",
 		"       pciconf -a device",
 		"       pciconf -r [-b | -h] device addr[:addr2]",
 		"       pciconf -w [-b | -h] device addr value");
@@ -98,14 +100,14 @@ int
 main(int argc, char **argv)
 {
 	int c;
-	int listmode, readmode, writemode, attachedmode;
+	int listmode, readmode, writemode, attachedmode, slotmode;
 	int bars, caps, errors, slots, verbose, vpd;
 	int byte, isshort;
 
-	listmode = readmode = writemode = attachedmode = 0;
+	listmode = readmode = writemode = attachedmode = slotmode = 0;
 	bars = caps = errors = slots = verbose = vpd = byte = isshort = 0;
 
-	while ((c = getopt(argc, argv, "abcehlrswvV")) != -1) {
+	while ((c = getopt(argc, argv, "abcehlrsSwvV")) != -1) {
 		switch(c) {
 		case 'a':
 			attachedmode = 1;
@@ -140,6 +142,10 @@ main(int argc, char **argv)
 			slots = 1;
 			break;
 
+		case 'S':
+			slotmode = 1;
+			break;
+
 		case 'w':
 			writemode = 1;
 			break;
@@ -158,6 +164,7 @@ main(int argc, char **argv)
 	}
 
 	if ((listmode && optind >= argc + 1)
+	    || (slotmode && optind != argc)
 	    || (writemode && optind + 3 != argc)
 	    || (readmode && optind + 2 != argc)
 	    || (attachedmode && optind + 1 != argc))
@@ -174,6 +181,8 @@ main(int argc, char **argv)
 	} else if (writemode) {
 		writeit(argv[optind], argv[optind + 1], argv[optind + 2],
 		    byte ? 1 : isshort ? 2 : 4);
+	} else if (slotmode) {
+		list_slots();
 	} else {
 		usage();
 	}
@@ -271,6 +280,7 @@ list_bars(int fd, struct pci_conf *p)
 {
 	struct pci_bar_io bar;
 	uint64_t base;
+	char buf[5];
 	const char *type;
 	int i, range, max;
 
@@ -317,9 +327,11 @@ list_bars(int fd, struct pci_conf *p)
 			}
 			base = bar.pbi_base & ~((uint64_t)0xf);
 		}
+		humanize_number(buf, sizeof(buf), bar.pbi_length, "",
+		    HN_AUTOSCALE, HN_NOSPACE);
 		printf("    bar   [%02x] = type %s, range %2d, base %#jx, ",
 		    PCIR_BAR(i), type, range, (uintmax_t)base);
-		printf("size %ju, %s\n", (uintmax_t)bar.pbi_length,
+		printf("size %s, %s\n", buf,
 		    bar.pbi_enabled ? "enabled" : "disabled");
 	}
 }
