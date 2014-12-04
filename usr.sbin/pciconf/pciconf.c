@@ -81,6 +81,7 @@ static int load_vendors(void);
 static void readit(const char *, const char *, int);
 static void writeit(const char *, const char *, const char *, int);
 static int chkattached(const char *);
+static void clearerrs(const char *);
 
 static void
 usage(void)
@@ -89,6 +90,7 @@ usage(void)
 		"usage: pciconf -l [-bcesvV] [device]",
 		"       pciconf -S",
 		"       pciconf -a device",
+		"       pciconf -C device",
 		"       pciconf -r [-b | -h] device addr[:addr2]",
 		"       pciconf -w [-b | -h] device addr value");
 	exit (1);
@@ -98,7 +100,7 @@ int
 main(int argc, char **argv)
 {
 	int c;
-	enum { NONE, LIST, READ, WRITE, ATTACHED, SLOT } mode;
+	enum { NONE, LIST, READ, WRITE, ATTACHED, SLOT, CLEAR } mode;
 	int bars, caps, errors, slots, verbose, vpd;
 	int width;
 
@@ -112,7 +114,7 @@ main(int argc, char **argv)
 	mode = (m);							\
 } while (0)
 
-	while ((c = getopt(argc, argv, "abcehlrsSwvV")) != -1) {
+	while ((c = getopt(argc, argv, "abcCehlrsSwvV")) != -1) {
 		switch(c) {
 		case 'a':
 			SET_MODE(ATTACHED);
@@ -121,6 +123,10 @@ main(int argc, char **argv)
 		case 'b':
 			bars = 1;
 			width = 1;
+			break;
+
+		case 'C':
+			SET_MODE(CLEAR);
 			break;
 
 		case 'c':
@@ -192,9 +198,14 @@ main(int argc, char **argv)
 		writeit(argv[0], argv[1], argv[2], width);
 		break;
 	case SLOT:
-		if (optind != argc)
+		if (argc != 0)
 			usage();
 		list_slots();
+		break;
+	case CLEAR:
+		if (argc != 1)
+			usage();
+		clearerrs(argv[0]);
 		break;
 	default:
 		usage();
@@ -661,6 +672,20 @@ read_config(int fd, struct pcisel *sel, long reg, int width)
 	return (pi.pi_data);
 }
 
+void
+write_config(int fd, struct pcisel *sel, long reg, int width, uint32_t value)
+{
+	struct pci_io pi;
+
+	pi.pi_sel = *sel;
+	pi.pi_reg = reg;
+	pi.pi_width = width;
+	pi.pi_data = value;
+
+	if (ioctl(fd, PCIOCWRITE, &pi) < 0)
+		err(1, "ioctl(PCIOCWRITE)");
+}
+
 static struct pcisel
 getdevice(const char *name)
 {
@@ -811,19 +836,18 @@ static void
 writeit(const char *name, const char *reg, const char *data, int width)
 {
 	int fd;
-	struct pci_io pi;
+	struct pcisel sel;
+	u_long r, value;
 
-	pi.pi_sel = getsel(name);
-	pi.pi_reg = strtoul(reg, (char **)0, 0); /* XXX error check */
-	pi.pi_width = width;
-	pi.pi_data = strtoul(data, (char **)0, 0); /* XXX error check */
+	sel = getsel(name);
+	r = strtoul(reg, (char **)0, 0); /* XXX error check */
+	value = strtoul(data, (char **)0, 0); /* XXX error check */
 
 	fd = open(_PATH_DEVPCI, O_RDWR, 0);
 	if (fd < 0)
 		err(1, "%s", _PATH_DEVPCI);
 
-	if (ioctl(fd, PCIOCWRITE, &pi) < 0)
-		err(1, "ioctl(PCIOCWRITE)");
+	write_config(fd, &sel, r, width, value);
 }
 
 static int
@@ -843,6 +867,36 @@ chkattached(const char *name)
 
 	printf("%s: %s%s\n", name, pi.pi_data == 0 ? "not " : "", "attached");
 	if (pi.pi_data == 0)
+
+static void
+clearerrs(const char *name)
+{
+	int fd;
+	struct pci_conf_io pc;
+	struct pci_conf conf[1];
+	struct pci_match_conf patterns[1];
+
+	fd = open(_PATH_DEVPCI, O_RDWR, 0);
+	if (fd < 0)
+		err(1, "%s", _PATH_DEVPCI);
+
+	bzero(&pc, sizeof(struct pci_conf_io));
+	pc.match_buf_len = sizeof(conf);
+	pc.matches = conf;
+	bzero(&patterns, sizeof(patterns));
+	patterns[0].pc_sel = getsel(name);
+	patterns[0].flags = PCI_GETCONF_MATCH_DOMAIN | PCI_GETCONF_MATCH_BUS |
+	    PCI_GETCONF_MATCH_DEV | PCI_GETCONF_MATCH_FUNC;
+	pc.num_patterns = 1;
+	pc.pat_buf_len = sizeof(patterns);
+	pc.patterns = patterns;
+
+	if (ioctl(fd, PCIOCGETCONF, &pc) == -1)
+		err(1, "ioctl(PCIOCGETCONF)");
+
+	clear_errors(fd, conf);
+	close(fd);
+}
 		return (2);
 	return (0);
 }

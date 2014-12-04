@@ -33,6 +33,7 @@
 #ifndef __PCICONF_H__
 #define	__PCICONF_H__
 
+void	clear_errors(int fd, struct pci_conf *p);
 void	list_caps(int fd, struct pci_conf *p);
 void	list_errors(int fd, struct pci_conf *p);
 void	list_slot(struct pci_conf *p);
@@ -40,6 +41,8 @@ void	list_slots(void);
 uint8_t	pci_find_cap(int fd, struct pci_conf *p, uint8_t id);
 uint16_t pcie_find_cap(int fd, struct pci_conf *p, uint16_t id);
 uint32_t read_config(int fd, struct pcisel *sel, long reg, int width);
+void	write_config(int fd, struct pcisel *sel, long reg, int width,
+	    uint32_t value);
 
 #if defined(__i386__) || defined(__amd64__)
 int	bios_slot(struct pci_conf *p);

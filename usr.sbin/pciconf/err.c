@@ -171,3 +171,36 @@ list_errors(int fd, struct pci_conf *p)
 	mask = read_config(fd, &p->pc_sel, aer + PCIR_AER_COR_STATUS, 4);
 	print_bits("Corrected", aer_cor, mask);
 }
+
+void
+clear_errors(int fd, struct pci_conf *p)
+{
+	uint16_t sta, aer;
+	uint8_t pcie;
+
+	/* Clear standard PCI errors. */
+	sta = read_config(fd, &p->pc_sel, PCIR_STATUS, 2);
+	if ((sta & PCI_ERRORS) != 0)
+		write_config(fd, &p->pc_sel, PCIR_STATUS, 2,
+		    sta & ~PCI_ERRORS);
+
+	/* See if this is a PCI-express device. */
+	pcie = pci_find_cap(fd, p, PCIY_EXPRESS);
+	if (pcie == 0)
+		return;
+
+	/* Clear PCI-e errors. */
+	sta = read_config(fd, &p->pc_sel, pcie + PCIER_DEVICE_STA, 2);
+	if ((sta & PCIE_ERRORS) != 0)
+		write_config(fd, &p->pc_sel, pcie + PCIER_DEVICE_STA, 2,
+		    sta & PCIE_ERRORS);
+
+	/* See if this device supports AER. */
+	aer = pcie_find_cap(fd, p, PCIZ_AER);
+	if (aer == 0)
+		return;
+
+	/* Clear AER errors. */
+	write_config(fd, &p->pc_sel, aer + PCIR_AER_UC_STATUS, 4, 0xffffffff);
+	write_config(fd, &p->pc_sel, aer + PCIR_AER_COR_STATUS, 4, 0xffffffff);
+}
