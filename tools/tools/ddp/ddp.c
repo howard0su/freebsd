@@ -127,10 +127,13 @@ main(int ac, char **av)
 	linecap = 0;
 	for (;;) {
 		linelen = getline(&line, &linecap, stdin);
-		if (linelen < 0)
-			err(1, "getline");
+		if (linelen < 0) {
+			if (feof(stdin))
+				break;
+			errx(1, "stdin returned an error");
+		}
 		if (linelen == 0)
-			break;
+			errx(1, "zero-length line");
 		nwritten = write(s, line, linelen);
 		if (nwritten < 0)
 			err(1, "socket write");
