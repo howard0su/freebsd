@@ -93,7 +93,7 @@ read_plain(int s, const char *data, size_t len)
 {
 	static char *buf;
 	static size_t buflen;
-	size_t nread;
+	ssize_t nread;
 
 	if (buflen < len) {
 		buf = realloc(buf, len);
@@ -115,8 +115,8 @@ int
 main(int ac, char **av)
 {
 	char *line;
-	size_t linecap, linelen;
-	ssize_t nwritten;
+	size_t linecap;
+	ssize_t linelen, nwritten;
 	int s;
 
 	if (ac < 2 || ac > 3)
@@ -134,8 +134,8 @@ main(int ac, char **av)
 		nwritten = write(s, line, linelen);
 		if (nwritten < 0)
 			err(1, "socket write");
-		if ((size_t)nwritten != linelen)
-			errx(1, "short write: %zd of %zu", nwritten, linelen);
+		if (nwritten != linelen)
+			errx(1, "short write: %zd of %zd", nwritten, linelen);
 		read_plain(s, line, linelen);
 	}
 	close(s);
