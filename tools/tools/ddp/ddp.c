@@ -32,12 +32,18 @@
  * the next line of input.  Uses blocking I/O and TCP_NODELAY.
  */
 
+#define _WITH_GETLINE
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <err.h>
+#include <malloc_np.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 static void
 usage(void)
@@ -63,7 +69,7 @@ opensock(const char *host, const char *port)
 		s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (s < 0)
 			continue;
-		if (connect(s, res->ai_addrlen, res->ai_addrlen) < 0) {
+		if (connect(s, res->ai_addr, res->ai_addrlen) < 0) {
 			close(s);
 			s = -1;
 			continue;
@@ -82,7 +88,7 @@ opensock(const char *host, const char *port)
 	return (s);
 }
 
-void
+static void
 read_plain(int s, const char *data, size_t len)
 {
 	static char *buf;
@@ -130,7 +136,7 @@ main(int ac, char **av)
 			err(1, "socket write");
 		if ((size_t)nwritten != linelen)
 			errx(1, "short write: %zd of %zu", nwritten, linelen);
-		read_plain();
+		read_plain(s, line, linelen);
 	}
 	close(s);
 	return (0);
