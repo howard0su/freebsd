@@ -1712,15 +1712,18 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			toep->db_static = dsb.obj;
 			toep->db_static_size = size;
 			toep->db_first_data = -1;
+			/*
+			 * XXX: Should we wait for this to complete
+			 * before returning?
+			 *
+			 * Also, perhaps we should coalesce the various
+			 * writes to DDP_FLAGS into one request?
+			 */
+			enable_ddp(td_adapter(toep->td), toep);
 			for (i = 0; i < nitems(toep->db); i++) {
 				toep->db[i] = dsb.db[i];
 				queue_static_ddp(so, toep, i);
 			}
-			/*
-			 * XXX: Should we wait for this to complete
-			 * before returning?
-			 */
-			enable_ddp(td_adapter(toep->td), toep);
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
 			error = 0;
