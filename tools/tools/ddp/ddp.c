@@ -138,6 +138,7 @@ main(int ac, char **av)
 	if (ac < 2 || ac > 3)
 		usage();
 	s = opensock(av[1], ac == 3 ? av[2] : "echo");
+	(void)check_for_toe(s);
 
 	line = NULL;
 	linecap = 0;
