@@ -1376,8 +1376,6 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 	bzero(dsb, sizeof(*dsb));
 	dsb->obj = vm_pager_allocate(OBJT_PHYS, NULL, size * nitems(dsb->db),
 	    VM_PROT_DEFAULT, 0, cred);
-	VM_OBJECT_WLOCK(dsb->obj);
-	vm_object_set_flag(dsb->obj, OBJ_COLORED);
 
 	/* Fault in pages. */
 	KASSERT((size & PAGE_MASK) == 0, ("bad size %zu", (size_t)size));
@@ -1386,6 +1384,8 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 	for (bucket = 0; bucket < nitems(dsb->db); bucket++)
 		pp[bucket] = malloc(pages * sizeof(vm_page_t), M_CXGBE,
 		    M_WAITOK);
+	VM_OBJECT_WLOCK(dsb->obj);
+	vm_object_set_flag(dsb->obj, OBJ_COLORED);
 	for (idx = 0; idx < pages * nitems(dsb->db); idx++) {
 		m = vm_page_grab(dsb->obj, idx, VM_ALLOC_NORMAL |
 		    VM_ALLOC_COUNT(pages * nitems(dsb->db) - idx - 1) |
@@ -1725,6 +1725,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			error = EINVAL;
 			break;
 		}
+		break;
 	case SOPT_GET:
 		switch (sopt->sopt_name) {
 		case TCP_DDP_STATIC:
@@ -1760,6 +1761,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				error = sooptcopyout(sopt, &tdr, sizeof(tdr));
 			break;
 		}
+		break;
 	}
 	return (error);
 }
