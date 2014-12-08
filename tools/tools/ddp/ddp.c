@@ -109,6 +109,7 @@ read_plain(int s, const char *data, size_t len)
 		errx(1, "short read: %zd vs %zu", nread, len);
 	if (memcmp(data, buf, len) != 0)
 		errx(1, "data mismatch");
+	printf("Received data matched\n");
 }
 
 int
