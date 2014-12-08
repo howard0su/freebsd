@@ -1692,6 +1692,15 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				}
 			}
 
+			for (i = 0; i < nitems(dsb.db); i++) {
+				if (write_page_pods(td_adapter(toep->td), toep,
+				    dsb.db[i]) != 0) {
+					INP_WUNLOCK(inp);
+					free_static_ddp_buffer(toep->td, &dsb);
+					return (ENOMEM);
+				}
+			}
+
 			SOCKBUF_LOCK(&so->so_rcv);
 
 			/*
