@@ -89,7 +89,7 @@ opensock(const char *host, const char *port)
 	return (s);
 }
 
-static bool
+static void
 check_for_toe(int s)
 {
 	struct tcp_info info;
@@ -100,7 +100,43 @@ check_for_toe(int s)
 		err(1, "getsockopt(TCP_INFO)");
 	if (info.tcpi_options & TCPI_OPT_TOE)
 		printf("Using TOE\n");
-	return ((info.tcpi_options & TCPI_OPT_TOE) != 0);
+}
+
+static char *ddp_buf;
+
+static void
+setup_static_ddp(int s)
+{
+	socklen_t len;
+	int optval;
+
+	optval = 1;
+	len = sizeof(optval);
+	if (setsockopt(s, IPPROTO_TCP, TCP_DDP_STATIC, &optval, len) < 0)
+		err(1, "Failed to enable static DDP");
+	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_STATIC, &optval, &len) < 0)
+		err(1, "getsockopt(TCP_DDP_STATIC");
+	if (optval == 0)
+		errx(1, "Static DDP doesn't claim to be enabled");
+	len = sizeof(ddp_buf);
+	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_MAP, &ddp_buf, &len) < 0)
+		err(1, "Failed to map static DDP buffer");
+}
+
+static void
+read_ddp(int s, const char *data, size_t len)
+{
+	struct tcp_ddp_read tdr;
+	socklen_t olen;
+
+	olen = sizeof(tdr);
+	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_READ, &tdr, &olen) < 0)
+		err(1, "Failed to read from static DDP buffer");
+	if (tdr.length != len)
+		errx(1, "short DDP read: %zu vs %zu", tdr.length, len);
+	if (memcmp(ddp_buf + tdr.offset, data, len) != 0)
+		errx(1, "DDP data mismatch");
+	printf("Received DDP data matched\n");
 }
 
 static void
@@ -133,12 +169,27 @@ main(int ac, char **av)
 	char *line;
 	size_t linecap;
 	ssize_t linelen, nwritten;
-	int s;
+	bool static_ddp;
+	int ch, s;
 
-	if (ac < 2 || ac > 3)
+	static_ddp = false;
+	while ((ch = getopt(ac, av, "D")) != -1)
+		switch (ch) {
+		case 'D':
+			static_ddp = true;
+			break;
+		default:
+			usage();
+		}
+	ac -= optind;
+	av += optind;
+
+	if (ac < 1 || ac > 2)
 		usage();
-	s = opensock(av[1], ac == 3 ? av[2] : "echo");
-	(void)check_for_toe(s);
+	s = opensock(av[0], ac == 2 ? av[1] : "echo");
+	check_for_toe(s);
+	if (static_ddp)
+		setup_static_ddp(s);
 
 	line = NULL;
 	linecap = 0;
@@ -156,7 +207,10 @@ main(int ac, char **av)
 			err(1, "socket write");
 		if (nwritten != linelen)
 			errx(1, "short write: %zd of %zd", nwritten, linelen);
-		read_plain(s, line, linelen);
+		if (static_ddp)
+			read_ddp(s, line, linelen);
+		else
+			read_plain(s, line, linelen);
 	}
 	close(s);
 	return (0);
