@@ -40,6 +40,7 @@
 #include <err.h>
 #include <malloc_np.h>
 #include <netdb.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,6 +87,20 @@ opensock(const char *host, const char *port)
 	    < 0)
 		err(1, "setsockopt(TCP_NODELAY)");
 	return (s);
+}
+
+static bool
+check_for_toe(int s)
+{
+	struct tcp_info info;
+	socklen_t len;
+
+	len = sizeof(info);
+	if (getsockopt(s, IPPROTO_TCP, TCP_INFO, &info, &len) < 0)
+		err(1, "getsockopt(TCP_INFO)");
+	if (info.tcpi_options & TCPI_OPT_TOE)
+		printf("Using TOE\n");
+	return ((info.tcpi_options & TCPI_OPT_TOE) != 0);
 }
 
 static void
