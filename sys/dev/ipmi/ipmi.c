@@ -181,8 +181,8 @@ ipmi_dtor(void *arg)
 		 */
 		dev->ipmi_closing = 1;
 		while (dev->ipmi_requests > 0) {
-			msleep(&dev->ipmi_requests, &sc->ipmi_lock, PWAIT,
-			    "ipmidrain", 0);
+			msleep(&dev->ipmi_requests, &sc->ipmi_requests_lock,
+			    PWAIT, "ipmidrain", 0);
 			ipmi_purge_completed_requests(dev);
 		}
 	}
@@ -533,21 +533,13 @@ ipmi_complete_request(struct ipmi_softc *sc, struct ipmi_request *req)
 	}
 }
 
-/* Enqueue an internal driver request and wait until it is completed. */
+/* Perform an internal driver request. */
 int
 ipmi_submit_driver_request(struct ipmi_softc *sc, struct ipmi_request *req,
     int timo)
 {
-	int error;
 
-	IPMI_LOCK(sc);
-	error = sc->ipmi_enqueue_request(sc, req);
-	if (error == 0)
-		error = msleep(req, &sc->ipmi_lock, 0, "ipmireq", timo);
-	if (error == 0)
-		error = req->ir_error;
-	IPMI_UNLOCK(sc);
-	return (error);
+	return (sc->ipmi_driver_request(sc, req, timo));
 }
 
 /*
@@ -564,7 +556,7 @@ ipmi_dequeue_request(struct ipmi_softc *sc)
 	IPMI_LOCK_ASSERT(sc);
 
 	while (!sc->ipmi_detaching && TAILQ_EMPTY(&sc->ipmi_pending_requests))
-		cv_wait(&sc->ipmi_request_added, &sc->ipmi_lock);
+		cv_wait(&sc->ipmi_request_added, &sc->ipmi_requests_lock);
 	if (sc->ipmi_detaching)
 		return (NULL);
 
@@ -680,7 +672,8 @@ ipmi_startup(void *arg)
 	dev = sc->ipmi_dev;
 
 	/* Initialize interface-independent state. */
-	mtx_init(&sc->ipmi_lock, device_get_nameunit(dev), "ipmi", MTX_DEF);
+	mtx_init(&sc->ipmi_requests_lock, "ipmi requests", NULL, MTX_DEF);
+	mtx_init(&sc->ipmi_io_lock, "ipmi io", NULL, MTX_DEF);
 	cv_init(&sc->ipmi_request_added, "ipmireq");
 	TAILQ_INIT(&sc->ipmi_pending_requests);
 
@@ -834,14 +827,16 @@ ipmi_detach(device_t dev)
 	sc->ipmi_detaching = 1;
 	if (sc->ipmi_kthread) {
 		cv_broadcast(&sc->ipmi_request_added);
-		msleep(sc->ipmi_kthread, &sc->ipmi_lock, 0, "ipmi_wait", 0);
+		msleep(sc->ipmi_kthread, &sc->ipmi_requests_lock, 0,
+		    "ipmi_wait", 0);
 	}
 	IPMI_UNLOCK(sc);
 	if (sc->ipmi_irq)
 		bus_teardown_intr(dev, sc->ipmi_irq_res, sc->ipmi_irq);
 
 	ipmi_release_resources(dev);
-	mtx_destroy(&sc->ipmi_lock);
+	mtx_destroy(&sc->ipmi_io_lock);
+	mtx_destroy(&sc->ipmi_requests_lock);
 	return (0);
 }
 
