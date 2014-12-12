@@ -1547,7 +1547,6 @@ restart:
 	if (sb->sb_cc > 0 && 
 	    ((so->so_state & SS_NBIO) ||
 	     sb->sb_cc >= sb->sb_lowat ||
-	     sb->sb_cc >= uio->uio_resid ||
 	     sb->sb_cc >= sb->sb_hiwat) ) {
 		goto deliver;
 	}
