@@ -852,7 +852,7 @@ write_page_pods(struct adapter *sc, struct toepcb *toep, struct ddp_buffer *db)
 					idx += ddp_pgsz / PAGE_SIZE;
 				} else
 					ppod->addr[k] = 0;
-#if 0
+#if 1
 				CTR5(KTR_CXGBE,
 				    "%s: tid %d ppod[%d]->addr[%d] = %p",
 				    __func__, toep->tid, i, k,
@@ -1447,6 +1447,127 @@ map_object(vm_object_t obj, vm_offset_t *vaddr)
 	return (vm_mmap_to_errno(rv));
 }
 
+static struct wrqe *
+mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
+    struct ddp_buffer *db[2], uint64_t ddp_flags, uint64_t ddp_flags_mask)
+{
+	struct wrqe *wr;
+	struct work_request_hdr *wrh;
+	struct ulp_txpkt *ulpmc;
+	int len;
+
+	/*
+	 * We'll send a compound work request that has 5 SET_TCB_FIELDs and an
+	 * RX_DATA_ACK (with RX_MODULATE to speed up delivery).
+	 *
+	 * The work request header is 16B and always ends at a 16B boundary.
+	 * The ULPTX master commands that follow must all end at 16B boundaries
+	 * too so we round up the size to 16.
+	 */
+	len = sizeof(*wrh) + 5 * roundup2(LEN__SET_TCB_FIELD_ULP, 16) +
+	    roundup2(LEN__RX_DATA_ACK_ULP, 16);
+
+	wr = alloc_wrqe(len, toep->ctrlq);
+	if (wr == NULL)
+		return (NULL);
+	wrh = wrtod(wr);
+	INIT_ULPTX_WRH(wrh, len, 1, 0);	/* atomic */
+	ulpmc = (struct ulp_txpkt *)(wrh + 1);
+
+	/* Write buffer 0's tag */
+	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+	    W_TCB_RX_DDP_BUF0_TAG,
+	    V_TCB_RX_DDP_BUF0_TAG(M_TCB_RX_DDP_BUF0_TAG),
+	    V_TCB_RX_DDP_BUF0_TAG(db[0]->tag));
+
+	/* Write buffer 1's tag */
+	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+	    W_TCB_RX_DDP_BUF1_TAG,
+	    V_TCB_RX_DDP_BUF1_TAG(M_TCB_RX_DDP_BUF0_TAG),
+	    V_TCB_RX_DDP_BUF1_TAG(db[1]->tag));
+
+	/* Update the current offset in the DDP buffer and its total length */
+	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+	    W_TCB_RX_DDP_BUF0_OFFSET,
+	    V_TCB_RX_DDP_BUF0_OFFSET(M_TCB_RX_DDP_BUF0_OFFSET) |
+	    V_TCB_RX_DDP_BUF0_LEN(M_TCB_RX_DDP_BUF0_LEN),
+	    V_TCB_RX_DDP_BUF0_OFFSET(0) |
+	    V_TCB_RX_DDP_BUF0_LEN(db[0]->len));
+
+	/* XXX: jhb: why the shifts? */
+	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+	    W_TCB_RX_DDP_BUF1_OFFSET,
+	    V_TCB_RX_DDP_BUF1_OFFSET(M_TCB_RX_DDP_BUF1_OFFSET) |
+	    V_TCB_RX_DDP_BUF1_LEN((u64)M_TCB_RX_DDP_BUF1_LEN << 32),
+	    V_TCB_RX_DDP_BUF1_OFFSET(0) |
+	    V_TCB_RX_DDP_BUF1_LEN((u64)db[1]->len << 32));
+
+	/* Update DDP flags */
+	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep, W_TCB_RX_DDP_FLAGS,
+	    ddp_flags_mask, ddp_flags);
+
+	/* Gratuitous RX_DATA_ACK with RX_MODULATE set to speed up delivery. */
+	ulpmc = mk_rx_data_ack_ulp(ulpmc, toep);
+
+	return (wr);
+}
+
+static int
+enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
+{
+	struct adapter *sc = td_adapter(toep->td);
+	struct wrqe *wr;
+	uint64_t ddp_flags, ddp_flags_mask;
+
+	KASSERT((toep->ddp_flags & (DDP_ON | DDP_OK | DDP_SC_REQ)) == DDP_OK,
+	    ("%s: toep %p has bad ddp_flags 0x%x",
+	    __func__, toep, toep->ddp_flags));
+
+	CTR3(KTR_CXGBE, "%s: tid %u (time %u)",
+	    __func__, toep->tid, time_uptime);
+
+	toep->ddp_flags |= DDP_SC_REQ;
+
+#if 0
+	/* XXX: jhb: I think we probably want coalescing for these? */
+	t4_set_tcb_field(sc, toep, 1, W_TCB_T_FLAGS,
+	    V_TF_RCV_COALESCE_ENABLE(1), 0);
+#endif
+
+	/* Enable DDP. */
+	ddp_flags = 0;
+	ddp_flags_mask = V_TF_DDP_OFF(1);
+
+	/* Disable indicate. */
+	ddp_flags_mask |= V_TF_DDP_BUF0_INDICATE(1) | V_TF_DDP_BUF1_INDICATE(1);
+
+	/* Mark both buffers valid. */
+	ddp_flags |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
+	ddp_flags_mask |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
+
+	/* Disable flushing. */
+	ddp_flags_mask |= V_TF_DDP_BUF0_FLUSH(1) | V_TF_DDP_BUF1_FLUSH(1);
+
+	/* Enable PUSH. */
+	ddp_flags_mask |= V_TF_DDP_PUSH_DISABLE_0(1) |
+	    V_TF_DDP_PUSH_DISABLE_1(1);
+
+	/* Clear indicate out. */
+	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
+
+	/* Mark buffer 0 as active. */
+	ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
+
+	wr = mk_update_tcb_for_static_ddp(sc, toep, db, ddp_flags,
+	    ddp_flags_mask);
+	if (wr == NULL)
+		return (ENOMEM);
+	t4_wrq_tx(sc, wr);
+	toep->ddp_flags |= DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE;
+	return (0);
+}
+
+#if 0
 static int
 queue_static_ddp(struct socket *so, struct toepcb *toep, int db_idx)
 {
@@ -1484,13 +1605,47 @@ queue_static_ddp(struct socket *so, struct toepcb *toep, int db_idx)
 	toep->ddp_flags |= buf_flag;
 	return (0);
 }
+#endif
+
+static void
+refresh_static_ddp(struct toepcb *toep)
+{
+	struct adapter *sc = td_adapter(toep->td);
+	uint64_t ddp_flags, ddp_flags_mask;
+	int buf_flag;
+
+	/*
+	 * Assume any buffers previously returned to userland can now
+	 * be re-used.
+	 */
+	buf_flag = 0;
+	ddp_flags = 0;
+	if (toep->db_static_data[0] == -1) {
+		toep->db_static_data[0] = 0;
+		ddp_flags |= V_TF_DDP_BUF0_VALID(1);
+		buf_flag |= DDP_BUF0_ACTIVE;
+	}
+	if (toep->db_static_data[1] == -1) {
+		toep->db_static_data[1] = 0;
+		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
+		buf_flag |= DDP_BUF1_ACTIVE;
+	}
+	if (ddp_flags == 0)
+		return;
+	ddp_flags_mask = ddp_flags;
+	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
+		ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
+	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags_mask,
+	    ddp_flags);
+	toep->ddp_flags |= buf_flag;
+}
 
 static int
 read_static_data(struct socket *so, struct toepcb *toep,
     struct tcp_ddp_read *tdr)
 {
 	struct sockbuf *sb;
-	int error, i;
+	int error;
 
 	sb = &so->so_rcv;
 
@@ -1500,15 +1655,17 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	if (error)
 		goto out;
 
-	/*
-	 * Assume any buffers previously returned to userland can now
-	 * be re-used.
-	 */
+#if 1
+	if ((toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) !=
+	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
+		refresh_static_ddp(toep);
+#else		
 	for (i = 0; i < nitems(toep->db); i++)
 		if (toep->db_static_data[i] == -1) {
 			queue_static_ddp(so, toep, i);
 			toep->db_static_data[i] = 0;
 		}
+#endif
 
 	/* We will never ever get anything unless we are or were connected. */
 	if (!(so->so_state & (SS_ISCONNECTED|SS_ISDISCONNECTED))) {
@@ -1724,11 +1881,24 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				free_static_ddp_buffer(toep->td, &dsb);
 				goto retry;
 			}
+#if 1
+			error = enable_static_ddp(toep, dsb.db);
+			if (error) {
+				SOCKBUF_UNLOCK(&so->so_rcv);
+				INP_WUNLOCK(inp);
+				free_static_ddp_buffer(toep->td, &dsb);
+				break;
+			}
+#endif
 			so->so_rcv.sb_flags |= SB_FIXEDSIZE;
 			toep->ddp_flags |= DDP_STATIC_BUF;
 			toep->db_static = dsb.obj;
 			toep->db_static_size = size;
 			toep->db_first_data = -1;
+#if 1
+			for (i = 0; i < nitems(toep->db); i++)
+				toep->db[i] = dsb.db[i];
+#else
 			/*
 			 * XXX: Should we wait for this to complete
 			 * before returning?
@@ -1741,6 +1911,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				toep->db[i] = dsb.db[i];
 				queue_static_ddp(so, toep, i);
 			}
+#endif
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
 			error = 0;
