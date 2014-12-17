@@ -32,6 +32,7 @@ __FBSDID("$FreeBSD$");
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include "devctl.h"
 
 static int
 devctl_request(u_long cmd, struct devreq *req)
