@@ -148,6 +148,8 @@ struct device {
 static MALLOC_DEFINE(M_BUS, "bus", "Bus data structures");
 static MALLOC_DEFINE(M_BUS_SC, "bus-sc", "Bus data structures, softc");
 
+static void devctl2_init(void);
+
 #ifdef BUS_DEBUG
 
 static int bus_debug = 1;
@@ -432,6 +434,7 @@ devinit(void)
 	cv_init(&devsoftc.cv, "dev cv");
 	TAILQ_INIT(&devsoftc.devq);
 	knlist_init_mtx(&devsoftc.sel.si_note, &devsoftc.mtx);
+	devctl2_init();
 }
 
 static int
@@ -2645,6 +2648,15 @@ int
 device_is_attached(device_t dev)
 {
 	return (dev->state >= DS_ATTACHED);
+}
+
+/**
+ * @brief Return non-zero if the device is currently suspended.
+ */
+int
+device_is_suspended(device_t dev)
+{
+	return ((dev->flags & DF_SUSPENDED) != 0);
 }
 
 /**
@@ -5030,4 +5042,157 @@ bus_free_resource(device_t dev, int type, struct resource *r)
 	if (r == NULL)
 		return (0);
 	return (bus_release_resource(dev, type, rman_get_rid(r), r));
+}
+
+/*
+ * /dev/devctl2 implementation.  The existing /dev/devctl device has
+ * implicit semantics on open, so it could not be reused for this.
+ * Another option would be to call this /dev/bus?
+ */
+static int
+find_device(struct devreq *req, device_t *devp)
+{
+	device_t dev;
+
+	/*
+	 * First, ensure that the name is nul terminated.
+	 */
+	if (memchr(req->dr_name, '\0', sizeof(req->dr_name)) == NULL)
+		return (EINVAL);
+
+	/*
+	 * Second, try to find an attached device whose name matches
+	 * 'name'.
+	 */
+	TAILQ_FOREACH(dev, &bus_data_devices, devlink) {
+		if (dev->nameunit != NULL &&
+		    strcmp(dev->nameunit, req->dr_name) == 0) {
+			*devp = dev;
+			return (0);
+		}
+	}
+
+	/* Finally, give device enumerators a chance. */
+	dev = NULL;
+	EVENTHANDLER_INVOKE(dev_lookup, req->dr_name, &dev);
+	if (dev == NULL)
+		return (ENOENT);
+	*devp = dev;
+	return (0);
+}
+
+static int
+devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
+    struct thread *td)
+{
+	struct devreq *req;
+	device_t dev;
+	int error;
+
+	/* Locate the device to control. */
+	mtx_lock(&Giant);
+	req = (struct devreq *)data;
+	switch (cmd) {
+	case DEV_ATTACH:
+	case DEV_DETACH:
+	case DEV_ENABLE:
+	case DEV_DISABLE:
+	case DEV_SUSPEND:
+	case DEV_RESUME:
+		error = find_device(req, &dev);
+		break;
+	default:
+		error = ENOTTY;
+		break;
+	}
+	if (error) {
+		mtx_unlock(&Giant);
+		return (error);
+	}
+
+	/* Perform the requested operation. */
+	switch (cmd) {
+	case DEV_ATTACH:
+		if (device_is_attached(dev) && (dev->flags & DF_REBID) == 0)
+			error = EBUSY;
+		else
+			error = device_probe_and_attach(dev);
+		break;
+	case DEV_DETACH:
+		if (!device_is_attached(dev))
+			error = ENXIO;
+		else
+			error = device_detach(dev);
+		break;
+	case DEV_ENABLE:
+		if (device_is_enabled(dev)) {
+			error = EBUSY;
+			break;
+		}
+
+		/*
+		 * If the device has been probed but not attached (e.g.
+		 * when it has been disabled by a loader hint), just
+		 * attach the device rather than doing a full probe.
+		 */
+		device_enable(dev);
+		if (device_is_alive(dev))
+			error = device_attach(dev);
+		else
+			error = device_probe_and_attach(dev);
+		break;
+	case DEV_DISABLE:
+		if (!device_is_enabled(dev)) {
+			error = ENXIO;
+			break;
+		}
+
+		/*
+		 * XXX: Consider preserving the device's name
+		 * by skipping the final parts of detach to mimic
+		 * boot-time disabling.
+		 */
+		error = device_detach(dev);
+		if (error == 0)
+			device_disable(dev);
+		break;
+	case DEV_SUSPEND:
+		if (device_is_suspended(dev)) {
+			error = EBUSY;
+			break;
+		}
+		if (device_get_parent(dev) == NULL) {
+			error = EINVAL;
+			break;
+		}
+		error = BUS_SUSPEND_CHILD(device_get_parent(dev), dev);
+		break;
+	case DEV_RESUME:
+		if (!device_is_suspended(dev)) {
+			error = EINVAL;
+			break;
+		}
+		if (device_get_parent(dev) == NULL) {
+			error = EINVAL;
+			break;
+		}
+		error = BUS_RESUME_CHILD(device_get_parent(dev), dev);
+		break;
+	}
+	mtx_unlock(&Giant);
+	return (error);
+}
+
+static struct cdevsw devctl2_cdevsw = {
+	.d_version =	D_VERSION,
+	.d_ioctl =	devctl2_ioctl,
+	.d_name =	"devctl2",
+};
+
+static void
+devctl2_init(void)
+{
+
+	make_dev_credf(MAKEDEV_ETERNAL, &devctl2_cdevsw, 0, NULL,
+	    UID_ROOT, GID_WHEEL, 0600, "devctl2");
 }
