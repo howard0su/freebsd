@@ -30,6 +30,8 @@ __FBSDID("$FreeBSD$");
 #include <devctl.h>
 #include <err.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
 
 static void
 usage(void)
