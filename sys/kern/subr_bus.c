@@ -5099,7 +5099,9 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	case DEV_DISABLE:
 	case DEV_SUSPEND:
 	case DEV_RESUME:
-		error = find_device(req, &dev);
+		error = priv_check(td, PRIV_DRIVER);
+		if (error == 0)
+			error = find_device(req, &dev);
 		break;
 	default:
 		error = ENOTTY;
