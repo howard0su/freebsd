@@ -5115,6 +5115,8 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	case DEV_ATTACH:
 		if (device_is_attached(dev) && (dev->flags & DF_REBID) == 0)
 			error = EBUSY;
+		else if (!device_is_enabled(dev))
+			error = ENXIO;
 		else
 			error = device_probe_and_attach(dev);
 		break;
