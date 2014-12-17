@@ -31,6 +31,7 @@
 
 #include <machine/_limits.h>
 #include <sys/_bus_dma.h>
+#include <sys/ioccom.h>
 
 /**
  * @defgroup NEWBUS newbus - a generic framework for managing devices
