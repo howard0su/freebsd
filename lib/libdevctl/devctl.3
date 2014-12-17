@@ -1,0 +1,155 @@
+.\"
+.\" Copyright (c) 2014 John Baldwin <jhb@FreeBSD.org>
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.\" $FreeBSD$
+.\"
+.Dd December 17, 2014
+.Dt DEVCTL 3
+.Os
+.Sh NAME
+.Nm devctl ,
+.Nm devctl_attach ,
+.Nm devctl_detach ,
+.Nm devctl_disable ,
+.Nm devctl_enable ,
+.Nm devctl_resume ,
+.Nm devctl_suspend
+.Nd device control library
+.Sh LIBRARY
+.Lb libdevctl
+.Sh SYNOPSIS
+.In devctl.h
+.Ft int
+.Fn devctl_attach "const char *name"
+.Ft int
+.Fn devctl_detach "const char *name"
+.Ft int
+.Fn devctl_disable "const char *name"
+.Ft int
+.Fn devctl_enable "const char *name"
+.Ft int
+.Fn devctl_resume "const char *name"
+.Ft int
+.Fn devctl_suspend "const char *name"
+.Sh DESCRIPTION
+The
+.Nm
+library adjusts the state of devices in the kernel's internal device
+hierarchy.
+Each control operation accepts a
+.Fa name
+argument that identifies the device to adjust.
+The
+.Fa name
+may be specified as either the name of an existing device or as a
+bus-specific address.
+The following bus-specific address formats are currently supported:
+.Bl -tag -offset indent
+.It Sy pci Ns Fa domain Ns : Ns Fa bus Ns : Ns Fa slot Ns : Ns Fa function
+A PCI device with the specified
+.Fa domain ,
+.Fa bus ,
+.Fa slot ,
+and
+.Fa function .
+.It Sy pci Ns Fa bus Ns : Ns Fa slot Ns : Ns Fa function
+A PCI device in domain zero with the specified
+.Fa bus ,
+.Fa slot ,
+and
+.Fa function .
+.It Fa handle
+A device with an ACPI handle of
+.Fa handle .
+The handle must be specified as an absolute path and must begin with a
+.Dq \e .
+.El
+.Pp
+The
+.Fn devctl_attach
+function probes a device and attaches a suitable device driver if one is
+found.
+.Pp
+The
+.Fn devctl_detach
+function detaches a device from its current device driver.
+The device is left detached until either a new driver for its parent
+bus is loaded or the device is explicitly probed via
+.Fn devctl_attach .
+.Pp
+The
+.Fn devctl_disable
+function disables a device.
+If the device is currently attached to a device driver,
+the device driver will be detached from the device.
+The device will remain disabled and detached until it is explicitly enabled
+via
+.Fn devctl_enable .
+.Pp
+The
+.Fn devctl_enable
+function re-enables a disabled device.
+The device will probe and attach if a suitable device driver is found.
+.Pp
+The
+.Fn devctl_suspend
+function suspends a device.
+This may include placing the device in a reduced power state,
+but any device driver currently attached to the device will remain attached.
+.Pp
+The
+.Fn devctl_resume
+function resumes a suspended device to a fully working state.
+.Sh SEE ALSO
+.Xr devinfo 3 ,
+.Xr devstat 3
+.Sh HISTORY
+The
+.Nm
+library first appeared in
+.Fx 11.0 .
+.Sh BUGS
+When a device is disabled via
+.Fn devctl_disable
+it is fully detached meaning it will lose its device name.
+This does not match the state of using a loader hint to disable a device
+at boot time.
+Ideally the device would keep its name allowing it to be used to re-enable
+the device later.
+.Pp
+The
+.Fn devctl_disable
+and
+.Fn devctl_enable
+functions do not update the corresponding kernel environment variable.
+This prevents
+.Fn devctl_enable
+from effectively re-enabling a device disabled at boot-time since the
+attempt to attach the device will re-disable it.
+.Pp
+If a device is suspended individually via
+.Fn devctl_suspend
+and the entire machine is subsequently suspended,
+the device will be resumed when the machine resumes.
