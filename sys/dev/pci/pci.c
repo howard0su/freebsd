@@ -4812,8 +4812,8 @@ pci_child_location_str_method(device_t dev, device_t child, char *buf,
     size_t buflen)
 {
 
-	snprintf(buf, buflen, "slot=%d function=%d", pci_get_slot(child),
-	    pci_get_function(child));
+	snprintf(buf, buflen, "pci%d:%d:%d:%d", pci_get_domain(child),
+	    pci_get_bus(child), pci_get_slot(child), pci_get_function(child));
 	return (0);
 }
 
@@ -4864,16 +4864,16 @@ pci_lookup(void *arg, const char *name, device_t *dev)
 	if (val < 0 || val > INT_MAX || *end != ':')
 		return;
 	domain = val;
-	val = strtol(end, &end, 10);
+	val = strtol(end + 1, &end, 10);
 	if (val < 0 || val > INT_MAX || *end != ':')
 		return;
 	bus = val;
-	val = strtol(end, &end, 10);
+	val = strtol(end + 1, &end, 10);
 	if (val < 0 || val > INT_MAX)
 		return;
 	slot = val;
 	if (*end == ':') {
-		val = strtol(end, &end, 10);
+		val = strtol(end + 1, &end, 10);
 		if (val < 0 || val > INT_MAX || *end != '\0')
 			return;
 		func = val;
