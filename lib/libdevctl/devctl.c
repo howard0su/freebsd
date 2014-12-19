@@ -44,7 +44,7 @@ devctl_request(u_long cmd, struct devreq *req)
 		if (devctl2_fd == -1)
 			return (-1);
 	}
-	return (ioctl(devctl2_fd, cmd, &req));
+	return (ioctl(devctl2_fd, cmd, req));
 }
 
 static int
