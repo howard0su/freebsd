@@ -1552,6 +1552,17 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/* Disable indicate. */
 	ddp_flags_mask |= V_TF_DDP_BUF0_INDICATE(1) | V_TF_DDP_BUF1_INDICATE(1);
 
+	/* Clear indicate out. */
+	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
+
+#if 1
+	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags,
+	    ddp_flags_mask);
+
+	ddp_flags = 0;
+	ddp_flags_mask = 0;
+#endif
+
 	/* Mark both buffers valid. */
 	ddp_flags |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
 	ddp_flags_mask |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
@@ -1579,9 +1590,6 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	    V_TF_DDP_PUSH_DISABLE_0(1)| V_TF_DDP_PSH_NO_INVALIDATE0(1) |
 	    V_TF_DDP_PSHF_ENABLE_1(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
-
-	/* Clear indicate out. */
-	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
 
 	/* Mark buffer 0 as active. */
 	ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
