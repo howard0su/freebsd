@@ -483,15 +483,14 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	 * Ah, rcv_nxt is the the start of the received data.  Isn't it
 	 * wrong to increase 'len' here though?  Might be better to
 	 * KASSERT() that rcv_nxt == tp->rcv_nxt?
+	 *
+	 * Ah, RX_DDP_COMPLETE doesn't have a length, only the next seq
+	 * number.
 	 */
-	KASSERT(be32toh(rcv_nxt) == tp->rcv_nxt, ("%s: hole in data stream",
-	    __func__));
-#if 0
+	KASSERT(len == 0 || be32toh(rcv_nxt) == tp->rcv_nxt,
+	    ("%s: hole in data stream", __func__));
 	len += be32toh(rcv_nxt) - tp->rcv_nxt;
 	tp->rcv_nxt += len;
-#else
-	tp->rcv_nxt = len;
-#endif
 	tp->t_rcvtime = ticks;
 #ifndef USE_DDP_RX_FLOW_CONTROL
 	KASSERT(tp->rcv_wnd >= len, ("%s: negative window size", __func__));
@@ -570,7 +569,7 @@ do_rx_data_ddp(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	KASSERT(!(toep->flags & TPF_SYNQE),
 	    ("%s: toep %p claims to be a synq entry", __func__, toep));
 
-	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DATA_DDP",
+	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DATA_DDP: ",
 	    HD_OMIT_CHARS | 64);
 	vld = be32toh(cpl->ddpvld);
 	if (__predict_false(vld & DDP_ERR)) {
@@ -607,7 +606,7 @@ do_rx_ddp_complete(struct sge_iq *iq, const struct rss_header *rss,
 	KASSERT(!(toep->flags & TPF_SYNQE),
 	    ("%s: toep %p claims to be a synq entry", __func__, toep));
 
-	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DDP_COMPLETE",
+	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DDP_COMPLETE: ",
 	    HD_OMIT_CHARS | 64);
 	handle_ddp_data(toep, cpl->ddp_report, cpl->rcv_nxt, 0);
 
