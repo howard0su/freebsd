@@ -146,6 +146,8 @@ print_device(struct devinfo_dev *dev, void *arg)
 			printf(" pnpinfo %s", dev->dd_pnpinfo);
 		if (vflag && *dev->dd_location)
 			printf(" at %s", dev->dd_location);
+		if ((dev->dd_flags & 0x01) == 0)
+			printf(" (disabled)");
 		printf("\n");
 		if (rflag) {
 			ia.indent = indent + 4;
