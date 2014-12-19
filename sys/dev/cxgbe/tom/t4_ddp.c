@@ -475,17 +475,15 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	tp = intotcpcb(inp);
 
 	/*
-	 * XXX: jhb: I don't understand this part.  Does this have to do
-	 * with data buffered in the card's RAM?  I want to know how much
-	 * of the current buffer was used which I think is the passed-in
-	 * length?
-	 *
-	 * Ah, rcv_nxt is the the start of the received data.  Isn't it
-	 * wrong to increase 'len' here though?  Might be better to
-	 * KASSERT() that rcv_nxt == tp->rcv_nxt?
-	 *
-	 * Ah, RX_DDP_COMPLETE doesn't have a length, only the next seq
-	 * number.
+	 * For RX_DDP_COMPLETE, len will be zero and rcv_nxt is the
+	 * sequence number of the next byte to receive.  The length of
+	 * the data received for this message must be computed by
+	 * comparing the new and old values of rcv_nxt.
+	 * 
+	 * For RX_DDP_DATA, len should be non-zero and rcv_nxt is
+	 * the sequence number of the first received byte.  That
+	 * should be identical to the existing rcv_nxt, so the
+	 * update to 'len' should be a no-op.
 	 */
 	KASSERT(len == 0 || be32toh(rcv_nxt) == tp->rcv_nxt,
 	    ("%s: hole in data stream", __func__));
