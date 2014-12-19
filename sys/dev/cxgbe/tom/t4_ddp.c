@@ -479,9 +479,19 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	 * with data buffered in the card's RAM?  I want to know how much
 	 * of the current buffer was used which I think is the passed-in
 	 * length?
+	 *
+	 * Ah, rcv_nxt is the the start of the received data.  Isn't it
+	 * wrong to increase 'len' here though?  Might be better to
+	 * KASSERT() that rcv_nxt == tp->rcv_nxt?
 	 */
+	KASSERT(be32toh(rcv_nxt) == tp->rcv_nxt, ("%s: hole in data stream",
+	    __func__));
+#if 0
 	len += be32toh(rcv_nxt) - tp->rcv_nxt;
 	tp->rcv_nxt += len;
+#else
+	tp->rcv_nxt = len;
+#endif
 	tp->t_rcvtime = ticks;
 #ifndef USE_DDP_RX_FLOW_CONTROL
 	KASSERT(tp->rcv_wnd >= len, ("%s: negative window size", __func__));
@@ -560,6 +570,8 @@ do_rx_data_ddp(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	KASSERT(!(toep->flags & TPF_SYNQE),
 	    ("%s: toep %p claims to be a synq entry", __func__, toep));
 
+	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DATA_DDP",
+	    HD_OMIT_CHARS | 64);
 	vld = be32toh(cpl->ddpvld);
 	if (__predict_false(vld & DDP_ERR)) {
 		panic("%s: DDP error 0x%x (tid %d, toep %p)",
@@ -595,6 +607,8 @@ do_rx_ddp_complete(struct sge_iq *iq, const struct rss_header *rss,
 	KASSERT(!(toep->flags & TPF_SYNQE),
 	    ("%s: toep %p claims to be a synq entry", __func__, toep));
 
+	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DDP_COMPLETE",
+	    HD_OMIT_CHARS | 64);
 	handle_ddp_data(toep, cpl->ddp_report, cpl->rcv_nxt, 0);
 
 	return (0);
@@ -1548,9 +1562,26 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/* Disable flushing. */
 	ddp_flags_mask |= V_TF_DDP_BUF0_FLUSH(1) | V_TF_DDP_BUF1_FLUSH(1);
 
-	/* Enable PUSH. */
-	ddp_flags_mask |= V_TF_DDP_PUSH_DISABLE_0(1) |
-	    V_TF_DDP_PUSH_DISABLE_1(1);
+	/*
+	 * Use timer-based PUSH handling.
+	 *
+	 * XXX: We may want to use a different model instead where we
+	 * use PUSH no-invalidate so that we know there is pending data
+	 * but allow it to accumulate as long as there is no reader.
+	 * Instead, once a reader arrives and there is known-pending
+	 * data, we could flush the buffer to complete it.  Not sure
+	 * what to do about that for non-blocking sockets (they would
+	 * not want to block to wait for the flush to complete).
+	 */
+#if 0
+	ddp_flags |= V_TF_DDP_PUSH_DISABLE_0(1) |
+	    V_TF_DDP_PSH_NO_INVALIDATE0(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
+	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
+#endif
+	ddp_flags_mask |= V_TF_DDP_PSHF_ENABLE_0(1) |
+	    V_TF_DDP_PUSH_DISABLE_0(1)| V_TF_DDP_PSH_NO_INVALIDATE0(1) |
+	    V_TF_DDP_PSHF_ENABLE_1(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
+	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
 
 	/* Clear indicate out. */
 	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
@@ -1632,6 +1663,8 @@ refresh_static_ddp(struct toepcb *toep)
 	}
 	if (ddp_flags == 0)
 		return;
+
+	/* XXX: Might need to reset offset to 0? */
 	ddp_flags_mask = ddp_flags;
 	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
 		ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
