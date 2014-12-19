@@ -1595,46 +1595,6 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	return (0);
 }
 
-#if 0
-static int
-queue_static_ddp(struct socket *so, struct toepcb *toep, int db_idx)
-{
-	struct adapter *sc = td_adapter(toep->td);
-	struct ddp_buffer *db;
-	int buf_flag;
-	struct wrqe *wr;
-	uint64_t ddp_flags;
-
-	db = toep->db[db_idx];
-	buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
-
-	/*
-	 * Build the compound work request that tells the chip where to DMA the
-	 * payload.
-	 *
-	 * XXX: flags of 0 here isn't really ideal.  What we kind of
-	 * want is to use MSG_WAITALL by default I think, but have a
-	 * way to see how much data is pending and flip buffers for a
-	 * non-blocking "read" if there is a partial buffer of more than
-	 * the low water mark.
-	 */
-	ddp_flags = select_ddp_flags(so, 0, db_idx);
-
-	/*
-	 * XXX: I think offset of 0 is wrong once data is arriving.
-	 */
-	wr = mk_update_tcb_for_ddp(sc, toep, db_idx, 0, ddp_flags);
-	if (wr == NULL)
-		/*
-		 * We don't really cope with this failing.
-		 */
-		return (ENOMEM);
-	t4_wrq_tx(sc, wr);
-	toep->ddp_flags |= buf_flag;
-	return (0);
-}
-#endif
-
 static void
 refresh_static_ddp(struct toepcb *toep)
 {
@@ -1685,17 +1645,9 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	if (error)
 		goto out;
 
-#if 1
 	if ((toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) !=
 	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
 		refresh_static_ddp(toep);
-#else		
-	for (i = 0; i < nitems(toep->db); i++)
-		if (toep->db_static_data[i] == -1) {
-			queue_static_ddp(so, toep, i);
-			toep->db_static_data[i] = 0;
-		}
-#endif
 
 	/* We will never ever get anything unless we are or were connected. */
 	if (!(so->so_state & (SS_ISCONNECTED|SS_ISDISCONNECTED))) {
@@ -1911,7 +1863,6 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				free_static_ddp_buffer(toep->td, &dsb);
 				goto retry;
 			}
-#if 1
 			error = enable_static_ddp(toep, dsb.db);
 			if (error) {
 				SOCKBUF_UNLOCK(&so->so_rcv);
@@ -1919,29 +1870,13 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				free_static_ddp_buffer(toep->td, &dsb);
 				break;
 			}
-#endif
 			so->so_rcv.sb_flags |= SB_FIXEDSIZE;
 			toep->ddp_flags |= DDP_STATIC_BUF;
 			toep->db_static = dsb.obj;
 			toep->db_static_size = size;
 			toep->db_first_data = -1;
-#if 1
 			for (i = 0; i < nitems(toep->db); i++)
 				toep->db[i] = dsb.db[i];
-#else
-			/*
-			 * XXX: Should we wait for this to complete
-			 * before returning?
-			 *
-			 * Also, perhaps we should coalesce the various
-			 * writes to DDP_FLAGS into one request?
-			 */
-			enable_ddp(td_adapter(toep->td), toep);
-			for (i = 0; i < nitems(toep->db); i++) {
-				toep->db[i] = dsb.db[i];
-				queue_static_ddp(so, toep, i);
-			}
-#endif
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
 			error = 0;
