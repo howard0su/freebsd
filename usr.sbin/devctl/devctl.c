@@ -27,11 +27,39 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include <sys/linker_set.h>
 #include <devctl.h>
 #include <err.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
+
+struct devctl_command {
+	const char *name;
+	int (*handler)(int ac, char **av);
+};
+
+#define	DEVCTL_DATASET(name)	devctl_ ## name ## _table
+
+#define	DEVCTL_COMMAND(set, name, function)				\
+	static struct devctl_command function ## _devctl_command =	\
+	{ #name, function };						\
+	DATA_SET(DEVCTL_DATASET(set), function ## _devctl_command)
+
+#define	DEVCTL_TABLE(set, name)						\
+	SET_DECLARE(DEVCTL_DATASET(name), struct devctl_command);	\
+									\
+	static int							\
+	devctl_ ## name ## _table_handler(int ac, char **av)		\
+	{								\
+		return (mfi_table_handler(SET_BEGIN(DEVCTL_DATASET(name)), \
+		    SET_LIMIT(DEVCTL_DATASET(name)), ac, av));		\
+	}								\
+	DEVCTL_COMMAND(set, name, devctl_ ## name ## _table_handler)
+
+SET_DECLARE(DEVCTL_DATASET(top), struct devctl_command);
 
 static void
 usage(void)
@@ -46,31 +74,126 @@ usage(void)
 	exit(1);
 }
 
-int
-main(int argc, char *argv[])
+#ifdef notyet
+static int
+devctl_table_handler(struct devctl_command **start,
+    struct devctl_command **end, int ac, char **av)
+{
+	struct devctl_command **cmd;
+
+	if (ac < 2) {
+		warnx("The %s command requires a sub-command.", av[0]);
+		return (EINVAL);
+	}
+	for (cmd = start; cmd < end; cmd++) {
+		if (strcmp((*cmd)->name, av[1]) == 0)
+			return ((*cmd)->handler(ac - 1, av + 1));
+	}
+
+	warnx("%s is not a valid sub-command of %s.", av[1], av[0]);
+	return (ENOENT);
+}
+#endif
+
+static int
+help(int ac __unused, char **av __unused)
 {
 
-	if (argc != 3)
-		usage();
-	if (strcasecmp(argv[1], "attach") == 0) {
-		if (devctl_attach(argv[2]) < 0)
-			err(1, "Failed to attach %s", argv[2]);
-	} else if (strcasecmp(argv[1], "detach") == 0) {
-		if (devctl_detach(argv[2]) < 0)
-			err(1, "Failed to detach %s", argv[2]);
-	} else if (strcasecmp(argv[1], "disable") == 0) {
-		if (devctl_disable(argv[2]) < 0)
-			err(1, "Failed to disable %s", argv[2]);
-	} else if (strcasecmp(argv[1], "enable") == 0) {
-		if (devctl_enable(argv[2]) < 0)
-			err(1, "Failed to enable %s", argv[2]);
-	} else if (strcasecmp(argv[1], "suspend") == 0) {
-		if (devctl_suspend(argv[2]) < 0)
-			err(1, "Failed to suspend %s", argv[2]);
-	} else if (strcasecmp(argv[1], "resume") == 0) {
-		if (devctl_resume(argv[2]) < 0)
-			err(1, "Failed to resume %s", argv[2]);
-	} else
-		usage();
+	usage();
 	return (0);
+}
+DEVCTL_COMMAND(top, help, help);
+
+static int
+attach(int ac, char **av)
+{
+
+	if (ac != 2)
+		usage();
+	if (devctl_attach(av[1]) < 0)
+		err(1, "Failed to attach %s", av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(top, attach, attach);
+
+static int
+detach(int ac, char **av)
+{
+
+	if (ac != 2)
+		usage();
+	if (devctl_detach(av[1]) < 0)
+		err(1, "Failed to detach %s", av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(top, detach, detach);
+
+static int
+disable(int ac, char **av)
+{
+
+	if (ac != 2)
+		usage();
+	if (devctl_disable(av[1]) < 0)
+		err(1, "Failed to disable %s", av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(top, disable, disable);
+
+static int
+enable(int ac, char **av)
+{
+
+	if (ac != 2)
+		usage();
+	if (devctl_enable(av[1]) < 0)
+		err(1, "Failed to enable %s", av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(top, enable, enable);
+
+static int
+suspend(int ac, char **av)
+{
+
+	if (ac != 2)
+		usage();
+	if (devctl_suspend(av[1]) < 0)
+		err(1, "Failed to suspend %s", av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(top, suspend, suspend);
+
+static int
+resume(int ac, char **av)
+{
+
+	if (ac != 2)
+		usage();
+	if (devctl_resume(av[1]) < 0)
+		err(1, "Failed to resume %s", av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(top, resume, resume);
+
+int
+main(int ac, char *av[])
+{
+	struct devctl_command **cmd;
+
+	if (ac == 1)
+		usage();
+	ac--;
+	av++;
+
+	SET_FOREACH(cmd, DEVCTL_DATASET(top)) {
+		if (strcmp((*cmd)->name, av[0]) == 0) {
+			if ((*cmd)->handler(ac, av) != 0)
+				return (1);
+			else
+				return (0);
+		}
+	}
+	warnx("Unknown command %s.", av[0]);
+	return (1);
 }

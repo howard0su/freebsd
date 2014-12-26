@@ -1,7 +1,8 @@
 # $FreeBSD$
 
 PROG=	devctl
-MAN=	devctl.8
+#MAN=	devctl.8
+MAN=
 
 LIBADD=	devctl
 
