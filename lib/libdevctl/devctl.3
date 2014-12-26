@@ -25,7 +25,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd December 17, 2014
+.Dd December 26, 2014
 .Dt DEVCTL 3
 .Os
 .Sh NAME
@@ -105,7 +105,8 @@ The
 .Fn devctl_disable
 function disables a device.
 If the device is currently attached to a device driver,
-the device driver will be detached from the device.
+the device driver will be detached from the device,
+but the device will retain its current name.
 The device will remain disabled and detached until it is explicitly enabled
 via
 .Fn devctl_enable .
