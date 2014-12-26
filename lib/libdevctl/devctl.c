@@ -62,43 +62,60 @@ devctl_simple_request(u_long cmd, const char *name)
 }
 
 int
-devctl_attach(const char *name)
+devctl_attach(const char *device)
 {
 
-	return (devctl_simple_request(DEV_ATTACH, name));
+	return (devctl_simple_request(DEV_ATTACH, device));
 }
 
 int
-devctl_detach(const char *name)
+devctl_detach(const char *device)
 {
 
-	return (devctl_simple_request(DEV_DETACH, name));
+	return (devctl_simple_request(DEV_DETACH, device));
 }
 
 int
-devctl_enable(const char *name)
+devctl_enable(const char *device)
 {
 
-	return (devctl_simple_request(DEV_ENABLE, name));
+	return (devctl_simple_request(DEV_ENABLE, device));
 }
 
 int
-devctl_disable(const char *name)
+devctl_disable(const char *device)
 {
 
-	return (devctl_simple_request(DEV_DISABLE, name));
+	return (devctl_simple_request(DEV_DISABLE, device));
 }
 
 int
-devctl_suspend(const char *name)
+devctl_suspend(const char *device)
 {
 
-	return (devctl_simple_request(DEV_SUSPEND, name));
+	return (devctl_simple_request(DEV_SUSPEND, device));
 }
 
 int
-devctl_resume(const char *name)
+devctl_resume(const char *device)
 {
 
-	return (devctl_simple_request(DEV_RESUME, name));
+	return (devctl_simple_request(DEV_RESUME, device));
+}
+
+int
+devctl_set_driver(const char *device, const char *driver, bool force)
+{
+	struct devreq req;
+
+	memset(&req, 0, sizeof(req));
+	if (strlcpy(req.dr_name, device, sizeof(req.dr_name)) >=
+	    sizeof(req.dr_name)) {
+		errno = EINVAL;
+		return (-1);
+	}
+	req.dr_data = __DECONST(char *, driver);
+	if (force)
+		req.dr_flags |= DEVF_SET_DRIVER_DETACH;
+	return (devctl_request(DEV_SET_DRIVER, &req));
 }

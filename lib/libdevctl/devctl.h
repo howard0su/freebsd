@@ -29,11 +29,14 @@
 #ifndef __DEVCTL_H__
 #define	__DEVCTL_H__
 
-int	devctl_attach(const char *name);
-int	devctl_detach(const char *name);
-int	devctl_enable(const char *name);
-int	devctl_disable(const char *name);
-int	devctl_suspend(const char *name);
-int	devctl_resume(const char *name);
+#include <stdbool.h>
+
+int	devctl_attach(const char *device);
+int	devctl_detach(const char *device);
+int	devctl_enable(const char *device);
+int	devctl_disable(const char *device);
+int	devctl_suspend(const char *device);
+int	devctl_resume(const char *device);
+int	devctl_set_driver(const char *device, const char *driver, bool force);
 
 #endif /* !__DEVCTL_H__ */

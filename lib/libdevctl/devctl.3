@@ -42,27 +42,29 @@
 .Sh SYNOPSIS
 .In devctl.h
 .Ft int
-.Fn devctl_attach "const char *name"
+.Fn devctl_attach "const char *device"
 .Ft int
-.Fn devctl_detach "const char *name"
+.Fn devctl_detach "const char *device"
 .Ft int
-.Fn devctl_disable "const char *name"
+.Fn devctl_disable "const char *device"
 .Ft int
-.Fn devctl_enable "const char *name"
+.Fn devctl_enable "const char *device"
 .Ft int
-.Fn devctl_resume "const char *name"
+.Fn devctl_resume "const char *device"
 .Ft int
-.Fn devctl_suspend "const char *name"
+.Fn devctl_suspend "const char *device"
+.Ft int
+.Fn devctl_set_driver "const char *device" "const char *driver" "bool force"
 .Sh DESCRIPTION
 The
 .Nm
 library adjusts the state of devices in the kernel's internal device
 hierarchy.
 Each control operation accepts a
-.Fa name
+.Fa device
 argument that identifies the device to adjust.
 The
-.Fa name
+.Fa device
 may be specified as either the name of an existing device or as a
 bus-specific address.
 The following bus-specific address formats are currently supported:
@@ -122,9 +124,142 @@ but any device driver currently attached to the device will remain attached.
 The
 .Fn devctl_resume
 function resumes a suspended device to a fully working state.
+.Pp
+The
+.Fn devctl_set_driver
+function attaches a device driver named
+.Fa driver
+to a device.
+If the device is already attached and
+.Fa force
+is false,
+the request will fail.
+If the device is already attached and
+.Fa force
+is true,
+the device will be detached from its current device driver before it is
+attached to the new device driver.
+.Sh RETURN VALUES
+.Rv -std devctl_attach devctl_detach devctl_disable devctl_enable \
+devctl_suspend devctl_resume devctl_set_driver
+.Sh ERRORS
+In addition to specific errors noted below,
+all of the
+.Nm
+functions may fail for any of the errors described in
+.Xr open 2
+as well as:
+.Bl -tag -width Er
+.It Bq Er EINVAL
+The device name is too long.
+.It Bq Er ENOENT
+No existing device matches the specified name or location.
+.It Bq Er EPERM
+The current process is not permitted to adjust the state of
+.Fa device .
+.El
+.Pp
+The
+.Fn devctl_attach
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EBUSY
+The device is already attached.
+.It Bq Er ENOMEM
+An internal memory allocation request failed.
+.It Bq Er ENXIO
+The device is disabled.
+.It Bq Er ENXIO
+No suitable driver for the device could be found,
+or the driver failed to attach.
+.El
+.Pp
+The
+.Fn devctl_detach
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EBUSY
+The current device driver for
+.Fa device
+is busy and cannot detach at this time.
+.It Bq Er ENXIO
+The device is not attached to a driver.
+.El
+.Pp
+The
+.Fn devctl_enable
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EBUSY
+The device is already enabled.
+.It Bq Er ENOMEM
+An internal memory allocation request failed.
+.It Bq Er ENXIO
+No suitable driver for the device could be found,
+or the driver failed to attach.
+.El
+.Pp
+The
+.Fn devctl_disable
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EBUSY
+The current device driver for
+.Fa device
+is busy and cannot detach at this time.
+.It Bq Er ENXIO
+The device is already disabled.
+.El
+.Pp
+The
+.Fn devctl_suspend
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EBUSY
+The device is already suspended.
+.It Bq Er EINVAL
+The device to be suspended is the root bus device.
+.El
+.Pp
+The
+.Fn devctl_resume
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EINVAL
+The device is not suspended.
+.It Bq Er EINVAL
+The device to be resumed is the root bus device.
+.El
+.Pp
+The
+.Fn devctl_set_driver
+function may fail if:
+.Bl -tag -width Er
+.It Bq Er EBUSY
+The device is currently attached to a device driver and
+.Fa force
+is false.
+.It Bq Er EBUSY
+The current device driver for
+.Fa device
+is busy and cannot detach at this time.
+.It Bq Er EFAULT
+The
+.Fa driver
+argument points outside the process' allocated address space.
+.It Bq Er ENOENT
+No device driver with the requested name exists.
+.It Bq Er ENOMEM
+An internal memory allocation request failed.
+.It Bq Er ENXIO
+The device is disabled.
+.It Bq Er ENXIO
+The new device driver failed to attach.
+.El
 .Sh SEE ALSO
 .Xr devinfo 3 ,
-.Xr devstat 3
+.Xr devstat 3 ,
+.Xr devctl 8
 .Sh HISTORY
 The
 .Nm

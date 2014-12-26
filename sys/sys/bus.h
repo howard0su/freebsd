@@ -89,14 +89,13 @@ struct devreq_buffer {
 
 struct devreq {
 	char		dr_name[128];
+	int		dr_flags;		/* request-specific flags */
 	union {
 		struct devreq_buffer dru_buffer;
 		void	*dru_data;
-		int	dru_powerstate;
 	} dr_dru;
 #define	dr_buffer	dr_dru.dru_buffer	/* variable-sized buffer */
 #define	dr_data		dr_dru.dru_data		/* fixed-size buffer */
-#define	dr_powerstate	dr_dru.dru_powerstate	/* powerstate for suspend */
 };
 
 #define	DEV_ATTACH	_IOW('D', 1, struct devreq)
@@ -105,6 +104,10 @@ struct devreq {
 #define	DEV_DISABLE	_IOW('D', 4, struct devreq)
 #define	DEV_SUSPEND	_IOW('D', 5, struct devreq)
 #define	DEV_RESUME	_IOW('D', 6, struct devreq)
+#define	DEV_SET_DRIVER	_IOW('D', 7, struct devreq)
+
+/* Flags for DEV_SET_DRIVER. */
+#define	DEVF_SET_DRIVER_DETACH	0x0000001	/* Detach existing driver. */
 
 #ifdef _KERNEL
 

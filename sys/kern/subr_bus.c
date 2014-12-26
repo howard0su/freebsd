@@ -5100,6 +5100,7 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	case DEV_DISABLE:
 	case DEV_SUSPEND:
 	case DEV_RESUME:
+	case DEV_SET_DRIVER:
 		error = priv_check(td, PRIV_DRIVER);
 		if (error == 0)
 			error = find_device(req, &dev);
@@ -5190,6 +5191,49 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		}
 		error = BUS_RESUME_CHILD(device_get_parent(dev), dev);
 		break;
+	case DEV_SET_DRIVER: {
+		devclass_t dc;
+		char driver[128];
+
+		error = copyinstr(req->dr_data, driver, sizeof(driver), NULL);
+		if (error)
+			break;
+		if (dev->devclass != NULL &&
+		    strcmp(driver, dev->devclass->name) == 0)
+			/* XXX: Could possibly force DF_FIXEDCLASS on? */
+			break;
+
+		/* XXX: devclass_create() instead? */
+		dc = devclass_find(driver);
+		if (dc == NULL) {
+			error = ENOENT;
+			break;
+		}
+
+		/* Detach device if necessary. */
+		if (device_is_attached(dev)) {
+			if (req->dr_flags & DEVF_SET_DRIVER_DETACH)
+				error = device_detach(dev);
+			else
+				error = EBUSY;
+			if (error)
+				break;
+		}
+
+		/* Clear any previously-fixed device class and unit. */
+		if (dev->flags & DF_FIXEDCLASS)
+			devclass_delete_device(dev->devclass, dev);
+		dev->flags |= DF_WILDCARD;
+		dev->unit = -1;
+
+		/* Force the new device class. */
+		error = devclass_add_device(dc, dev);
+		if (error)
+			break;
+		dev->flags |= DF_FIXEDCLASS;
+		error = device_probe_and_attach(dev);
+		break;
+	}
 	}
 	mtx_unlock(&Giant);
 	return (error);
