@@ -274,16 +274,6 @@ at boot time.
 Ideally the device would keep its name allowing it to be used to re-enable
 the device later.
 .Pp
-The
-.Fn devctl_disable
-and
-.Fn devctl_enable
-functions do not update the corresponding kernel environment variable.
-This prevents
-.Fn devctl_enable
-from effectively re-enabling a device disabled at boot-time since the
-attempt to attach the device will re-disable it.
-.Pp
 If a device is suspended individually via
 .Fn devctl_suspend
 and the entire machine is subsequently suspended,
