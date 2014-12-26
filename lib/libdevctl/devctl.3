@@ -266,14 +266,6 @@ The
 library first appeared in
 .Fx 11.0 .
 .Sh BUGS
-When a device is disabled via
-.Fn devctl_disable
-it is fully detached meaning it will lose its device name.
-This does not match the state of using a loader hint to disable a device
-at boot time.
-Ideally the device would keep its name allowing it to be used to re-enable
-the device later.
-.Pp
 If a device is suspended individually via
 .Fn devctl_suspend
 and the entire machine is subsequently suspended,

@@ -5088,7 +5088,7 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 {
 	struct devreq *req;
 	device_t dev;
-	int error;
+	int error, old;
 
 	/* Locate the device to control. */
 	mtx_lock(&Giant);
@@ -5161,11 +5161,14 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		}
 
 		/*
-		 * XXX: Consider preserving the device's name
-		 * by skipping the final parts of detach to mimic
-		 * boot-time disabling.
+		 * Force DF_FIXEDCLASS on around detach to preserve
+		 * the existing name.
 		 */
+		old = dev->flags;
+		dev->flags |= DF_FIXEDCLASS;
 		error = device_detach(dev);
+		if (!(old & DF_FIXEDCLASS))
+			dev->flags &= ~DF_FIXEDCLASS;
 		if (error == 0)
 			device_disable(dev);
 		break;
