@@ -5141,9 +5141,16 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		 * attach the device rather than doing a full probe.
 		 */
 		device_enable(dev);
-		if (device_is_alive(dev))
+		if (device_is_alive(dev)) {
+			/*
+			 * If the device was disabled via a hint, clear
+			 * the hint.
+			 */
+			if (resource_disabled(dev->driver->name, dev->unit))
+				resource_unset_value(dev->driver->name,
+				    dev->unit, "disabled");
 			error = device_attach(dev);
-		else
+		} else
 			error = device_probe_and_attach(dev);
 		break;
 	case DEV_DISABLE:

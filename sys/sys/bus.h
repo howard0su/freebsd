@@ -557,6 +557,8 @@ int	resource_set_long(const char *name, int unit, const char *resname,
 			  long value);
 int	resource_set_string(const char *name, int unit, const char *resname,
 			    const char *value);
+int	resource_unset_value(const char *name, int unit, const char *resname);
+
 /*
  * Functions for maintaining and checking consistency of
  * bus information exported to userspace.
