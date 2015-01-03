@@ -5082,6 +5082,18 @@ find_device(struct devreq *req, device_t *devp)
 	return (0);
 }
 
+static bool
+driver_exists(struct device *bus, const char *driver)
+{
+	devclass_t dc;
+
+	for (dc = bus->devclass; dc != NULL; dc = dc->parent) {
+		if (devclass_find_driver_internal(dc, driver) != NULL)
+			return (true);
+	}
+	return (false);
+}
+
 static int
 devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
     struct thread *td)
@@ -5213,15 +5225,30 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		error = copyinstr(req->dr_data, driver, sizeof(driver), NULL);
 		if (error)
 			break;
+		if (driver[0] == '\0') {
+			error = EINVAL;
+			break;
+		}
 		if (dev->devclass != NULL &&
 		    strcmp(driver, dev->devclass->name) == 0)
 			/* XXX: Could possibly force DF_FIXEDCLASS on? */
 			break;
 
-		/* XXX: devclass_create() instead? */
-		dc = devclass_find(driver);
-		if (dc == NULL) {
+		/*
+		 * Scan drivers for this device's bus looking for at
+		 * least one matching driver.
+		 */
+		if (dev->parent == NULL) {
+			error = EINVAL;
+			break;
+		}
+		if (!driver_exists(dev->parent, driver)) {
 			error = ENOENT;
+			break;
+		}
+		dc = devclass_create(driver);
+		if (dc == NULL) {
+			error = ENOMEM;
 			break;
 		}
 
