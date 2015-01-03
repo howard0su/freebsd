@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD$");
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 
 struct devctl_command {
 	const char *name;
@@ -54,27 +55,32 @@ struct devctl_command {
 	static int							\
 	devctl_ ## name ## _table_handler(int ac, char **av)		\
 	{								\
-		return (mfi_table_handler(SET_BEGIN(DEVCTL_DATASET(name)), \
+		return (devctl_table_handler(SET_BEGIN(DEVCTL_DATASET(name)), \
 		    SET_LIMIT(DEVCTL_DATASET(name)), ac, av));		\
 	}								\
 	DEVCTL_COMMAND(set, name, devctl_ ## name ## _table_handler)
 
+static int	devctl_table_handler(struct devctl_command **start,
+    struct devctl_command **end, int ac, char **av);
+
 SET_DECLARE(DEVCTL_DATASET(top), struct devctl_command);
+
+DEVCTL_TABLE(top, set);
 
 static void
 usage(void)
 {
-	fprintf(stderr, "%s\n%s\n%s\n%s\n%s\n%s\n",
+	fprintf(stderr, "%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
 	    "usage: devctl attach device",
-	    "       devctl detach device",
-	    "       devctl disable device",
+	    "       devctl detach [-f] device",
+	    "       devctl disable [-f] device",
 	    "       devctl enable device",
 	    "       devctl suspend device",
-	    "       devctl resume device");
+	    "       devctl resume device",
+	    "       devctl set driver [-f] device driver");
 	exit(1);
 }
 
-#ifdef notyet
 static int
 devctl_table_handler(struct devctl_command **start,
     struct devctl_command **end, int ac, char **av)
@@ -93,7 +99,6 @@ devctl_table_handler(struct devctl_command **start,
 	warnx("%s is not a valid sub-command of %s.", av[1], av[0]);
 	return (ENOENT);
 }
-#endif
 
 static int
 help(int ac __unused, char **av __unused)
@@ -116,26 +121,70 @@ attach(int ac, char **av)
 }
 DEVCTL_COMMAND(top, attach, attach);
 
+static void
+detach_usage(void)
+{
+
+	fprintf(stderr, "usage: devctl detach [-f] device\n");
+	exit(1);
+}
+
 static int
 detach(int ac, char **av)
 {
+	bool force;
+	int ch;
 
-	if (ac != 2)
-		usage();
-	if (devctl_detach(av[1]) < 0)
-		err(1, "Failed to detach %s", av[1]);
+	force = false;
+	while ((ch = getopt(ac, av, "f")) != -1)
+		switch (ch) {
+		case 'f':
+			force = true;
+			break;
+		default:
+			detach_usage();
+		}
+	ac -= optind;
+	av += optind;
+
+	if (ac != 1)
+		detach_usage();
+	if (devctl_detach(av[0], force) < 0)
+		err(1, "Failed to detach %s", av[0]);
 	return (0);
 }
 DEVCTL_COMMAND(top, detach, detach);
 
+static void
+disable_usage(void)
+{
+
+	fprintf(stderr, "usage: devctl disable [-f] device\n");
+	exit(1);
+}
+
 static int
 disable(int ac, char **av)
 {
+	bool force;
+	int ch;
 
-	if (ac != 2)
-		usage();
-	if (devctl_disable(av[1]) < 0)
-		err(1, "Failed to disable %s", av[1]);
+	force = false;
+	while ((ch = getopt(ac, av, "f")) != -1)
+		switch (ch) {
+		case 'f':
+			force = true;
+			break;
+		default:
+			disable_usage();
+		}
+	ac -= optind;
+	av += optind;
+
+	if (ac != 1)
+		disable_usage();
+	if (devctl_disable(av[0], force) < 0)
+		err(1, "Failed to disable %s", av[0]);
 	return (0);
 }
 DEVCTL_COMMAND(top, disable, disable);
@@ -175,6 +224,40 @@ resume(int ac, char **av)
 	return (0);
 }
 DEVCTL_COMMAND(top, resume, resume);
+
+static void
+set_driver_usage(void)
+{
+
+	fprintf(stderr, "usage: devctl set driver [-f] device driver\n");
+	exit(1);
+}
+
+static int
+set_driver(int ac, char **av)
+{
+	bool force;
+	int ch;
+
+	force = false;
+	while ((ch = getopt(ac, av, "f")) != -1)
+		switch (ch) {
+		case 'f':
+			force = true;
+			break;
+		default:
+			set_driver_usage();
+		}
+	ac -= optind;
+	av += optind;
+
+	if (ac != 2)
+		set_driver_usage();
+	if (devctl_set_driver(av[0], av[1], force) < 0)
+		err(1, "Failed to set %s driver to %s", av[0], av[1]);
+	return (0);
+}
+DEVCTL_COMMAND(set, driver, set_driver);
 
 int
 main(int ac, char *av[])

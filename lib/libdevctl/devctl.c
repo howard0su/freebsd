@@ -48,7 +48,7 @@ devctl_request(u_long cmd, struct devreq *req)
 }
 
 static int
-devctl_simple_request(u_long cmd, const char *name)
+devctl_simple_request(u_long cmd, const char *name, int flags)
 {
 	struct devreq req;
 
@@ -58,6 +58,7 @@ devctl_simple_request(u_long cmd, const char *name)
 		errno = EINVAL;
 		return (-1);
 	}
+	req.dr_flags = flags;
 	return (devctl_request(cmd, &req));
 }
 
@@ -65,42 +66,44 @@ int
 devctl_attach(const char *device)
 {
 
-	return (devctl_simple_request(DEV_ATTACH, device));
+	return (devctl_simple_request(DEV_ATTACH, device, 0));
 }
 
 int
-devctl_detach(const char *device)
+devctl_detach(const char *device, bool force)
 {
 
-	return (devctl_simple_request(DEV_DETACH, device));
+	return (devctl_simple_request(DEV_DETACH, device, force ?
+	    DEVF_FORCE_DETACH : 0));
 }
 
 int
 devctl_enable(const char *device)
 {
 
-	return (devctl_simple_request(DEV_ENABLE, device));
+	return (devctl_simple_request(DEV_ENABLE, device, 0));
 }
 
 int
-devctl_disable(const char *device)
+devctl_disable(const char *device, bool force_detach)
 {
 
-	return (devctl_simple_request(DEV_DISABLE, device));
+	return (devctl_simple_request(DEV_DISABLE, device, force_detach ?
+	    DEVF_FORCE_DETACH : 0));
 }
 
 int
 devctl_suspend(const char *device)
 {
 
-	return (devctl_simple_request(DEV_SUSPEND, device));
+	return (devctl_simple_request(DEV_SUSPEND, device, 0));
 }
 
 int
 devctl_resume(const char *device)
 {
 
-	return (devctl_simple_request(DEV_RESUME, device));
+	return (devctl_simple_request(DEV_RESUME, device, 0));
 }
 
 int

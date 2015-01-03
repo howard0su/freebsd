@@ -32,9 +32,9 @@
 #include <stdbool.h>
 
 int	devctl_attach(const char *device);
-int	devctl_detach(const char *device);
+int	devctl_detach(const char *device, bool force);
 int	devctl_enable(const char *device);
-int	devctl_disable(const char *device);
+int	devctl_disable(const char *device, bool force_detach);
 int	devctl_suspend(const char *device);
 int	devctl_resume(const char *device);
 int	devctl_set_driver(const char *device, const char *driver, bool force);

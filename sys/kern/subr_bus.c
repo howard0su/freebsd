@@ -5125,10 +5125,16 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 			error = device_probe_and_attach(dev);
 		break;
 	case DEV_DETACH:
-		if (!device_is_attached(dev))
+		if (!device_is_attached(dev)) {
 			error = ENXIO;
-		else
-			error = device_detach(dev);
+			break;
+		}
+		if (!(req->dr_flags & DEVF_FORCE_DETACH)) {
+			error = device_quiesce(dev);
+			if (error)
+				break;
+		}
+		error = device_detach(dev);
 		break;
 	case DEV_ENABLE:
 		if (device_is_enabled(dev)) {
@@ -5158,6 +5164,12 @@ devctl2_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		if (!device_is_enabled(dev)) {
 			error = ENXIO;
 			break;
+		}
+
+		if (!(req->dr_flags & DEVF_FORCE_DETACH)) {
+			error = device_quiesce(dev);
+			if (error)
+				break;
 		}
 
 		/*
