@@ -384,7 +384,7 @@ static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 	    ("static DDP socket buffer has data mismatch (cc %zu first %d)", cc,
 	    toep->db_first_data));
 	KASSERT(cc == sbused(sb),
-	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc, sb->sb_cc));
+	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc, sbused(sb)));
 #endif
 }
 
@@ -1663,7 +1663,8 @@ deliver:
 	tdr->offset = toep->db_first_data * toep->db_static_size;
 	tdr->length = toep->db_static_data[toep->db_first_data];
 	toep->db_static_data[toep->db_first_data] = -1;
-	sbused(sb) -= tdr->length;
+	sb->sb_acc -= tdr->length;
+	sb->sb_ccc -= tdr->length;
 
 	toep->db_first_data ^= 1;
 	if (toep->db_static_data[toep->db_first_data] <= 0)
