@@ -383,7 +383,7 @@ static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 	KASSERT((cc == 0) == (toep->db_first_data == -1),
 	    ("static DDP socket buffer has data mismatch (cc %zu first %d)", cc,
 	    toep->db_first_data));
-	KASSERT(cc == sb->sb_cc,
+	KASSERT(cc == sbused(sb),
 	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc, sb->sb_cc));
 #endif
 }
@@ -456,16 +456,17 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		toep->db_static_data[db_idx] = len;
 
 		/* XXX: Too much duplication. */
-		KASSERT(toep->sb_cc >= sb->sb_cc,
+		KASSERT(toep->sb_cc >= sbused(sb),
 		    ("%s: sb %p has more data (%d) than last time (%d).",
-		    __func__, sb, sb->sb_cc, toep->sb_cc));
-		toep->rx_credits += toep->sb_cc - sb->sb_cc;
+		    __func__, sb, sbused(sb), toep->sb_cc));
+		toep->rx_credits += toep->sb_cc - sbused(sb);
 #ifdef USE_DDP_RX_FLOW_CONTROL
 		toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
 #endif
-		sb->sb_cc += len;
+		sb->sb_ccc += len;
+		sb->sb_acc += len;
 		static_ddp_sbcheck(toep, sb);
-		toep->sb_cc = sb->sb_cc;
+		toep->sb_cc = sbused(sb);
 		goto wakeup;
 	}
 	m = get_ddp_mbuf(len);
@@ -922,9 +923,9 @@ handle_ddp(struct socket *so, struct uio *uio, int flags, int error)
 	SOCKBUF_LOCK_ASSERT(sb);
 
 #if 0
-	if (sb->sb_cc + sc->tt.ddp_thres > uio->uio_resid) {
+	if (sbused(sb) + sc->tt.ddp_thres > uio->uio_resid) {
 		CTR4(KTR_CXGBE, "%s: sb_cc %d, threshold %d, resid %d",
-		    __func__, sb->sb_cc, sc->tt.ddp_thres, uio->uio_resid);
+		    __func__, sbused(sb), sc->tt.ddp_thres, uio->uio_resid);
 	}
 #endif
 
@@ -1612,7 +1613,7 @@ read_static_data(struct socket *so, struct toepcb *toep,
 restart:
 	/* Abort if socket has reported problems. */
 	if (so->so_error != 0) {
-		if (sb->sb_cc > 0)
+		if (sbused(sb) > 0)
 			goto deliver;
 		error = so->so_error;
 		so->so_error = 0;
@@ -1621,7 +1622,7 @@ restart:
 
 	/* Door is closed.  Deliver what is left, if any. */
 	if (sb->sb_state & SBS_CANTRCVMORE) {
-		if (sb->sb_cc > 0)
+		if (sbused(sb) > 0)
 			goto deliver;
 		else {
 			tdr->offset = 0;
@@ -1631,16 +1632,16 @@ restart:
 	}
 
 	/* Socket buffer is empty and we shall not block. */
-	if (sb->sb_cc == 0 && (so->so_state & SS_NBIO)) {
+	if (sbused(sb) == 0 && (so->so_state & SS_NBIO)) {
 		error = EAGAIN;
 		goto out;
 	}
 
 	/* Socket buffer got some data that we shall deliver now. */
-	if (sb->sb_cc > 0 && 
+	if (sbused(sb) > 0 && 
 	    ((so->so_state & SS_NBIO) ||
-	     sb->sb_cc >= sb->sb_lowat ||
-	     sb->sb_cc >= sb->sb_hiwat) ) {
+	     sbused(sb) >= sb->sb_lowat ||
+	     sbused(sb) >= sb->sb_hiwat) ) {
 		goto deliver;
 	}
 
@@ -1655,14 +1656,14 @@ restart:
 
 deliver:
 	SOCKBUF_LOCK_ASSERT(&so->so_rcv);
-	KASSERT(sb->sb_cc > 0, ("%s: sockbuf empty", __func__));
+	KASSERT(sbused(sb) > 0, ("%s: sockbuf empty", __func__));
 	KASSERT(toep->db_first_data == 0 || toep->db_first_data == 1,
 	    ("%s: db_first_data wrong (%d)", __func__, toep->db_first_data));
 
 	tdr->offset = toep->db_first_data * toep->db_static_size;
 	tdr->length = toep->db_static_data[toep->db_first_data];
 	toep->db_static_data[toep->db_first_data] = -1;
-	sb->sb_cc -= tdr->length;
+	sbused(sb) -= tdr->length;
 
 	toep->db_first_data ^= 1;
 	if (toep->db_static_data[toep->db_first_data] <= 0)
