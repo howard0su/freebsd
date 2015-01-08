@@ -1081,7 +1081,7 @@ acpi_parse_pxm(device_t dev)
 	ACPI_STATUS status;
 	int pxm;
 
-	handle = acpi_get_handle(child);
+	handle = acpi_get_handle(dev);
 	if (handle == NULL)
 		return (-1);
 	status = acpi_GetInteger(handle, "_PXM", &pxm);
