@@ -289,7 +289,7 @@ kern_execve(td, args, mac_p)
 	    args->endp - args->begin_envv);
 	if (p->p_flag & P_HADTHREADS) {
 		PROC_LOCK(p);
-		if (thread_single(SINGLE_BOUNDARY)) {
+		if (thread_single(p, SINGLE_BOUNDARY)) {
 			PROC_UNLOCK(p);
 	       		exec_free_args(args);
 			return (ERESTART);	/* Try again later. */
@@ -308,9 +308,9 @@ kern_execve(td, args, mac_p)
 		 * force other threads to suicide.
 		 */
 		if (error == 0)
-			thread_single(SINGLE_EXIT);
+			thread_single(p, SINGLE_EXIT);
 		else
-			thread_single_end();
+			thread_single_end(p, SINGLE_BOUNDARY);
 		PROC_UNLOCK(p);
 	}
 	if ((td->td_pflags & TDP_EXECVMSPC) != 0) {
@@ -688,10 +688,8 @@ interpret:
 		 * Close any file descriptors 0..2 that reference procfs,
 		 * then make sure file descriptors 0..2 are in use.
 		 *
-		 * setugidsafety() may call closef() and then pfind()
-		 * which may grab the process lock.
-		 * fdcheckstd() may call falloc() which may block to
-		 * allocate memory, so temporarily drop the process lock.
+		 * Both fdsetugidsafety() and fdcheckstd() may call functions
+		 * taking sleepable locks, so temporarily drop our locks.
 		 */
 		PROC_UNLOCK(p);
 		VOP_UNLOCK(imgp->vp, 0);

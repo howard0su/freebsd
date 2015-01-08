@@ -986,7 +986,7 @@ igb_mq_start(struct ifnet *ifp, struct mbuf *m)
 	 * If everything is setup correctly, it should be the
 	 * same bucket that the current CPU we're on is.
 	 */
-	if ((m->m_flags & M_FLOWID) != 0) {
+	if (M_HASHTYPE_GET(m) != M_HASHTYPE_NONE) {
 #ifdef	RSS
 		if (rss_hash2bucket(m->m_pkthdr.flowid,
 		    M_HASHTYPE_GET(m), &bucket_id) == 0) {
@@ -2905,6 +2905,10 @@ igb_setup_msix(struct adapter *adapter)
 	queues = (mp_ncpus > (msgs-1)) ? (msgs-1) : mp_ncpus;
 #endif
 
+	/* Override via tuneable */
+	if (igb_num_queues != 0)
+		queues = igb_num_queues;
+
 #ifdef	RSS
 	/* If we're doing RSS, clamp at the number of RSS buckets */
 	if (queues > rss_getnumbuckets())
@@ -2932,12 +2936,10 @@ igb_setup_msix(struct adapter *adapter)
 			maxqueues = 1;
 			break;
 	}
+
+	/* Final clamp on the actual hardware capability */
 	if (queues > maxqueues)
 		queues = maxqueues;
-
-	/* Manual override */
-	if (igb_num_queues != 0)
-		queues = igb_num_queues;
 
 	/*
 	** One vector (RX/TX pair) per queue
@@ -5181,7 +5183,6 @@ igb_rxeof(struct igb_queue *que, int count, int *done)
 			/* XXX set flowtype once this works right */
 			rxr->fmp->m_pkthdr.flowid = 
 			    le32toh(cur->wb.lower.hi_dword.rss);
-			rxr->fmp->m_flags |= M_FLOWID;
 			switch (pkt_info & E1000_RXDADV_RSSTYPE_MASK) {
 			case E1000_RXDADV_RSSTYPE_IPV4_TCP:
 				M_HASHTYPE_SET(rxr->fmp, M_HASHTYPE_RSS_TCP_IPV4);
@@ -5211,11 +5212,11 @@ igb_rxeof(struct igb_queue *que, int count, int *done)
 			
 			default:
 				/* XXX fallthrough */
-				M_HASHTYPE_SET(rxr->fmp, M_HASHTYPE_NONE);
+				M_HASHTYPE_SET(rxr->fmp, M_HASHTYPE_OPAQUE);
 			}
 #elif !defined(IGB_LEGACY_TX)
 			rxr->fmp->m_pkthdr.flowid = que->msix;
-			rxr->fmp->m_flags |= M_FLOWID;
+			M_HASHTYPE_SET(rxr->fmp, M_HASHTYPE_OPAQUE);
 #endif
 			sendmp = rxr->fmp;
 			/* Make sure to set M_PKTHDR. */

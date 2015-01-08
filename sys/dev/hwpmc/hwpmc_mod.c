@@ -320,7 +320,8 @@ static struct syscall_module_data pmc_syscall_mod = {
 	NULL,
 	&pmc_syscall_num,
 	&pmc_sysent,
-	{ 0, NULL }
+	{ 0, NULL },
+	SY_THR_STATIC_KLD,
 };
 
 static moduledata_t pmc_mod = {
@@ -4748,8 +4749,9 @@ pmc_initialize(void)
 	if (pmc_callchaindepth <= 0 ||
 	    pmc_callchaindepth > PMC_CALLCHAIN_DEPTH_MAX) {
 		(void) printf("hwpmc: tunable \"callchaindepth\"=%d out of "
-		    "range.\n", pmc_callchaindepth);
-		pmc_callchaindepth = PMC_CALLCHAIN_DEPTH;
+		    "range - using %d.\n", pmc_callchaindepth,
+		    PMC_CALLCHAIN_DEPTH_MAX);
+		pmc_callchaindepth = PMC_CALLCHAIN_DEPTH_MAX;
 	}
 
 	md = pmc_md_initialize();
