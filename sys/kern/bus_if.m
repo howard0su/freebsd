@@ -721,4 +721,3 @@ METHOD int get_cpus {
 	enum cpu_sets	_op;
 	cpuset_t	*_cpuset;
 } DEFAULT bus_generic_get_cpus;
-
