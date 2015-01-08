@@ -2541,19 +2541,10 @@ igb_allocate_msix(struct adapter *adapter)
 		 * corresponding CPU.
 		 */
 		if (adapter->num_queues > 1) {
-			char cpusetbuf[CPUSETBUFSIZ];
-			
-			device_printf(dev, "CPU list before: %s\n",
-			    cpusetobj_strprint(cpusetbuf, &cpus));
 			cpu_id = CPU_FFS(&cpus) - 1;
-			device_printf(dev, "chose CPU %d", cpu_id);
 			CPU_CLR(cpu_id, &cpus);
-			device_printf(dev, "CPU list after: %s\n",
-			    cpusetobj_strprint(cpusetbuf, &cpus));
-			if (CPU_EMPTY(&cpus)) {
-				device_printf(dev, "CPU list is empty\n");
+			if (CPU_EMPTY(&cpus))
 				cpus = adapter->cpus;
-			}
 		}
 #else
 		/*
