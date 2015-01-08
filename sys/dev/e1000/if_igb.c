@@ -2545,7 +2545,7 @@ igb_allocate_msix(struct adapter *adapter)
 			
 			device_printf(dev, "CPU list before: %s\n",
 			    cpusetobj_strprint(cpusetbuf, &cpus));
-			cpu_id = CPU_FFS(&cpus);
+			cpu_id = CPU_FFS(&cpus) - 1;
 			device_printf(dev, "chose CPU %d", cpu_id);
 			CPU_CLR(cpu_id, &cpus);
 			device_printf(dev, "CPU list after: %s\n",
