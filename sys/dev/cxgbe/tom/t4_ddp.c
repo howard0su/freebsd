@@ -1504,8 +1504,8 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
 
 #if 1
-	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags,
-	    ddp_flags_mask);
+	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags_mask,
+	    ddp_flags);
 
 	ddp_flags = 0;
 	ddp_flags_mask = 0;
