@@ -1706,7 +1706,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 		if (!(inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED))) {
 			tp = intotcpcb(inp);
 			toep = tp->t_toe;
-			if (toep->ddp_flags & DDP_STATIC_BUF)
+			if (toep != NULL && toep->ddp_flags & DDP_STATIC_BUF)
 				panic(
 			    "Cannot change socket buffer of DDP connection");
 		}
@@ -1733,6 +1733,10 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	}
 	tp = intotcpcb(inp);
 	toep = tp->t_toe;
+	if (toep == NULL) {
+		INP_WUNLOCK(inp);
+		return (ENOPROTOOPT);
+	}
 	switch (sopt->sopt_dir) {
 	case SOPT_SET:
 		switch (sopt->sopt_name) {
