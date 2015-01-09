@@ -1500,10 +1500,11 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/* Disable indicate. */
 	ddp_flags_mask |= V_TF_DDP_BUF0_INDICATE(1) | V_TF_DDP_BUF1_INDICATE(1);
 
-	/* Clear indicate out. */
+	/* Set indicate out to doubly disable indicates. */
+	ddp_flags |= V_TF_DDP_INDICATE_OUT(1);
 	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
 
-#if 1
+#if 0
 	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags_mask,
 	    ddp_flags);
 
