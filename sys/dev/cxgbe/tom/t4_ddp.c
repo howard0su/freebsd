@@ -1349,6 +1349,7 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 		m = vm_page_grab(dsb->obj, idx, VM_ALLOC_NORMAL |
 		    VM_ALLOC_COUNT(pages * nitems(dsb->db) - idx - 1) |
 		    VM_ALLOC_WIRED | VM_ALLOC_ZERO);
+		m->valid = VM_PAGE_BITS_ALL;
 		pp[idx / pages][idx % pages] = m;
 		vm_page_xunbusy(m);
 	}
