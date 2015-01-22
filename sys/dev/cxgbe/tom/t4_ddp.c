@@ -520,8 +520,6 @@ do_rx_data_ddp(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	KASSERT(!(toep->flags & TPF_SYNQE),
 	    ("%s: toep %p claims to be a synq entry", __func__, toep));
 
-	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DATA_DDP: ",
-	    HD_OMIT_CHARS | 64);
 	vld = be32toh(cpl->ddpvld);
 	if (__predict_false(vld & DDP_ERR)) {
 		panic("%s: DDP error 0x%x (tid %d, toep %p)",
@@ -557,8 +555,6 @@ do_rx_ddp_complete(struct sge_iq *iq, const struct rss_header *rss,
 	KASSERT(!(toep->flags & TPF_SYNQE),
 	    ("%s: toep %p claims to be a synq entry", __func__, toep));
 
-	hexdump(rss, sizeof(*rss) + sizeof(*cpl), "RX_DDP_COMPLETE: ",
-	    HD_OMIT_CHARS | 64);
 	handle_ddp_data(toep, cpl->ddp_report, cpl->rcv_nxt, 0);
 
 	return (0);
@@ -1504,14 +1500,6 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/* Set indicate out to doubly disable indicates. */
 	ddp_flags |= V_TF_DDP_INDICATE_OUT(1);
 	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
-
-#if 0
-	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags_mask,
-	    ddp_flags);
-
-	ddp_flags = 0;
-	ddp_flags_mask = 0;
-#endif
 
 	/* Mark both buffers valid. */
 	ddp_flags |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
