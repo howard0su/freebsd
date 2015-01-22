@@ -1686,6 +1686,21 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	 * XXX: Cannot block SO_RCVBUF changes, so depending on newly-added
 	 * SB_FIXEDSIZE.  (Eventually we could choose to cope by adjusting
 	 * the buffers).
+	 *
+	 * A more realistic approach is that we know that these
+	 * buffers can only be 16MB in size, so we could always create
+	 * the object with a fixed size of 16MB * 2 but only fill in
+	 * wired pages (and write page pods) for the size that is
+	 * actually used.  When the socket buffer size increases we
+	 * could then wire in additional pages (or wire any pages
+	 * already faulted in to the object via user mappings) and
+	 * update the page pods.  User mappings would always map the
+	 * full 32MB, so they would not have to change when the socket
+	 * buffer size changed.  If userland is well behaved and only
+	 * reads pages it is told to read, only enough pages to back
+	 * the buffers will be allocated and wired.  If userland reads
+	 * additional pages they will be able to use additional wired
+	 * memory, but there are no other consequences.
 	 */
 #ifdef INVARIANTS
 	if (sopt->sopt_level == SOL_SOCKET && sopt->sopt_dir == SOPT_SET &&
