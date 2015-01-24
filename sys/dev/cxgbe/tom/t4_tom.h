@@ -95,6 +95,29 @@ struct ddp_buffer {
 	vm_page_t *pages;
 };
 
+/*
+ * Data is placed into the DDP buffer by the NIC starting at offset 0.
+ * As data completion messages arrive, the offset field in the
+ * associated ddp_buffer is updated (offsets less than offset contain
+ * valid data placed by the card until the buffer is fully consumed).
+ *
+ * When userland reads data from the buffer, it is given a range of
+ * bytes starting at the current read_index and ending at one byte
+ * before the current write offset, and the read_index is advanced to
+ * the current write offset.  Offset less than read_index contain
+ * valid data that has already been given to userland.
+ *
+ * For a bulk transfer connection there should only be one completion
+ * message for each buffer either to note that the buffer has been
+ * fully consumed, or when the FIN arrives.  However, for connections
+ * using PSH packets, each PSH packet will trigger a separate data
+ * completion message.  These connections may satisfy multiple reads
+ * from a single DDP buffer before it is fully consumed.
+ */
+struct static_ddp_state {
+	int read_index;
+};
+
 struct toepcb {
 	TAILQ_ENTRY(toepcb) link; /* toep_list */
 	u_int flags;		/* miscellaneous flags */
@@ -127,7 +150,7 @@ struct toepcb {
 	struct vm_object *db_static; /* split into two equal-sized buffers */
 	vm_size_t db_static_size;
 	int db_first_data;	/* If both have data, which is first */
-	int db_static_data[2];	/* 0 when queued, > 0 for pending data, -1 while userland reads */
+	struct static_ddp_state db_static_data[2];
 
 	/* Tx software descriptor */
 	uint8_t txsd_total;

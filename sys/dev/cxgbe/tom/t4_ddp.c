@@ -371,15 +371,16 @@ static void
 static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 {
 #ifdef INVARIANTS
-	size_t cc;
-	int i;
+	size_t cc_total;
+	int i, cc_per[2];
 
-	cc = 0;
-	for (i = 0; i < nitems(toep->db); i++)
-		if (toep->db_static_data[i] > 0)
-			cc += toep->db_static_data[i];
-	KASSERT(toep->db_first_data == -1 ||
-	    toep->db_static_data[toep->db_first_data] > 0,
+	cc_total = 0;
+	for (i = 0; i < nitems(toep->db); i++) {
+		cc_per[i] = toep->db[i]->offset -
+		    toep->db_static_data[i].read_index;
+		cc_total += cc_per[i];
+	}
+	KASSERT(toep->db_first_data == -1 || cc_per[toep->db_first_data] > 0,
 	    ("static DDP socket buffer has no data in first %d",
 	    toep->db_first_data));
 	KASSERT((cc == 0) == (toep->db_first_data == -1),
@@ -403,8 +404,9 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 
 	db_flag = report & F_DDP_BUF_IDX ? DDP_BUF1_ACTIVE : DDP_BUF0_ACTIVE;
 
-	if (__predict_false(!(report & F_DDP_INV)))
-		CXGBE_UNIMPLEMENTED("DDP buffer still valid");
+	KASSERT((report & F_DDP_INV) ||
+	    ((toep->ddp_flags & DDP_STATIC_BUF) && (report & F_DDP_PSH)),
+	    "DDP buffer still valid");
 
 	INP_WLOCK(inp);
 	so = inp_inpcbtosocket(inp);
@@ -453,9 +455,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
 		if (toep->db_first_data == -1)
 			toep->db_first_data = db_idx;
-		KASSERT(toep->db_static_data[db_idx] == 0,
-		    ("%s: static buffer %d has pending data", __func__, db_idx));
-		toep->db_static_data[db_idx] = len;
+		toep->db[db_idx]->offset += len;
 
 		/* XXX: Too much duplication. */
 		KASSERT(toep->sb_cc >= sbused(sb),
@@ -492,7 +492,8 @@ wakeup:
 	KASSERT(toep->ddp_flags & db_flag,
 	    ("%s: DDP buffer not active. toep %p, ddp_flags 0x%x, report 0x%x",
 	    __func__, toep, toep->ddp_flags, report));
-	toep->ddp_flags &= ~db_flag;
+	if (report & F_DDP_INV)
+		toep->ddp_flags &= ~db_flag;
 	sorwakeup_locked(so);
 	SOCKBUF_UNLOCK_ASSERT(sb);
 
@@ -1404,7 +1405,7 @@ map_object(vm_object_t obj, vm_offset_t *vaddr)
 }
 
 static struct wrqe *
-mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
+mk_update_tcb_for_static_ddp_init(struct adapter *sc, struct toepcb *toep,
     struct ddp_buffer *db[2], uint64_t ddp_flags, uint64_t ddp_flags_mask)
 {
 	struct wrqe *wr;
@@ -1511,15 +1512,16 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/*
 	 * Use timer-based PUSH handling.
 	 *
-	 * XXX: We may want to use a different model instead where we
-	 * use PUSH no-invalidate so that we know there is pending data
-	 * but allow it to accumulate as long as there is no reader.
-	 * Instead, once a reader arrives and there is known-pending
-	 * data, we could flush the buffer to complete it.  Not sure
-	 * what to do about that for non-blocking sockets (they would
-	 * not want to block to wait for the flush to complete).
+	 * XXX: I think what we want to use instead is PUSH no-invalidate
+	 * without any other push completions.  We can keep track of how
+	 * much of the buffer has been consumed and how much of that
+	 * consumed buffer has been signalled to userland but allow the
+	 * multiple PUSH packets to be packed into a single DDP buffer.
+	 * For any socket read we will always know how much pending data
+	 * is in the not-yet-filled DDP buffer and be able to return that
+	 * immediately both for block and non-blocking sockets.
 	 */
-#if 0
+#ifdef PUSH_NO_INVALIDATE
 	ddp_flags |= V_TF_DDP_PUSH_DISABLE_0(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE0(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
@@ -1532,7 +1534,7 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/* Mark buffer 0 as active. */
 	ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
 
-	wr = mk_update_tcb_for_static_ddp(sc, toep, db, ddp_flags,
+	wr = mk_update_tcb_for_static_ddp_init(sc, toep, db, ddp_flags,
 	    ddp_flags_mask);
 	if (wr == NULL)
 		return (ENOMEM);
@@ -1541,36 +1543,99 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	return (0);
 }
 
+static struct wrqe *
+mk_update_tcb_for_static_ddp_refresh(struct adapter *sc, struct toepcb *toep,
+    uint64_t ddp_flags, uint64_t ddp_flags_mask)
+{
+	struct wrqe *wr;
+	struct work_request_hdr *wrh;
+	struct ulp_txpkt *ulpmc;
+	int len;
+
+	/*
+	 * We'll send a compound work request that has 2 or 3 SET_TCB_FIELDs
+	 * and an RX_DATA_ACK (with RX_MODULATE to speed up delivery).
+	 *
+	 * The work request header is 16B and always ends at a 16B boundary.
+	 * The ULPTX master commands that follow must all end at 16B boundaries
+	 * too so we round up the size to 16.
+	 */
+	len = sizeof(*wrh) + 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
+	if ((ddp_flags & (V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1))) ==
+	    (V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1)))
+		len += roundup2(LEN__SET_TCB_FIELD_ULP, 16);
+	len += roundup2(LEN__RX_DATA_ACK_ULP, 16);
+
+	wr = alloc_wrqe(len, toep->ctrlq);
+	if (wr == NULL)
+		return (NULL);
+	wrh = wrtod(wr);
+	INIT_ULPTX_WRH(wrh, len, 1, 0);	/* atomic */
+	ulpmc = (struct ulp_txpkt *)(wrh + 1);
+
+	/* Reset the offset of each DDP buffer being re-enabled. */
+	if (ddp_flags & V_TF_DDP_BUF0_VALID(1))
+		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+		    W_TCB_RX_DDP_BUF0_OFFSET,
+		    V_TCB_RX_DDP_BUF0_OFFSET(M_TCB_RX_DDP_BUF0_OFFSET),
+		    V_TCB_RX_DDP_BUF0_OFFSET(0));
+
+	if (ddp_flags & V_TF_DDP_BUF1_VALID(1))
+		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+		    W_TCB_RX_DDP_BUF1_OFFSET,
+		    V_TCB_RX_DDP_BUF1_OFFSET(M_TCB_RX_DDP_BUF1_OFFSET),
+		    V_TCB_RX_DDP_BUF1_OFFSET(0));
+
+	/* Update DDP flags */
+	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep, W_TCB_RX_DDP_FLAGS,
+	    ddp_flags_mask, ddp_flags);
+
+	/* Gratuitous RX_DATA_ACK with RX_MODULATE set to speed up delivery. */
+	ulpmc = mk_rx_data_ack_ulp(ulpmc, toep);
+
+	return (wr);
+}
+
 static void
 refresh_static_ddp(struct toepcb *toep)
 {
 	struct adapter *sc = td_adapter(toep->td);
+	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
 	int buf_flag;
 
 	/*
-	 * Assume any buffers previously returned to userland can now
-	 * be re-used.
+	 * Assume any inactive buffer that has no pending data to
+	 * return to userland can now be re-used.
 	 */
 	buf_flag = 0;
 	ddp_flags = 0;
-	if (toep->db_static_data[0] == -1) {
-		toep->db_static_data[0] = 0;
+	if (!(toep->ddp_flags & DDP_BUF0_ACTIVE) &&
+	    toep->db[0]->offset == toep->db_static_data[0].read_index) {
+		toep->db[0]->offset = 0;
+		toep->db_static_data[0].read_index = 0;
 		ddp_flags |= V_TF_DDP_BUF0_VALID(1);
 		buf_flag |= DDP_BUF0_ACTIVE;
 	}
-	if (toep->db_static_data[1] == -1) {
-		toep->db_static_data[1] = 0;
+	if (!(toep->ddp_flags & DDP_BUF1_ACTIVE) &&
+	    toep->db[1]->offset == toep->db_static_data[1].read_index) {
+		toep->db[1]->offset = 0;
+		toep->db_static_data[1].read_index = 0;
 		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
 		buf_flag |= DDP_BUF1_ACTIVE;
 	}
 	if (ddp_flags == 0)
 		return;
 
-	/* XXX: Might need to reset offset to 0? */
 	ddp_flags_mask = ddp_flags;
 	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
 		ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
+	wr = mk_update_tcb_for_static_ddp_refresh(sc, toep, ddp_flags,
+	    ddp_flags_mask);
+	if (wr == NULL)
+		return;
+	t4_wrq_tx(sc, wr);
+	
 	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags_mask,
 	    ddp_flags);
 	toep->ddp_flags |= buf_flag;
@@ -1581,7 +1646,7 @@ read_static_data(struct socket *so, struct toepcb *toep,
     struct tcp_ddp_read *tdr)
 {
 	struct sockbuf *sb;
-	int error;
+	int buf_flag, db_idx, error, write_index;
 
 	sb = &so->so_rcv;
 
@@ -1651,16 +1716,40 @@ deliver:
 	KASSERT(toep->db_first_data == 0 || toep->db_first_data == 1,
 	    ("%s: db_first_data wrong (%d)", __func__, toep->db_first_data));
 
-	tdr->offset = toep->db_first_data * toep->db_static_size;
-	tdr->length = toep->db_static_data[toep->db_first_data];
-	toep->db_static_data[toep->db_first_data] = -1;
+	/*
+	 * Provide the current data between the read_index and the
+	 * write offset to userland and update the read_index.
+	 */
+	db_idx = toep->db_first_data;
+	write_index = toep->db[db_idx]->offset;
+	tdr->offset = db_idx * toep->db_static_size +
+	    toep->db_static_data[db_idx].read_index;
+	tdr->length = write_index - toep->db_static_data[db_idx].read_index;
+	toep->db_static_data[db_idx].read_index = write_index;
 	sb->sb_acc -= tdr->length;
 	sb->sb_ccc -= tdr->length;
 
-	toep->db_first_data ^= 1;
-	if (toep->db_static_data[toep->db_first_data] <= 0)
-		toep->db_first_data = -1;
+	/*
+	 * If there is pending data still, then this DDP buffer must have
+	 * been invalidated and the other DDP buffer must contain the
+	 * data.
+	 */
+	if (sbavail(sb) > 0) {
+#ifdef INVARIANTS
+		int buf_flag;
+#endif
 
+		toep->db_first_data ^= 1;
+		KASSERT(toep->db[toep->db_first_data]->offset !=
+		    toep->db_static_data[toep->db_first_data].read_index,
+		    ("other static DDP buffer doesn't have data"));
+		buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
+		KASSERT(!(toep->ddp_flags & buf_flag),
+		    ("other static DDP buffer has data, but current one "
+		    "is active"));
+	} else
+		toep->db_first_data = -1;
+		
 out:
 	SOCKBUF_LOCK_ASSERT(sb);
 	static_ddp_sbcheck(toep, sb);
