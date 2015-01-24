@@ -1522,11 +1522,10 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	 * is in the not-yet-filled DDP buffer and be able to return that
 	 * immediately both for block and non-blocking sockets.
 	 */
-#ifdef PUSH_NO_INVALIDATE
 	ddp_flags |= V_TF_DDP_PUSH_DISABLE_0(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE0(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
-#endif
+	ddp_flags |= V_TF_DDP_PSHF_ENABLE_0(1) | V_TF_DDP_PSHF_ENABLE_1(1);
 	ddp_flags_mask |= V_TF_DDP_PSHF_ENABLE_0(1) |
 	    V_TF_DDP_PUSH_DISABLE_0(1)| V_TF_DDP_PSH_NO_INVALIDATE0(1) |
 	    V_TF_DDP_PSHF_ENABLE_1(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
