@@ -383,11 +383,12 @@ static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 	KASSERT(toep->db_first_data == -1 || cc_per[toep->db_first_data] > 0,
 	    ("static DDP socket buffer has no data in first %d",
 	    toep->db_first_data));
-	KASSERT((cc == 0) == (toep->db_first_data == -1),
-	    ("static DDP socket buffer has data mismatch (cc %zu first %d)", cc,
-	    toep->db_first_data));
-	KASSERT(cc == sbused(sb),
-	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc, sbused(sb)));
+	KASSERT((cc_total == 0) == (toep->db_first_data == -1),
+	    ("static DDP socket buffer has data mismatch (cc %zu first %d)",
+	    cc_total, toep->db_first_data));
+	KASSERT(cc_total == sbused(sb),
+	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc_total,
+	    sbused(sb)));
 #endif
 }
 
@@ -406,7 +407,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 
 	KASSERT((report & F_DDP_INV) ||
 	    ((toep->ddp_flags & DDP_STATIC_BUF) && (report & F_DDP_PSH)),
-	    "DDP buffer still valid");
+	    ("DDP buffer still valid"));
 
 	INP_WLOCK(inp);
 	so = inp_inpcbtosocket(inp);
@@ -1646,7 +1647,7 @@ read_static_data(struct socket *so, struct toepcb *toep,
     struct tcp_ddp_read *tdr)
 {
 	struct sockbuf *sb;
-	int buf_flag, db_idx, error, write_index;
+	int db_idx, error, write_index;
 
 	sb = &so->so_rcv;
 
@@ -1737,13 +1738,13 @@ deliver:
 	if (sbavail(sb) > 0) {
 #ifdef INVARIANTS
 		int buf_flag;
-#endif
 
+		buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
+#endif
 		toep->db_first_data ^= 1;
 		KASSERT(toep->db[toep->db_first_data]->offset !=
 		    toep->db_static_data[toep->db_first_data].read_index,
 		    ("other static DDP buffer doesn't have data"));
-		buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
 		KASSERT(!(toep->ddp_flags & buf_flag),
 		    ("other static DDP buffer has data, but current one "
 		    "is active"));
