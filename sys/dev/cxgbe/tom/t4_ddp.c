@@ -1787,6 +1787,13 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	 * the buffers will be allocated and wired.  If userland reads
 	 * additional pages they will be able to use additional wired
 	 * memory, but there are no other consequences.
+	 *
+	 * A simpler variant of that is to just always allocate the
+	 * full 32MB.  If we are worried about that using too much RAM
+	 * and if the DDP static buffer size is not directly tied to
+	 * the receive window / congestion window size, then we could
+	 * also let userland specify the desired size when static DDP
+	 * is enabled.
 	 */
 #ifdef INVARIANTS
 	if (sopt->sopt_level == SOL_SOCKET && sopt->sopt_dir == SOPT_SET &&
