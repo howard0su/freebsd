@@ -1511,21 +1511,18 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	ddp_flags_mask |= V_TF_DDP_BUF0_FLUSH(1) | V_TF_DDP_BUF1_FLUSH(1);
 
 	/*
-	 * Use timer-based PUSH handling.
-	 *
-	 * XXX: I think what we want to use instead is PUSH no-invalidate
-	 * without any other push completions.  We can keep track of how
-	 * much of the buffer has been consumed and how much of that
-	 * consumed buffer has been signalled to userland but allow the
-	 * multiple PUSH packets to be packed into a single DDP buffer.
-	 * For any socket read we will always know how much pending data
-	 * is in the not-yet-filled DDP buffer and be able to return that
-	 * immediately both for block and non-blocking sockets.
+	 * Send a CPL_RX_DDP_DATA when a PSH packet arrives, but don't
+	 * invalidate the DDP buffer if it is only partially used.  We
+	 * keep track of how much of the DDP buffer has been used (and
+	 * how much has been provided to userland), but allow multiple
+	 * PSH packets to be packed into a single DDP buffer.  For any
+	 * socket read we will always know how much pending data is in
+	 * the not-yet-filled DDP buffer and be able to return that
+	 * immediately both for blocking and non-blocking sockets.
 	 */
-	ddp_flags |= V_TF_DDP_PUSH_DISABLE_0(1) |
-	    V_TF_DDP_PSH_NO_INVALIDATE0(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
-	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
-	ddp_flags |= V_TF_DDP_PSHF_ENABLE_0(1) | V_TF_DDP_PSHF_ENABLE_1(1);
+	ddp_flags |= V_TF_DDP_PSHF_ENABLE_0(1) | V_TF_DDP_PUSH_DISABLE_0(1) |
+	    V_TF_DDP_PSH_NO_INVALIDATE0(1) | V_TF_DDP_PSHF_ENABLE_1(1) |
+	    V_TF_DDP_PUSH_DISABLE_1(1) | V_TF_DDP_PSH_NO_INVALIDATE1(1);
 	ddp_flags_mask |= V_TF_DDP_PSHF_ENABLE_0(1) |
 	    V_TF_DDP_PUSH_DISABLE_0(1)| V_TF_DDP_PSH_NO_INVALIDATE0(1) |
 	    V_TF_DDP_PSHF_ENABLE_1(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
