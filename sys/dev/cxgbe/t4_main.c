@@ -3284,6 +3284,9 @@ cxgbe_uninit_synchronized(struct port_info *pi)
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 
+	if (!(pi->flags & PORT_INIT_DONE))
+		return;
+
 	/*
 	 * Disable the VI so that all its data in either direction is discarded
 	 * by the MPS.  Leave everything else (the queues, interrupts, and 1Hz
