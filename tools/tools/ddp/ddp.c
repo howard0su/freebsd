@@ -50,7 +50,7 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "Usage: ddp <host> [port]\n");
+	fprintf(stderr, "Usage: ddp [-D] [-s size] <host> [port]\n");
 	exit(1);
 }
 
@@ -105,11 +105,17 @@ check_for_toe(int s)
 static char *ddp_buf;
 
 static void
-setup_static_ddp(int s)
+setup_static_ddp(int s, int size)
 {
 	socklen_t len;
 	int optval;
 
+	if (size != 0) {
+		optval = size;
+		len = sizeof(optval);
+		if (setsockopt(s, IPPROTO_TCP, TCP_DDP_SIZE, &optval, len) < 0)
+			err(1, "Failed to set static DDP buffer size");
+	}
 	optval = 1;
 	len = sizeof(optval);
 	if (setsockopt(s, IPPROTO_TCP, TCP_DDP_STATIC, &optval, len) < 0)
@@ -118,6 +124,10 @@ setup_static_ddp(int s)
 		err(1, "getsockopt(TCP_DDP_STATIC");
 	if (optval == 0)
 		errx(1, "Static DDP doesn't claim to be enabled");
+	len = sizeof(optval);
+	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_SIZE, &optval, &len) < 0)
+		err(1, "Failed to fetch static DDP buffer size");
+	printf("Static DDP buffer size: %d\n", size);
 	len = sizeof(ddp_buf);
 	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_MAP, &ddp_buf, &len) < 0)
 		err(1, "Failed to map static DDP buffer");
@@ -170,13 +180,17 @@ main(int ac, char **av)
 	size_t linecap;
 	ssize_t linelen, nwritten;
 	bool static_ddp;
-	int ch, s;
+	int ch, s, size;
 
+	size = 0;
 	static_ddp = false;
-	while ((ch = getopt(ac, av, "D")) != -1)
+	while ((ch = getopt(ac, av, "Ds:")) != -1)
 		switch (ch) {
 		case 'D':
 			static_ddp = true;
+			break;
+		case 's':
+			size = atoi(optarg);
 			break;
 		default:
 			usage();
@@ -189,7 +203,7 @@ main(int ac, char **av)
 	s = opensock(av[0], ac == 2 ? av[1] : "echo");
 	check_for_toe(s);
 	if (static_ddp)
-		setup_static_ddp(s);
+		setup_static_ddp(s, size);
 
 	line = NULL;
 	linecap = 0;
