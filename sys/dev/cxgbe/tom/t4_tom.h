@@ -75,6 +75,7 @@ enum {
 	DDP_BUF0_ACTIVE	= (1 << 3),	/* buffer 0 in use (not invalidated) */
 	DDP_BUF1_ACTIVE	= (1 << 4),	/* buffer 1 in use (not invalidated) */
 	DDP_STATIC_BUF	= (1 << 5),	/* using static buffers */
+	DDP_STATIC_ACT	= (1 << 6),	/* static DDP has seen a completion */
 };
 
 struct sockopt;
@@ -148,6 +149,7 @@ struct toepcb {
 	time_t ddp_disabled;
 	uint8_t ddp_score;
 	struct vm_object *db_static; /* split into two equal-sized buffers */
+	void *db_static_buf;
 	vm_size_t db_static_size;
 	int db_first_data;	/* If both have data, which is first */
 	struct static_ddp_state db_static_data[2];

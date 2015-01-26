@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD$");
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
+#include <vm/vm_kern.h>
 #include <vm/vm_param.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
@@ -149,6 +150,7 @@ free_ddp_buffer(struct tom_data *td, struct ddp_buffer *db)
 void
 release_ddp_resources(struct toepcb *toep)
 {
+	vm_offset_t kva;
 	int i;
 
 	for (i = 0; i < nitems(toep->db); i++) {
@@ -157,8 +159,12 @@ release_ddp_resources(struct toepcb *toep)
 			toep->db[i] = NULL;
 		}
 	}
-	if (toep->db_static != NULL)
+	if (toep->db_static != NULL) {
+		kva = (vm_offset_t)toep->db_static_buf;
+		vm_map_remove(kernel_map, kva, kva +
+		    IDX_TO_OFF(toep->db_static->size));
 		vm_object_deallocate(toep->db_static);
+	}
 }
 
 /* XXX: handle_ddp_data code duplication */
@@ -371,9 +377,10 @@ static void
 static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 {
 #ifdef INVARIANTS
-	size_t cc_total;
+	size_t cc_total, cc_mb;
 	int i, cc_per[2];
 
+	cc_mb = m_length(sb->sb_mb, NULL);
 	cc_total = 0;
 	for (i = 0; i < nitems(toep->db); i++) {
 		cc_per[i] = toep->db[i]->offset -
@@ -386,9 +393,9 @@ static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 	KASSERT((cc_total == 0) == (toep->db_first_data == -1),
 	    ("static DDP socket buffer has data mismatch (cc %zu first %d)",
 	    cc_total, toep->db_first_data));
-	KASSERT(cc_total == sbused(sb),
-	    ("static DDP socket buffer cc mismatch: %zu vs %u", cc_total,
-	    sbused(sb)));
+	KASSERT(cc_total + cc_mb == sbused(sb),
+	    ("static DDP socket buffer cc mismatch: %zu vs %u",
+	    cc_total + cc_mb, sbused(sb)));
 #endif
 }
 
@@ -470,6 +477,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		sb->sb_acc += len;
 		static_ddp_sbcheck(toep, sb);
 		toep->sb_cc = sbused(sb);
+		toep->ddp_flags |= DDP_STATIC_ACT;
 		goto wakeup;
 	}
 	m = get_ddp_mbuf(len);
@@ -1320,6 +1328,7 @@ out:
 
 struct ddp_static_buf {
 	vm_object_t obj;
+	vm_offset_t kva;
 	/* XXX: This should use nitems(toep->db) or similar */
 	struct ddp_buffer *db[2];
 };
@@ -1330,7 +1339,7 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 {
 	vm_pindex_t idx, pages;
 	vm_page_t m, *pp[nitems(dsb->db)];
-	int bucket;
+	int bucket, rv;
 
 	bzero(dsb, sizeof(*dsb));
 	dsb->obj = vm_pager_allocate(OBJT_PHYS, NULL, size * nitems(dsb->db),
@@ -1353,8 +1362,21 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 		pp[idx / pages][idx % pages] = m;
 		vm_page_xunbusy(m);
 	}
+	vm_object_reference_locked(dsb->obj);
 	VM_OBJECT_WUNLOCK(dsb->obj);
 
+	/* Map the object into the kernel for sockbuf copying. */
+	dsb->kva = vm_map_min(kernel_map);
+	rv = vm_map_find(kernel_map, dsb->obj, 0, &dsb->kva,
+	    size * nitems(dsb->db), 0, VMFS_OPTIMAL_SPACE,
+	    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE, 0);
+	if (rv != KERN_SUCCESS) {
+		vm_object_deallocate(dsb->obj);
+		for (bucket = 0; bucket < nitems(dsb->db); bucket++)
+			free(pp[bucket], M_CXGBE);
+		return (ENOMEM);
+	}
+	
 	for (bucket = 0; bucket < nitems(dsb->db); bucket++) {
 		dsb->db[bucket] = alloc_ddp_buffer(td, pp[bucket], pages, 0,
 		    size);
@@ -1364,6 +1386,8 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 					free_ddp_buffer(td, dsb->db[bucket]);
 				else
 					free(pp[bucket], M_CXGBE);
+			vm_map_remove(kernel_map, dsb->kva,
+			    dsb->kva + size * nitems(dsb->db));
 			vm_object_deallocate(dsb->obj);
 			return (ENOMEM);
 		}
@@ -1379,8 +1403,11 @@ free_static_ddp_buffer(struct tom_data *td, struct ddp_static_buf *dsb)
 
 	for (i = 0; i < nitems(dsb->db); i++)
 		free_ddp_buffer(td, dsb->db[i]);
-	if (dsb->obj != NULL)
+	if (dsb->obj != NULL) {
+		vm_map_remove(kernel_map, dsb->kva, dsb->kva +
+		    IDX_TO_OFF(dsb->obj->size));
 		vm_object_deallocate(dsb->obj);
+	}
 }
 
 static int
@@ -1398,7 +1425,7 @@ map_object(vm_object_t obj, vm_offset_t *vaddr)
 	*vaddr = round_page((vm_offset_t)vms->vm_daddr +
 	    lim_max(p, RLIMIT_DATA));
 	PROC_UNLOCK(p);
-	rv = vm_map_find(&vms->vm_map, obj, 0, vaddr, obj->size * PAGE_SIZE, 0,
+	rv = vm_map_find(&vms->vm_map, obj, 0, vaddr, IDX_TO_OFF(obj->size), 0,
 	    VMFS_OPTIMAL_SPACE, VM_PROT_READ, VM_PROT_READ, MAP_PREFAULT |
 	    MAP_DISABLE_SYNCER | MAP_INHERIT_SHARE);
 	if (rv == KERN_SUCCESS)
@@ -1473,13 +1500,15 @@ mk_update_tcb_for_static_ddp_init(struct adapter *sc, struct toepcb *toep,
 }
 
 static int
-enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
+enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb, int buf_flag)
 {
 	struct adapter *sc = td_adapter(toep->td);
 	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
 	int i;
 
+	KASSERT(buf_flag == 0 || buf_flag == DDP_BUF1_ACTIVE,
+	    ("%s: bad buf_flag", __func__));
 	KASSERT((toep->ddp_flags & (DDP_ON | DDP_OK | DDP_SC_REQ)) == DDP_OK,
 	    ("%s: toep %p has bad ddp_flags 0x%x",
 	    __func__, toep, toep->ddp_flags));
@@ -1506,8 +1535,9 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
 	ddp_flags |= V_TF_DDP_INDICATE_OUT(1);
 	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
 
-	/* Mark both buffers valid. */
-	ddp_flags |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
+	/* Mark free buffers valid. */
+	if (buf_flag == DDP_BUF1_ACTIVE)
+		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
 	ddp_flags_mask |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
 
 	/* Disable flushing. */
@@ -1531,7 +1561,9 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
 	    V_TF_DDP_PSHF_ENABLE_1(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
 
-	/* Mark buffer 0 as active. */
+	/* Set active buffer. */
+	if (buf_flag == DDP_BUF1_ACTIVE)
+		ddp_flags |= V_TF_DDP_ACTIVE_BUF(1);
 	ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
 
 	wr = mk_update_tcb_for_static_ddp_init(sc, toep, dsb->db, ddp_flags,
@@ -1539,7 +1571,7 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
 	if (wr == NULL)
 		return (ENOMEM);
 	t4_wrq_tx(sc, wr);
-	toep->ddp_flags |= DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE | DDP_STATIC_BUF;
+	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
 	toep->db_static = dsb->obj;
 	toep->db_static_size = IDX_TO_OFF(dsb->obj->size) / nitems(toep->db);
 	toep->db_first_data = -1;
@@ -1612,10 +1644,14 @@ refresh_static_ddp(struct toepcb *toep)
 	/*
 	 * Assume any inactive buffer that has no pending data to
 	 * return to userland can now be re-used.
+	 *
+	 * As a special case, hold back buffer 0 to be used for any
+	 * non-DDP copies until the first DDP completion posts.
 	 */
 	buf_flag = 0;
 	ddp_flags = 0;
 	if (!(toep->ddp_flags & DDP_BUF0_ACTIVE) &&
+	    toep->ddp_flags & DDP_STATIC_ACT &&
 	    toep->db[0]->offset == toep->db_static_data[0].read_index) {
 		toep->db[0]->offset = 0;
 		toep->db_static_data[0].read_index = 0;
@@ -1661,7 +1697,8 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	if (error)
 		goto out;
 
-	if ((toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) !=
+	if (sb->sb_mb == NULL &&
+	    (toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) !=
 	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
 		refresh_static_ddp(toep);
 
@@ -1718,6 +1755,54 @@ restart:
 deliver:
 	SOCKBUF_LOCK_ASSERT(&so->so_rcv);
 	KASSERT(sbavail(sb) > 0, ("%s: sockbuf empty", __func__));
+
+	/*
+	 * Copy any non-DDP data in the socket buffer out to free space
+	 * in an inactive DDP buffer.
+	 */
+	if (sb->sb_mb != NULL) {
+		struct mbuf *m;
+		size_t count, len, offset;
+
+		/*
+		 * During the copy stage, buffer 0 should always be
+		 * inactive.  If there is a lot of data to copy out,
+		 * then buffer 1 might also be inactive.
+		 */
+		KASSERT(!(toep->ddp_flags & DDP_BUF0_ACTIVE),
+		    ("copying non-DDP data, but buffer 0 active"));
+
+		/*
+		 * Since the application has called read, it has
+		 * consumed any pending data, so we can always use
+		 * the full space of any inactive buffer.  If both
+		 * buffers are inactive then we can treat it as one
+		 * large buffer to write into.
+		 */
+		offset = 0;
+		if (!(toep->ddp_flags & DDP_BUF1_ACTIVE))
+			len = toep->db_static_size * 2;
+		else
+			len = toep->db_static_size;
+
+		/*
+		 * Copy up to 'len' bytes out of the socket buffer into
+		 * the static buffer.
+		 */
+		tdr->offset = offset;
+		tdr->length = 0;
+		for (m = sb->sb_mb; m != NULL && len > 0; m = m->m_next) {
+			count = min(m->m_len, len);
+			bcopy(mtod(m, char *), (char *)toep->db_static_buf +
+			    offset, count);
+			offset += count;
+			len -= count;
+			tdr->length += count;
+		}
+		sbdrop_locked(sb, tdr->length);
+		goto out;
+	}
+	    
 	KASSERT(toep->db_first_data == 0 || toep->db_first_data == 1,
 	    ("%s: db_first_data wrong (%d)", __func__, toep->db_first_data));
 
@@ -1774,7 +1859,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	vm_offset_t vaddr;
 	vm_object_t obj;
 	vm_size_t size;
-	int error, i, old, optval;
+	int buf_flag, error, i, old, optval;
 
 	if (sopt->sopt_level != IPPROTO_TCP)
 		return (tcp_ctloutput(so, sopt));
@@ -1886,11 +1971,29 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			SOCKBUF_LOCK(&so->so_rcv);
 
 			/*
-			 * XXX: Fail for so_error or SBS_CANTRCVMORE?  Also
-			 * fail if there is data in the socket buffer already?
+			 * XXX: Fail for so_error or SBS_CANTRCVMORE?
 			 */
 
-			error = enable_static_ddp(toep, &dsb);
+			/*
+			 * Always hold back at least one buffer until
+			 * we know for certain that the connection is
+			 * in DDP mode.  This can be used to copy data
+			 * out of the socket buffer as well as any
+			 * pending CPL messages and provide them to
+			 * userland.  Once we receive the first DDP
+			 * completion we know that all in-flight
+			 * non-DDP data has settled and can enable use
+			 * of both buffers once all pending data in
+			 * the socket buffer is drained.
+			 *
+			 * If the socket buffer has more pending data
+			 * than can fit in a single DDP buffer, hold
+			 * back both DDP buffers.
+			 */
+			buf_flag = DDP_BUF1_ACTIVE;
+			if (sbused(&so->so_rcv) > size)
+				buf_flag = 0;
+			error = enable_static_ddp(toep, &dsb, buf_flag);
 			if (error) {
 				SOCKBUF_UNLOCK(&so->so_rcv);
 				INP_WUNLOCK(inp);
