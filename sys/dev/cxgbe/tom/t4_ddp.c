@@ -1770,48 +1770,6 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	vm_size_t size;
 	int error, i, old, optval;
 
-	/*
-	 * XXX: Cannot block SO_RCVBUF changes, so depending on newly-added
-	 * SB_FIXEDSIZE.  (Eventually we could choose to cope by adjusting
-	 * the buffers).
-	 *
-	 * A more realistic approach is that we know that these
-	 * buffers can only be 16MB in size, so we could always create
-	 * the object with a fixed size of 16MB * 2 but only fill in
-	 * wired pages (and write page pods) for the size that is
-	 * actually used.  When the socket buffer size increases we
-	 * could then wire in additional pages (or wire any pages
-	 * already faulted in to the object via user mappings) and
-	 * update the page pods.  User mappings would always map the
-	 * full 32MB, so they would not have to change when the socket
-	 * buffer size changed.  If userland is well behaved and only
-	 * reads pages it is told to read, only enough pages to back
-	 * the buffers will be allocated and wired.  If userland reads
-	 * additional pages they will be able to use additional wired
-	 * memory, but there are no other consequences.
-	 *
-	 * A simpler variant of that is to just always allocate the
-	 * full 32MB.  If we are worried about that using too much RAM
-	 * and if the DDP static buffer size is not directly tied to
-	 * the receive window / congestion window size, then we could
-	 * also let userland specify the desired size when static DDP
-	 * is enabled.
-	 */
-#ifdef INVARIANTS
-	if (sopt->sopt_level == SOL_SOCKET && sopt->sopt_dir == SOPT_SET &&
-	    sopt->sopt_name == SO_RCVBUF) {
-		inp = sotoinpcb(so);
-		KASSERT(inp != NULL, ("t4_tcp_ctloutput: inp == NULL"));
-		INP_WLOCK(inp);
-		if (!(inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED))) {
-			tp = intotcpcb(inp);
-			toep = tp->t_toe;
-			if (toep != NULL && toep->ddp_flags & DDP_STATIC_BUF)
-				panic(
-			    "Cannot change socket buffer of DDP connection");
-		}
-	}
-#endif
 	if (sopt->sopt_level != IPPROTO_TCP)
 		return (tcp_ctloutput(so, sopt));
 
@@ -1931,7 +1889,6 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				free_static_ddp_buffer(toep->td, &dsb);
 				break;
 			}
-			so->so_rcv.sb_flags |= SB_FIXEDSIZE;
 			toep->ddp_flags |= DDP_STATIC_BUF;
 			toep->db_static = dsb.obj;
 			toep->db_static_size = size;
