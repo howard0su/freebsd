@@ -1473,7 +1473,7 @@ mk_update_tcb_for_static_ddp_init(struct adapter *sc, struct toepcb *toep,
 }
 
 static int
-enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
+enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
 {
 	struct adapter *sc = td_adapter(toep->td);
 	struct wrqe *wr;
@@ -1533,12 +1533,17 @@ enable_static_ddp(struct toepcb *toep, struct ddp_buffer *db[2])
 	/* Mark buffer 0 as active. */
 	ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
 
-	wr = mk_update_tcb_for_static_ddp_init(sc, toep, db, ddp_flags,
+	wr = mk_update_tcb_for_static_ddp_init(sc, toep, dsb->db, ddp_flags,
 	    ddp_flags_mask);
 	if (wr == NULL)
 		return (ENOMEM);
 	t4_wrq_tx(sc, wr);
-	toep->ddp_flags |= DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE;
+	toep->ddp_flags |= DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE | DDP_STATIC_BUF;
+	toep->db_static = dsb->obj;
+	toep->db_static_size = IDX_TO_OFF(dsb->obj.size) / nitems(toep->db);
+	toep->db_first_data = -1;
+	for (i = 0; i < nitems(toep->db); i++)
+		toep->db[i] = dsb->db[i];
 	return (0);
 }
 
@@ -1812,12 +1817,13 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				return (EBUSY);
 
 			SOCKBUF_LOCK(&so->so_rcv);
-			size = round_page(so->so_rcv.sb_hiwat);
+			size = so->so_rcv.sb_hiwat;
 			SOCKBUF_UNLOCK(&so->so_rcv);
-
-		retry:
+			size = round_page(size);
+			if (size < PAGE_SIZE)
+				size = PAGE_SIZE;
 			if (size > MAX_DDP_BUFFER_SIZE)
-				return (E2BIG);
+				size = MAX_DDP_BUFFER_SIZE;
 
 			/* Create a new VM object of the appropriate size. */
 			create_static_ddp_buffer(toep->td, size, so->so_cred,
@@ -1874,27 +1880,13 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			 * fail if there is data in the socket buffer already?
 			 */
 
-			size = round_page(so->so_rcv.sb_hiwat);
-			if (OFF_TO_IDX(size * nitems(toep->db)) !=
-			    dsb.obj->size) {
-				SOCKBUF_UNLOCK(&so->so_rcv);
-				INP_WUNLOCK(inp);
-				free_static_ddp_buffer(toep->td, &dsb);
-				goto retry;
-			}
-			error = enable_static_ddp(toep, dsb.db);
+			error = enable_static_ddp(toep, &dsb);
 			if (error) {
 				SOCKBUF_UNLOCK(&so->so_rcv);
 				INP_WUNLOCK(inp);
 				free_static_ddp_buffer(toep->td, &dsb);
 				break;
 			}
-			toep->ddp_flags |= DDP_STATIC_BUF;
-			toep->db_static = dsb.obj;
-			toep->db_static_size = size;
-			toep->db_first_data = -1;
-			for (i = 0; i < nitems(toep->db); i++)
-				toep->db[i] = dsb.db[i];
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
 			error = 0;
