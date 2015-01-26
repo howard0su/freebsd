@@ -1104,6 +1104,8 @@ t4_soreceive_ddp(struct socket *so, struct sockaddr **psa, struct uio *uio,
     struct mbuf **mp0, struct mbuf **controlp, int *flagsp)
 {
 	int len = 0, error = 0, flags, oresid, ddp_handled = 0;
+	struct tcpcb *tp = so_sototcpcb(so);
+	struct toepcb *toep = tp->t_toe;
 	struct sockbuf *sb;
 	struct mbuf *m, *n = NULL;
 
@@ -1132,7 +1134,7 @@ t4_soreceive_ddp(struct socket *so, struct sockaddr **psa, struct uio *uio,
 		goto out;
 
 	/* If a static buffer is active, fail attempts to use read/recv. */
-	if (sb->sb_flags & SB_FIXEDSIZE) {
+	if (toep->ddp_flags & DDP_STATIC_BUF) {
 		error = EINVAL;
 		goto out;
 	}
