@@ -1478,6 +1478,7 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
 	struct adapter *sc = td_adapter(toep->td);
 	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
+	int i;
 
 	KASSERT((toep->ddp_flags & (DDP_ON | DDP_OK | DDP_SC_REQ)) == DDP_OK,
 	    ("%s: toep %p has bad ddp_flags 0x%x",
@@ -1540,7 +1541,7 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb)
 	t4_wrq_tx(sc, wr);
 	toep->ddp_flags |= DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE | DDP_STATIC_BUF;
 	toep->db_static = dsb->obj;
-	toep->db_static_size = IDX_TO_OFF(dsb->obj.size) / nitems(toep->db);
+	toep->db_static_size = IDX_TO_OFF(dsb->obj->size) / nitems(toep->db);
 	toep->db_first_data = -1;
 	for (i = 0; i < nitems(toep->db); i++)
 		toep->db[i] = dsb->db[i];
@@ -1780,6 +1781,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 
 	switch (sopt->sopt_name) {
 	case TCP_DDP_STATIC:
+	case TCP_DDP_SIZE:
 	case TCP_DDP_MAP:
 	case TCP_DDP_READ:
 		break;
@@ -1805,6 +1807,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 		switch (sopt->sopt_name) {
 		case TCP_DDP_STATIC:
 			old = (toep->ddp_flags & DDP_STATIC_BUF) != 0;
+			size = toep->db_static_size;
 			INP_WUNLOCK(inp);
 			error = sooptcopyin(sopt, &optval, sizeof(optval),
 			    sizeof(optval));
@@ -1816,14 +1819,21 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				/* Disabling static buffers is not supported. */
 				return (EBUSY);
 
-			SOCKBUF_LOCK(&so->so_rcv);
-			size = so->so_rcv.sb_hiwat;
-			SOCKBUF_UNLOCK(&so->so_rcv);
-			size = round_page(size);
-			if (size < PAGE_SIZE)
-				size = PAGE_SIZE;
-			if (size > MAX_DDP_BUFFER_SIZE)
-				size = MAX_DDP_BUFFER_SIZE;
+			/*
+			 * If an explicit size is not specified, use
+			 * the current size of the receive socket
+			 * buffer.
+			 */
+			if (size == 0) {
+				SOCKBUF_LOCK(&so->so_rcv);
+				size = so->so_rcv.sb_hiwat;
+				SOCKBUF_UNLOCK(&so->so_rcv);
+				size = round_page(size);
+				if (size < PAGE_SIZE)
+					size = PAGE_SIZE;
+				if (size > MAX_DDP_BUFFER_SIZE)
+					size = MAX_DDP_BUFFER_SIZE;
+			}
 
 			/* Create a new VM object of the appropriate size. */
 			create_static_ddp_buffer(toep->td, size, so->so_cred,
@@ -1889,7 +1899,28 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			}
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
-			error = 0;
+			break;
+		case TCP_DDP_SIZE:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof(optval),
+			    sizeof(optval));
+			if (error)
+				return (error);
+			if (optval < PAGE_SIZE ||
+			    optval > MAX_DDP_BUFFER_SIZE)
+				return (EINVAL);
+			optval = round_page(optval);
+			INP_WLOCK(inp);
+			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+				INP_WUNLOCK(inp);
+				return (ECONNRESET);
+			}
+			if (toep->ddp_flags & DDP_STATIC_BUF) {
+				INP_WUNLOCK(inp);
+				return (EBUSY);
+			}
+			toep->db_static_size = optval;
+			INP_WUNLOCK(inp);
 			break;
 		default:
 			INP_WUNLOCK(inp);
@@ -1904,6 +1935,11 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;
+		case TCP_DDP_SIZE:
+			optval = toep->db_static_size;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof(optval));
+			break;			
 		case TCP_DDP_MAP:
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
 				obj = toep->db_static;
