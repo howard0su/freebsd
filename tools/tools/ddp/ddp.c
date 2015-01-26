@@ -127,7 +127,7 @@ setup_static_ddp(int s, int size)
 	len = sizeof(optval);
 	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_SIZE, &optval, &len) < 0)
 		err(1, "Failed to fetch static DDP buffer size");
-	printf("Static DDP buffer size: %d\n", size);
+	printf("Static DDP buffer size: %d\n", optval);
 	len = sizeof(ddp_buf);
 	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_MAP, &ddp_buf, &len) < 0)
 		err(1, "Failed to map static DDP buffer");
