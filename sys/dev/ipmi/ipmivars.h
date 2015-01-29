@@ -193,9 +193,6 @@ struct ipmi_ipmb {
 #define	IPMI_IO_UNLOCK(sc)	mtx_unlock(&(sc)->ipmi_io_lock)
 #define	IPMI_IO_LOCK_ASSERT(sc)	mtx_assert(&(sc)->ipmi_io_lock, MA_OWNED)
 
-#define	ipmi_alloc_driver_request(addr, cmd, reqlen, replylen)		\
-	ipmi_alloc_request(NULL, 0, (addr), (cmd), (reqlen), (replylen))
-
 #if __FreeBSD_version < 601105
 #define bus_read_1(r, o) \
 	bus_space_read_1(rman_get_bustag(r), rman_get_bushandle(r), (o))
