@@ -1063,7 +1063,6 @@ SYSCTL_UINT(_debug_xhits, OID_AUTO, ipi_masked_range_size, CTLFLAG_RW,
 void
 ipi_startup(int apic_id, int vector)
 {
-	int ipi_sent;
 
 	/*
 	 * This attempts to follow the algorithm described in theIntel
