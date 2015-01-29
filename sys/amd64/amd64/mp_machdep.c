@@ -1065,9 +1065,9 @@ ipi_startup(int apic_id, int vector)
 {
 
 	/*
-	 * This attempts to follow the algorithm described in theIntel
-	 * Multiprocessor Specification v1.4 in section B.4.  For
-	 * each IPI, we allow the local APIC ~20us to deliver the
+	 * This attempts to follow the algorithm described in the
+	 * Intel Multiprocessor Specification v1.4 in section B.4.
+	 * For each IPI, we allow the local APIC ~20us to deliver the
 	 * IPI.  If that times out, we panic.
 	 */
 
