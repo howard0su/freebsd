@@ -1063,6 +1063,14 @@ SYSCTL_UINT(_debug_xhits, OID_AUTO, ipi_masked_range_size, CTLFLAG_RW,
 void
 ipi_startup(int apic_id, int vector)
 {
+	int ipi_sent;
+
+	/*
+	 * This attempts to follow the algorithm described in theIntel
+	 * Multiprocessor Specification v1.4 in section B.4.  For
+	 * each IPI, we allow the local APIC ~20us to deliver the
+	 * IPI.  If that times out, we panic.
+	 */
 
 	/*
 	 * first we do an INIT IPI: this INIT IPI might be run, resetting
@@ -1070,9 +1078,15 @@ ipi_startup(int apic_id, int vector)
 	 * bug), CPU waiting for STARTUP IPI. OR this INIT IPI might be
 	 * ignored.
 	 */
-	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_EDGE |
+	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_LEVEL |
 	    APIC_LEVEL_ASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_INIT, apic_id);
-	lapic_ipi_wait(-1);
+	lapic_ipi_wait(20);
+
+	/* Explicitly deassert the INIT IPI. */
+	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_LEVEL |
+	    APIC_LEVEL_DEASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_INIT,
+	    apic_id);
+
 	DELAY(10000);		/* wait ~10mS */
 
 	/*
@@ -1086,7 +1100,9 @@ ipi_startup(int apic_id, int vector)
 	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_EDGE |
 	    APIC_LEVEL_DEASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_STARTUP |
 	    vector, apic_id);
-	lapic_ipi_wait(-1);
+	if (!lapic_ipi_wait(20))
+		panic("Failed to deliver first STARTUP IPI to APIC %d",
+		    apic_id);
 	DELAY(200);		/* wait ~200uS */
 
 	/*
@@ -1098,7 +1114,10 @@ ipi_startup(int apic_id, int vector)
 	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_EDGE |
 	    APIC_LEVEL_DEASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_STARTUP |
 	    vector, apic_id);
-	lapic_ipi_wait(-1);
+	if (!lapic_ipi_wait(20))
+		panic("Failed to deliver second STARTUP IPI to APIC %d",
+		    apic_id);
+
 	DELAY(200);		/* wait ~200uS */
 }
 
