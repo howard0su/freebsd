@@ -1514,7 +1514,7 @@ native_lapic_ipi_vectored(u_int vector, int dest)
 	KASSERT((vector & ~APIC_VECTOR_MASK) == 0,
 	    ("%s: invalid vector %d", __func__, vector));
 
-	icrlo = APIC_DESTMODE_PHY | APIC_TRIGMOD_EDGE;
+	icrlo = APIC_DESTMODE_PHY | APIC_TRIGMOD_EDGE | APIC_LEVEL_ASSERT;
 
 	/*
 	 * IPI_STOP_HARD is just a "fake" vector used to send a NMI.
@@ -1522,9 +1522,9 @@ native_lapic_ipi_vectored(u_int vector, int dest)
 	 * the vector.
 	 */
 	if (vector == IPI_STOP_HARD)
-		icrlo |= APIC_DELMODE_NMI | APIC_LEVEL_ASSERT;
+		icrlo |= APIC_DELMODE_NMI;
 	else
-		icrlo |= vector | APIC_DELMODE_FIXED | APIC_LEVEL_DEASSERT;
+		icrlo |= vector | APIC_DELMODE_FIXED;
 	destfield = 0;
 	switch (dest) {
 	case APIC_IPI_DEST_SELF:

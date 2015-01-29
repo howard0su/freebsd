@@ -1097,7 +1097,7 @@ ipi_startup(int apic_id, int vector)
 	 * will run.
 	 */
 	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_EDGE |
-	    APIC_LEVEL_DEASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_STARTUP |
+	    APIC_LEVEL_ASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_STARTUP |
 	    vector, apic_id);
 	if (!lapic_ipi_wait(20))
 		panic("Failed to deliver first STARTUP IPI to APIC %d",
@@ -1111,7 +1111,7 @@ ipi_startup(int apic_id, int vector)
 	 * recognized after hardware RESET or INIT IPI.
 	 */
 	lapic_ipi_raw(APIC_DEST_DESTFLD | APIC_TRIGMOD_EDGE |
-	    APIC_LEVEL_DEASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_STARTUP |
+	    APIC_LEVEL_ASSERT | APIC_DESTMODE_PHY | APIC_DELMODE_STARTUP |
 	    vector, apic_id);
 	if (!lapic_ipi_wait(20))
 		panic("Failed to deliver second STARTUP IPI to APIC %d",
