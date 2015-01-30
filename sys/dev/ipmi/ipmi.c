@@ -57,12 +57,12 @@ __FBSDID("$FreeBSD$");
  * that there is adequate reply/request space in the original allocation.
  */
 #define	IPMI_INIT_DRIVER_REQUEST(req, addr, cmd, reqlen, replylen)	\
+	bzero((req), sizeof(struct ipmi_request));			\
 	ipmi_init_request((req), NULL, 0, (addr), (cmd), (reqlen), (replylen))
 
 #define	IPMI_ALLOC_DRIVER_REQUEST(req, addr, cmd, reqlen, replylen)	\
 	(req) = __builtin_alloca(sizeof(struct ipmi_request) +		\
 	    (reqlen) + (replylen));					\
-	bzero((req), sizeof(struct ipmi_request));			\
 	IPMI_INIT_DRIVER_REQUEST((req), (addr), (cmd), (reqlen),	\
 	    (replylen))
 
