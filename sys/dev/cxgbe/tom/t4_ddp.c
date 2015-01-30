@@ -1573,6 +1573,7 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb, int buf_flag)
 	t4_wrq_tx(sc, wr);
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
 	toep->db_static = dsb->obj;
+	toep->db_static_buf = (void *)dsb->kva;
 	toep->db_static_size = IDX_TO_OFF(dsb->obj->size) / nitems(toep->db);
 	toep->db_first_data = -1;
 	for (i = 0; i < nitems(toep->db); i++)
