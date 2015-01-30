@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2014 Chelsio Communications, Inc.
+ * Copyright (c) 2014-2015 Chelsio Communications, Inc.
  * All rights reserved.
  * Written by: John Baldwin <jhb@FreeBSD.org>
  *
@@ -50,7 +50,7 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "Usage: ddp [-D] [-s size] <host> [port]\n");
+	fprintf(stderr, "Usage: ddp [-Dw] [-s size] <host> [port]\n");
 	exit(1);
 }
 
@@ -179,18 +179,23 @@ main(int ac, char **av)
 	char *line;
 	size_t linecap;
 	ssize_t linelen, nwritten;
-	bool static_ddp;
+	bool static_ddp, static_ddp_active, wait;
 	int ch, s, size;
 
 	size = 0;
+	wait = false;
 	static_ddp = false;
-	while ((ch = getopt(ac, av, "Ds:")) != -1)
+	static_ddp_active = false;
+	while ((ch = getopt(ac, av, "Ds:w")) != -1)
 		switch (ch) {
 		case 'D':
 			static_ddp = true;
 			break;
 		case 's':
 			size = atoi(optarg);
+			break;
+		case 'w':
+			wait = true;
 			break;
 		default:
 			usage();
@@ -202,8 +207,10 @@ main(int ac, char **av)
 		usage();
 	s = opensock(av[0], ac == 2 ? av[1] : "echo");
 	check_for_toe(s);
-	if (static_ddp)
+	if (static_ddp && !wait) {
 		setup_static_ddp(s, size);
+		static_ddp_active = true;
+	}
 
 	line = NULL;
 	linecap = 0;
@@ -221,7 +228,14 @@ main(int ac, char **av)
 			err(1, "socket write");
 		if (nwritten != linelen)
 			errx(1, "short write: %zd of %zd", nwritten, linelen);
-		if (static_ddp)
+		if (static_ddp && !static_ddp_active) {
+			if (!wait) {
+				setup_static_ddp(s, size);
+				static_ddp_active = true;
+			} else
+				wait = false;
+		}
+		if (static_ddp_active)
 			read_ddp(s, line, linelen);
 		else
 			read_plain(s, line, linelen);
