@@ -1369,8 +1369,14 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 	dsb->kva = vm_map_min(kernel_map);
 	rv = vm_map_find(kernel_map, dsb->obj, 0, &dsb->kva,
 	    size * nitems(dsb->db), 0, VMFS_OPTIMAL_SPACE,
-	    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE,
-	    MAP_PREFAULT);
+	    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE, 0);
+	if (rv == KERN_SUCCESS) {
+		rv = vm_map_wire(kernel_map, dsb->kva, dsb->kva + size *
+		    nitems(dsb->db), VM_MAP_WIRE_SYSTEM);
+		if (rv != KERN_SUCCESS)
+			vm_map_remove(kernel_map, dsb->kva,
+			    dsb->kva + size * nitems(dsb->db));
+	}
 	if (rv != KERN_SUCCESS) {
 		vm_object_deallocate(dsb->obj);
 		for (bucket = 0; bucket < nitems(dsb->db); bucket++)
