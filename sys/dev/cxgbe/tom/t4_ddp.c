@@ -442,13 +442,12 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	 * the data received for this message must be computed by
 	 * comparing the new and old values of rcv_nxt.
 	 * 
-	 * For RX_DDP_DATA, len should be non-zero and rcv_nxt is
-	 * the sequence number of the first received byte.  That
-	 * should be identical to the existing rcv_nxt, so the
-	 * update to 'len' should be a no-op.
+	 * For RX_DDP_DATA, len might be non-zero, but it is only the
+	 * length of the most recent DMA.  It does not include the
+	 * total length of the data received since the previous update
+	 * for this DDP buffer.  rcv_nxt is the sequence number of the
+	 * first received byte from the most recent DMA.
 	 */
-	KASSERT(len == 0 || be32toh(rcv_nxt) == tp->rcv_nxt,
-	    ("%s: hole in data stream", __func__));
 	len += be32toh(rcv_nxt) - tp->rcv_nxt;
 	tp->rcv_nxt += len;
 	tp->t_rcvtime = ticks;
