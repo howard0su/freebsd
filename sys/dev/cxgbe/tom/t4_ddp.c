@@ -442,7 +442,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	 * the data received for this message must be computed by
 	 * comparing the new and old values of rcv_nxt.
 	 * 
-	 * For RX_DDP_DATA, len might be non-zero, but it is only the
+	 * For RX_DATA_DDP, len might be non-zero, but it is only the
 	 * length of the most recent DMA.  It does not include the
 	 * total length of the data received since the previous update
 	 * for this DDP buffer.  rcv_nxt is the sequence number of the
@@ -1550,7 +1550,7 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb, int buf_flag)
 	ddp_flags_mask |= V_TF_DDP_BUF0_FLUSH(1) | V_TF_DDP_BUF1_FLUSH(1);
 
 	/*
-	 * Send a CPL_RX_DDP_DATA when a PSH packet arrives, but don't
+	 * Send a CPL_RX_DATA_DDP when a PSH packet arrives, but don't
 	 * invalidate the DDP buffer if it is only partially used.  We
 	 * keep track of how much of the DDP buffer has been used (and
 	 * how much has been provided to userland), but allow multiple
