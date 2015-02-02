@@ -1515,14 +1515,15 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb, int buf_flag)
 
 	KASSERT(buf_flag == 0 || buf_flag == DDP_BUF1_ACTIVE,
 	    ("%s: bad buf_flag", __func__));
-	KASSERT((toep->ddp_flags & (DDP_ON | DDP_OK | DDP_SC_REQ)) == DDP_OK,
+	KASSERT((toep->ddp_flags & (DDP_OK | DDP_SC_REQ)) == DDP_OK,
 	    ("%s: toep %p has bad ddp_flags 0x%x",
 	    __func__, toep, toep->ddp_flags));
 
 	CTR3(KTR_CXGBE, "%s: tid %u (time %u)",
 	    __func__, toep->tid, time_uptime);
 
-	toep->ddp_flags |= DDP_SC_REQ;
+	if (!(toep->ddp_flags & DDP_ON))
+		toep->ddp_flags |= DDP_SC_REQ;
 
 #if 0
 	/* XXX: jhb: I think we probably want coalescing for these? */
@@ -1966,6 +1967,15 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				}
 			}
 
+			/*
+			 * Fail if DDP is currently being toggled.
+			 */
+			if (toep->ddp_flags & DDP_SC_REQ) {
+				INP_WUNLOCK(inp);
+				free_static_ddp_buffer(toep->td, &dsb);
+				return (EBUSY);
+			}
+				
 			for (i = 0; i < nitems(dsb.db); i++) {
 				if (write_page_pods(td_adapter(toep->td), toep,
 				    dsb.db[i]) != 0) {
