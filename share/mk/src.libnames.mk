@@ -111,6 +111,7 @@ _LIBRARIES=	\
 		memstat \
 		mp \
 		nandfs \
+		ncurses \
 		ncursesw \
 		netgraph \
 		ngatm \

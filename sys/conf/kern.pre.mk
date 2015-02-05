@@ -60,7 +60,6 @@ COPTFLAGS+= -fno-strict-aliasing
 .if !defined(NO_CPU_COPTFLAGS)
 COPTFLAGS+= ${_CPUCFLAGS}
 .endif
-C_DIALECT= -std=c99
 NOSTDINC= -nostdinc
 
 INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
@@ -80,6 +79,9 @@ INCLUDES+= -I$S/dev/ath -I$S/dev/ath/ath_hal -I$S/contrib/dev/ath/ath_hal
 # ... and the same for the NgATM stuff
 INCLUDES+= -I$S/contrib/ngatm
 
+# ... and the same for vchiq
+INCLUDES+= -I$S/contrib/vchiq
+
 # ... and the same for twa
 INCLUDES+= -I$S/dev/twa
 
@@ -88,7 +90,7 @@ INCLUDES+= -I$S/dev/cxgb -I$S/dev/cxgbe
 
 .endif
 
-CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
+CFLAGS=	${COPTFLAGS} ${DEBUG} ${CWARNFLAGS}
 CFLAGS+= ${INCLUDES} -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
 CFLAGS_PARAM_INLINE_UNIT_GROWTH?=100
 CFLAGS_PARAM_LARGE_FUNCTION_GROWTH?=1000
@@ -104,13 +106,7 @@ CFLAGS.gcc+=${CFLAGS_ARCH_PARAMS}
 WERROR?= -Werror
 
 # XXX LOCORE means "don't declare C stuff" not "for locore.s".
-ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${CFLAGS}
-
-.if ${COMPILER_TYPE} == "clang"
-CLANG_NO_IAS= -no-integrated-as
-.else
-GCC_MS_EXTENSIONS= -fms-extensions
-.endif
+ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${CFLAGS} ${ASM_CFLAGS.${.IMPSRC:T}} 
 
 .if defined(PROFLEVEL) && ${PROFLEVEL} >= 1
 CFLAGS+=	-DGPROF
