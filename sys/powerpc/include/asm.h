@@ -37,7 +37,7 @@
 
 #include <sys/cdefs.h>
 
-#if defined(__PIC__) && !defined(__powerpc64__)
+#if defined(PIC) && !defined(__powerpc64__)
 #define	PIC_PROLOGUE	XXX
 #define	PIC_EPILOGUE	XXX
 #define	PIC_PLT(x)	x@plt
@@ -80,6 +80,12 @@
 	name:
 
 #ifdef __powerpc64__
+#define TOC_REF(name)	__CONCAT(.L,name)
+#define TOC_ENTRY(name) \
+	.section ".toc","aw"; \
+	TOC_REF(name): \
+        .tc name[TC],name
+
 #define	_ENTRY(name) \
 	.section ".text"; \
 	.p2align 2; \

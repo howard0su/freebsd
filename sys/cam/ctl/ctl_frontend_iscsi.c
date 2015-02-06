@@ -68,6 +68,7 @@ __FBSDID("$FreeBSD$");
 #include <cam/ctl/ctl_private.h>
 
 #include <dev/iscsi/icl.h>
+#include <dev/iscsi/icl_wrappers.h>
 #include <dev/iscsi/iscsi_proto.h>
 #include <cam/ctl/ctl_frontend_iscsi.h>
 
@@ -150,7 +151,6 @@ static int	cfiscsi_lun_enable(void *arg,
 		    struct ctl_id target_id, int lun_id);
 static int	cfiscsi_lun_disable(void *arg,
 		    struct ctl_id target_id, int lun_id);
-static uint32_t	cfiscsi_lun_map(void *arg, uint32_t lun);
 static int	cfiscsi_ioctl(struct cdev *dev,
 		    u_long cmd, caddr_t addr, int flag, struct thread *td);
 static void	cfiscsi_datamove(union ctl_io *io);
@@ -165,9 +165,10 @@ static void	cfiscsi_pdu_handle_data_out(struct icl_pdu *request);
 static void	cfiscsi_pdu_handle_logout_request(struct icl_pdu *request);
 static void	cfiscsi_session_terminate(struct cfiscsi_session *cs);
 static struct cfiscsi_target	*cfiscsi_target_find(struct cfiscsi_softc
-		    *softc, const char *name);
+		    *softc, const char *name, uint16_t tag);
 static struct cfiscsi_target	*cfiscsi_target_find_or_create(
-    struct cfiscsi_softc *softc, const char *name, const char *alias);
+    struct cfiscsi_softc *softc, const char *name, const char *alias,
+    uint16_t tag);
 static void	cfiscsi_target_release(struct cfiscsi_target *ct);
 static void	cfiscsi_session_delete(struct cfiscsi_session *cs);
 
@@ -233,19 +234,34 @@ cfiscsi_pdu_update_cmdsn(const struct icl_pdu *request)
 	}
 #endif
 
-	/*
-	 * The target MUST silently ignore any non-immediate command outside
-	 * of this range.
-	 */
-	if (cmdsn < cs->cs_cmdsn || cmdsn > cs->cs_cmdsn + maxcmdsn_delta) {
-		CFISCSI_SESSION_UNLOCK(cs);
-		CFISCSI_SESSION_WARN(cs, "received PDU with CmdSN %d, "
-		    "while expected CmdSN was %d", cmdsn, cs->cs_cmdsn);
-		return (true);
-	}
+	if ((request->ip_bhs->bhs_opcode & ISCSI_BHS_OPCODE_IMMEDIATE) == 0) {
+		/*
+		 * The target MUST silently ignore any non-immediate command
+		 * outside of this range.
+		 */
+		if (ISCSI_SNLT(cmdsn, cs->cs_cmdsn) ||
+		    ISCSI_SNGT(cmdsn, cs->cs_cmdsn + maxcmdsn_delta)) {
+			CFISCSI_SESSION_UNLOCK(cs);
+			CFISCSI_SESSION_WARN(cs, "received PDU with CmdSN %u, "
+			    "while expected %u", cmdsn, cs->cs_cmdsn);
+			return (true);
+		}
 
-	if ((request->ip_bhs->bhs_opcode & ISCSI_BHS_OPCODE_IMMEDIATE) == 0)
+		/*
+		 * We don't support multiple connections now, so any
+		 * discontinuity in CmdSN means lost PDUs.  Since we don't
+		 * support PDU retransmission -- terminate the connection.
+		 */
+		if (cmdsn != cs->cs_cmdsn) {
+			CFISCSI_SESSION_UNLOCK(cs);
+			CFISCSI_SESSION_WARN(cs, "received PDU with CmdSN %u, "
+			    "while expected %u; dropping connection",
+			    cmdsn, cs->cs_cmdsn);
+			cfiscsi_session_terminate(cs);
+			return (true);
+		}
 		cs->cs_cmdsn++;
+	}
 
 	CFISCSI_SESSION_UNLOCK(cs);
 
@@ -367,14 +383,16 @@ cfiscsi_pdu_prepare(struct icl_pdu *response)
 	 * See the comment below - StatSN is not meaningful and must
 	 * not be advanced.
 	 */
-	if (bhssr->bhssr_opcode == ISCSI_BHS_OPCODE_SCSI_DATA_IN)
+	if (bhssr->bhssr_opcode == ISCSI_BHS_OPCODE_SCSI_DATA_IN &&
+	    (bhssr->bhssr_flags & BHSDI_FLAGS_S) == 0)
 		advance_statsn = false;
 
 	/*
 	 * 10.7.3: "The fields StatSN, Status, and Residual Count
 	 * only have meaningful content if the S bit is set to 1."
 	 */
-	if (bhssr->bhssr_opcode != ISCSI_BHS_OPCODE_SCSI_DATA_IN)
+	if (bhssr->bhssr_opcode != ISCSI_BHS_OPCODE_SCSI_DATA_IN ||
+	    (bhssr->bhssr_flags & BHSDI_FLAGS_S))
 		bhssr->bhssr_statsn = htonl(cs->cs_statsn);
 	bhssr->bhssr_expcmdsn = htonl(cs->cs_cmdsn);
 	bhssr->bhssr_maxcmdsn = htonl(cs->cs_cmdsn + maxcmdsn_delta);
@@ -542,13 +560,6 @@ cfiscsi_pdu_handle_scsi_command(struct icl_pdu *request)
 		return;
 	}
 	io = ctl_alloc_io(cs->cs_target->ct_port.ctl_pool_ref);
-	if (io == NULL) {
-		CFISCSI_SESSION_WARN(cs, "can't allocate ctl_io; "
-		    "dropping connection");
-		icl_pdu_free(request);
-		cfiscsi_session_terminate(cs);
-		return;
-	}
 	ctl_zero_io(io);
 	io->io_hdr.ctl_private[CTL_PRIV_FRONTEND].ptr = request;
 	io->io_hdr.io_type = CTL_IO_SCSI;
@@ -606,13 +617,6 @@ cfiscsi_pdu_handle_task_request(struct icl_pdu *request)
 	cs = PDU_SESSION(request);
 	bhstmr = (struct iscsi_bhs_task_management_request *)request->ip_bhs;
 	io = ctl_alloc_io(cs->cs_target->ct_port.ctl_pool_ref);
-	if (io == NULL) {
-		CFISCSI_SESSION_WARN(cs, "can't allocate ctl_io;"
-		    "dropping connection");
-		icl_pdu_free(request);
-		cfiscsi_session_terminate(cs);
-		return;
-	}
 	ctl_zero_io(io);
 	io->io_hdr.ctl_private[CTL_PRIV_FRONTEND].ptr = request;
 	io->io_hdr.io_type = CTL_IO_TASK;
@@ -904,6 +908,16 @@ cfiscsi_pdu_handle_data_out(struct icl_pdu *request)
 		return;
 	}
 
+	if (cdw->cdw_datasn != ntohl(bhsdo->bhsdo_datasn)) {
+		CFISCSI_SESSION_WARN(cs, "received Data-Out PDU with "
+		    "DataSN %u, while expected %u; dropping connection",
+		    ntohl(bhsdo->bhsdo_datasn), cdw->cdw_datasn);
+		icl_pdu_free(request);
+		cfiscsi_session_terminate(cs);
+		return;
+	}
+	cdw->cdw_datasn++;
+
 	io = cdw->cdw_ctl_io;
 	KASSERT((io->io_hdr.flags & CTL_FLAG_DATA_MASK) != CTL_FLAG_DATA_IN,
 	    ("CTL_FLAG_DATA_IN"));
@@ -1063,10 +1077,6 @@ cfiscsi_session_terminate_tasks(struct cfiscsi_session *cs)
 	if (cs->cs_target == NULL)
 		return;		/* No target yet, so nothing to do. */
 	io = ctl_alloc_io(cs->cs_target->ct_port.ctl_pool_ref);
-	if (io == NULL) {
-		CFISCSI_SESSION_WARN(cs, "can't allocate ctl_io");
-		return;
-	}
 	ctl_zero_io(io);
 	io->io_hdr.ctl_private[CTL_PRIV_FRONTEND].ptr = cs;
 	io->io_hdr.io_type = CTL_IO_TASK;
@@ -1076,6 +1086,7 @@ cfiscsi_session_terminate_tasks(struct cfiscsi_session *cs)
 	io->io_hdr.nexus.targ_lun = 0;
 	io->taskio.tag_type = CTL_TAG_SIMPLE; /* XXX */
 	io->taskio.task_action = CTL_TASK_I_T_NEXUS_RESET;
+	wait = cs->cs_outstanding_ctl_pdus;
 	refcount_acquire(&cs->cs_outstanding_ctl_pdus);
 	error = ctl_queue(io);
 	if (error != CTL_RETVAL_COMPLETE) {
@@ -1103,7 +1114,6 @@ cfiscsi_session_terminate_tasks(struct cfiscsi_session *cs)
 	/*
 	 * Wait for CTL to terminate all the tasks.
 	 */
-	wait = cs->cs_outstanding_ctl_pdus;
 	if (wait > 0)
 		CFISCSI_SESSION_WARN(cs,
 		    "waiting for CTL to terminate %d tasks", wait);
@@ -1232,7 +1242,7 @@ cfiscsi_session_new(struct cfiscsi_softc *softc)
 	cv_init(&cs->cs_login_cv, "cfiscsi_login");
 #endif
 
-	cs->cs_conn = icl_conn_new("cfiscsi", &cs->cs_lock);
+	cs->cs_conn = icl_new_conn(NULL, "cfiscsi", &cs->cs_lock);
 	cs->cs_conn->ic_receive = cfiscsi_receive_callback;
 	cs->cs_conn->ic_error = cfiscsi_error_callback;
 	cs->cs_conn->ic_prv0 = cs;
@@ -1425,7 +1435,8 @@ cfiscsi_ioctl_handoff(struct ctl_iscsi *ci)
 	    cihp->initiator_name, cihp->initiator_addr,
 	    cihp->target_name);
 
-	ct = cfiscsi_target_find(softc, cihp->target_name);
+	ct = cfiscsi_target_find(softc, cihp->target_name,
+	    cihp->portal_group_tag);
 	if (ct == NULL) {
 		ci->status = CTL_ISCSI_ERROR;
 		snprintf(ci->error_str, sizeof(ci->error_str),
@@ -1475,7 +1486,6 @@ cfiscsi_ioctl_handoff(struct ctl_iscsi *ci)
 	 * PDU from the Login Phase received from the initiator.  Thus,
 	 * the -1 below.
 	 */
-	cs->cs_portal_group_tag = cihp->portal_group_tag;
 	cs->cs_cmdsn = cihp->cmdsn;
 	cs->cs_statsn = cihp->statsn;
 	cs->cs_max_data_segment_length = cihp->max_recv_data_segment_length;
@@ -1520,7 +1530,6 @@ restart:
 		TAILQ_FOREACH(cs2, &softc->sessions, cs_next) {
 			if (cs2 != cs && cs2->cs_tasks_aborted == false &&
 			    cs->cs_target == cs2->cs_target &&
-			    cs->cs_portal_group_tag == cs2->cs_portal_group_tag &&
 			    strcmp(cs->cs_initiator_id, cs2->cs_initiator_id) == 0) {
 				cfiscsi_session_terminate(cs2);
 				mtx_unlock(&softc->lock);
@@ -1605,6 +1614,7 @@ cfiscsi_ioctl_list(struct ctl_iscsi *ci)
 		    "<initiator_alias>%s</initiator_alias>"
 		    "<target>%s</target>"
 		    "<target_alias>%s</target_alias>"
+		    "<target_portal_group_tag>%u</target_portal_group_tag>"
 		    "<header_digest>%s</header_digest>"
 		    "<data_digest>%s</data_digest>"
 		    "<max_data_segment_length>%zd</max_data_segment_length>"
@@ -1614,6 +1624,7 @@ cfiscsi_ioctl_list(struct ctl_iscsi *ci)
 		    cs->cs_id,
 		    cs->cs_initiator_name, cs->cs_initiator_addr, cs->cs_initiator_alias,
 		    cs->cs_target->ct_name, cs->cs_target->ct_alias,
+		    cs->cs_target->ct_tag,
 		    cs->cs_conn->ic_header_crc32c ? "CRC32C" : "None",
 		    cs->cs_conn->ic_data_crc32c ? "CRC32C" : "None",
 		    cs->cs_max_data_segment_length,
@@ -1971,23 +1982,25 @@ cfiscsi_ioctl_port_create(struct ctl_req *req)
 {
 	struct cfiscsi_target *ct;
 	struct ctl_port *port;
-	const char *target, *alias, *tag;
+	const char *target, *alias, *tags;
 	struct scsi_vpd_id_descriptor *desc;
 	ctl_options_t opts;
 	int retval, len, idlen;
+	uint16_t tag;
 
 	ctl_init_opts(&opts, req->num_args, req->kern_args);
 	target = ctl_get_opt(&opts, "cfiscsi_target");
 	alias = ctl_get_opt(&opts, "cfiscsi_target_alias");
-	tag = ctl_get_opt(&opts, "cfiscsi_portal_group_tag");
-	if (target == NULL || tag == NULL) {
+	tags = ctl_get_opt(&opts, "cfiscsi_portal_group_tag");
+	if (target == NULL || tags == NULL) {
 		req->status = CTL_LUN_ERROR;
 		snprintf(req->error_str, sizeof(req->error_str),
 		    "Missing required argument");
 		ctl_free_opts(&opts);
 		return;
 	}
-	ct = cfiscsi_target_find_or_create(&cfiscsi_softc, target, alias);
+	tag = strtol(tags, (char **)NULL, 10);
+	ct = cfiscsi_target_find_or_create(&cfiscsi_softc, target, alias, tag);
 	if (ct == NULL) {
 		req->status = CTL_LUN_ERROR;
 		snprintf(req->error_str, sizeof(req->error_str),
@@ -2004,6 +2017,7 @@ cfiscsi_ioctl_port_create(struct ctl_req *req)
 		return;
 	}
 	port = &ct->ct_port;
+	// WAT
 	if (ct->ct_state == CFISCSI_TARGET_STATE_DYING)
 		goto done;
 
@@ -2012,7 +2026,7 @@ cfiscsi_ioctl_port_create(struct ctl_req *req)
 	/* XXX KDM what should the real number be here? */
 	port->num_requested_ctl_io = 4096;
 	port->port_name = "iscsi";
-	port->physical_port = strtoul(tag, NULL, 0);
+	port->physical_port = tag;
 	port->virtual_port = ct->ct_target_id;
 	port->port_online = cfiscsi_online;
 	port->port_offline = cfiscsi_offline;
@@ -2020,7 +2034,6 @@ cfiscsi_ioctl_port_create(struct ctl_req *req)
 	port->onoff_arg = ct;
 	port->lun_enable = cfiscsi_lun_enable;
 	port->lun_disable = cfiscsi_lun_disable;
-	port->lun_map = cfiscsi_lun_map;
 	port->targ_lun_arg = ct;
 	port->fe_datamove = cfiscsi_datamove;
 	port->fe_done = cfiscsi_done;
@@ -2045,8 +2058,7 @@ cfiscsi_ioctl_port_create(struct ctl_req *req)
 	desc->id_type = SVPD_ID_PIV | SVPD_ID_ASSOC_PORT |
 	    SVPD_ID_TYPE_SCSI_NAME;
 	desc->length = idlen;
-	snprintf(desc->identifier, idlen, "%s,t,0x%4.4x",
-	    target, port->physical_port);
+	snprintf(desc->identifier, idlen, "%s,t,0x%4.4x", target, tag);
 
 	/* Generate Target ID. */
 	idlen = strlen(target) + 1;
@@ -2070,7 +2082,7 @@ cfiscsi_ioctl_port_create(struct ctl_req *req)
 		free(port->target_devid, M_CFISCSI);
 		req->status = CTL_LUN_ERROR;
 		snprintf(req->error_str, sizeof(req->error_str),
-		    "ctl_frontend_register() failed with error %d", retval);
+		    "ctl_port_register() failed with error %d", retval);
 		return;
 	}
 done:
@@ -2084,19 +2096,22 @@ static void
 cfiscsi_ioctl_port_remove(struct ctl_req *req)
 {
 	struct cfiscsi_target *ct;
-	const char *target;
+	const char *target, *tags;
 	ctl_options_t opts;
+	uint16_t tag;
 
 	ctl_init_opts(&opts, req->num_args, req->kern_args);
 	target = ctl_get_opt(&opts, "cfiscsi_target");
-	if (target == NULL) {
+	tags = ctl_get_opt(&opts, "cfiscsi_portal_group_tag");
+	if (target == NULL || tags == NULL) {
 		ctl_free_opts(&opts);
 		req->status = CTL_LUN_ERROR;
 		snprintf(req->error_str, sizeof(req->error_str),
 		    "Missing required argument");
 		return;
 	}
-	ct = cfiscsi_target_find(&cfiscsi_softc, target);
+	tag = strtol(tags, (char **)NULL, 10);
+	ct = cfiscsi_target_find(&cfiscsi_softc, target, tag);
 	if (ct == NULL) {
 		ctl_free_opts(&opts);
 		req->status = CTL_LUN_ERROR;
@@ -2117,6 +2132,7 @@ cfiscsi_ioctl_port_remove(struct ctl_req *req)
 	ctl_port_offline(&ct->ct_port);
 	cfiscsi_target_release(ct);
 	cfiscsi_target_release(ct);
+	req->status = CTL_LUN_OK;
 }
 
 static int
@@ -2225,13 +2241,14 @@ cfiscsi_target_release(struct cfiscsi_target *ct)
 }
 
 static struct cfiscsi_target *
-cfiscsi_target_find(struct cfiscsi_softc *softc, const char *name)
+cfiscsi_target_find(struct cfiscsi_softc *softc, const char *name, uint16_t tag)
 {
 	struct cfiscsi_target *ct;
 
 	mtx_lock(&softc->lock);
 	TAILQ_FOREACH(ct, &softc->targets, ct_next) {
-		if (strcmp(name, ct->ct_name) != 0 ||
+		if (ct->ct_tag != tag ||
+		    strcmp(name, ct->ct_name) != 0 ||
 		    ct->ct_state != CFISCSI_TARGET_STATE_ACTIVE)
 			continue;
 		cfiscsi_target_hold(ct);
@@ -2245,10 +2262,9 @@ cfiscsi_target_find(struct cfiscsi_softc *softc, const char *name)
 
 static struct cfiscsi_target *
 cfiscsi_target_find_or_create(struct cfiscsi_softc *softc, const char *name,
-    const char *alias)
+    const char *alias, uint16_t tag)
 {
 	struct cfiscsi_target *ct, *newct;
-	int i;
 
 	if (name[0] == '\0' || strlen(name) >= CTL_ISCSI_NAME_LEN)
 		return (NULL);
@@ -2257,7 +2273,8 @@ cfiscsi_target_find_or_create(struct cfiscsi_softc *softc, const char *name,
 
 	mtx_lock(&softc->lock);
 	TAILQ_FOREACH(ct, &softc->targets, ct_next) {
-		if (strcmp(name, ct->ct_name) != 0 ||
+		if (ct->ct_tag != tag ||
+		    strcmp(name, ct->ct_name) != 0 ||
 		    ct->ct_state == CFISCSI_TARGET_STATE_INVALID)
 			continue;
 		cfiscsi_target_hold(ct);
@@ -2266,12 +2283,10 @@ cfiscsi_target_find_or_create(struct cfiscsi_softc *softc, const char *name,
 		return (ct);
 	}
 
-	for (i = 0; i < CTL_MAX_LUNS; i++)
-		newct->ct_luns[i] = UINT32_MAX;
-
 	strlcpy(newct->ct_name, name, sizeof(newct->ct_name));
 	if (alias != NULL)
 		strlcpy(newct->ct_alias, alias, sizeof(newct->ct_alias));
+	newct->ct_tag = tag;
 	refcount_init(&newct->ct_refcount, 1);
 	newct->ct_softc = softc;
 	if (TAILQ_EMPTY(&softc->targets))
@@ -2283,108 +2298,17 @@ cfiscsi_target_find_or_create(struct cfiscsi_softc *softc, const char *name,
 	return (newct);
 }
 
-/*
- * Takes LUN from the target space and returns LUN from the CTL space.
- */
-static uint32_t
-cfiscsi_lun_map(void *arg, uint32_t lun)
-{
-	struct cfiscsi_target *ct = arg;
-
-	if (lun >= CTL_MAX_LUNS) {
-		CFISCSI_DEBUG("requested lun number %d is higher "
-		    "than maximum %d", lun, CTL_MAX_LUNS - 1);
-		return (UINT32_MAX);
-	}
-	return (ct->ct_luns[lun]);
-}
-
-static int
-cfiscsi_target_set_lun(struct cfiscsi_target *ct,
-    unsigned long lun_id, unsigned long ctl_lun_id)
-{
-
-	if (lun_id >= CTL_MAX_LUNS) {
-		CFISCSI_WARN("requested lun number %ld is higher "
-		    "than maximum %d", lun_id, CTL_MAX_LUNS - 1);
-		return (-1);
-	}
-
-	if (ct->ct_luns[lun_id] < CTL_MAX_LUNS) {
-		/*
-		 * CTL calls cfiscsi_lun_enable() twice for each LUN - once
-		 * when the LUN is created, and a second time just before
-		 * the port is brought online; don't emit warnings
-		 * for that case.
-		 */
-		if (ct->ct_luns[lun_id] == ctl_lun_id)
-			return (0);
-		CFISCSI_WARN("lun %ld already allocated", lun_id);
-		return (-1);
-	}
-
-#if 0
-	CFISCSI_DEBUG("adding mapping for lun %ld, target %s "
-	    "to ctl lun %ld", lun_id, ct->ct_name, ctl_lun_id);
-#endif
-
-	ct->ct_luns[lun_id] = ctl_lun_id;
-
-	return (0);
-}
-
 static int
 cfiscsi_lun_enable(void *arg, struct ctl_id target_id, int lun_id)
 {
-	struct cfiscsi_softc *softc;
-	struct cfiscsi_target *ct;
-	const char *target = NULL;
-	const char *lun = NULL;
-	unsigned long tmp;
 
-	ct = (struct cfiscsi_target *)arg;
-	softc = ct->ct_softc;
-
-	target = ctl_get_opt(&control_softc->ctl_luns[lun_id]->be_lun->options,
-	    "cfiscsi_target");
-	lun = ctl_get_opt(&control_softc->ctl_luns[lun_id]->be_lun->options,
-	    "cfiscsi_lun");
-
-	if (target == NULL && lun == NULL)
-		return (0);
-
-	if (target == NULL || lun == NULL) {
-		CFISCSI_WARN("lun added with cfiscsi_target, but without "
-		    "cfiscsi_lun, or the other way around; ignoring");
-		return (0);
-	}
-
-	if (strcmp(target, ct->ct_name) != 0)
-		return (0);
-
-	tmp = strtoul(lun, NULL, 10);
-	cfiscsi_target_set_lun(ct, tmp, lun_id);
 	return (0);
 }
 
 static int
 cfiscsi_lun_disable(void *arg, struct ctl_id target_id, int lun_id)
 {
-	struct cfiscsi_softc *softc;
-	struct cfiscsi_target *ct;
-	int i;
 
-	ct = (struct cfiscsi_target *)arg;
-	softc = ct->ct_softc;
-
-	mtx_lock(&softc->lock);
-	for (i = 0; i < CTL_MAX_LUNS; i++) {
-		if (ct->ct_luns[i] != lun_id)
-			continue;
-		ct->ct_luns[i] = UINT32_MAX;
-		break;
-	}
-	mtx_unlock(&softc->lock);
 	return (0);
 }
 
@@ -2566,8 +2490,10 @@ cfiscsi_datamove_in(union ctl_io *io)
 			 */
 			buffer_offset += response->ip_data_len;
 			if (buffer_offset == io->scsiio.kern_total_len ||
-			    buffer_offset == expected_len)
-				bhsdi->bhsdi_flags |= BHSDI_FLAGS_F;
+			    buffer_offset == expected_len) {
+				buffer_offset -= response->ip_data_len;
+				break;
+			}
 			cfiscsi_pdu_queue(response);
 			response = NULL;
 			bhsdi = NULL;
@@ -2576,8 +2502,27 @@ cfiscsi_datamove_in(union ctl_io *io)
 	if (response != NULL) {
 		buffer_offset += response->ip_data_len;
 		if (buffer_offset == io->scsiio.kern_total_len ||
-		    buffer_offset == expected_len)
+		    buffer_offset == expected_len) {
 			bhsdi->bhsdi_flags |= BHSDI_FLAGS_F;
+			if (io->io_hdr.status == CTL_SUCCESS) {
+				bhsdi->bhsdi_flags |= BHSDI_FLAGS_S;
+				if (PDU_TOTAL_TRANSFER_LEN(request) <
+				    ntohl(bhssc->bhssc_expected_data_transfer_length)) {
+					bhsdi->bhsdi_flags |= BHSSR_FLAGS_RESIDUAL_UNDERFLOW;
+					bhsdi->bhsdi_residual_count =
+					    htonl(ntohl(bhssc->bhssc_expected_data_transfer_length) -
+					    PDU_TOTAL_TRANSFER_LEN(request));
+				} else if (PDU_TOTAL_TRANSFER_LEN(request) >
+				    ntohl(bhssc->bhssc_expected_data_transfer_length)) {
+					bhsdi->bhsdi_flags |= BHSSR_FLAGS_RESIDUAL_OVERFLOW;
+					bhsdi->bhsdi_residual_count =
+					    htonl(PDU_TOTAL_TRANSFER_LEN(request) -
+					    ntohl(bhssc->bhssc_expected_data_transfer_length));
+				}
+				bhsdi->bhsdi_status = io->scsiio.scsi_status;
+				io->io_hdr.flags |= CTL_FLAG_STATUS_SENT;
+			}
+		}
 		KASSERT(response->ip_data_len > 0, ("sending empty Data-In"));
 		cfiscsi_pdu_queue(response);
 	}
@@ -2645,6 +2590,7 @@ cfiscsi_datamove_out(union ctl_io *io)
 	cdw->cdw_target_transfer_tag = target_transfer_tag;
 	cdw->cdw_initiator_task_tag = bhssc->bhssc_initiator_task_tag;
 	cdw->cdw_r2t_end = io->scsiio.kern_data_len;
+	cdw->cdw_datasn = 0;
 
 	/* Set initial data pointer for the CDW respecting ext_data_filled. */
 	if (io->scsiio.kern_sg_entries > 0) {
@@ -2783,8 +2729,9 @@ cfiscsi_scsi_command_done(union ctl_io *io)
 	 * Do not return status for aborted commands.
 	 * There are exceptions, but none supported by CTL yet.
 	 */
-	if ((io->io_hdr.flags & CTL_FLAG_ABORT) &&
-	    (io->io_hdr.flags & CTL_FLAG_ABORT_STATUS) == 0) {
+	if (((io->io_hdr.flags & CTL_FLAG_ABORT) &&
+	     (io->io_hdr.flags & CTL_FLAG_ABORT_STATUS) == 0) ||
+	    (io->io_hdr.flags & CTL_FLAG_STATUS_SENT)) {
 		ctl_free_io(io);
 		icl_pdu_free(request);
 		return;
