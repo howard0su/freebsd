@@ -485,7 +485,7 @@ init_cache(struct cache_params const *params)
 	assert(retval != NULL);
 
 	assert(params != NULL);
-	memcpy(&retval->params, params, sizeof(struct cache_params));
+	retval->params = *params;
 
 	retval->entries = calloc(1,
 		sizeof(*retval->entries) * INITIAL_ENTRIES_CAPACITY);
@@ -560,10 +560,8 @@ register_cache_entry(struct cache_ *the_cache,
 			sizeof(*new_common_entry));
 		assert(new_common_entry != NULL);
 
-		memcpy(&new_common_entry->common_params, params,
-			sizeof(struct common_cache_entry_params));
-		new_common_entry->params =
-		  (struct cache_entry_params *)&new_common_entry->common_params;
+		new_common_entry->common_params.cep = *params;
+		new_common_entry->params = &new_common_entry->common_params.cep;
 
 		new_common_entry->common_params.cep.entry_name = calloc(1,
 			entry_name_size);
@@ -614,10 +612,8 @@ register_cache_entry(struct cache_ *the_cache,
 			sizeof(*new_mp_entry));
 		assert(new_mp_entry != NULL);
 
-		memcpy(&new_mp_entry->mp_params, params,
-			sizeof(struct mp_cache_entry_params));
-		new_mp_entry->params =
-			(struct cache_entry_params *)&new_mp_entry->mp_params;
+		new_mp_entry->mp_params.cep = *params;
+		new_mp_entry->params = &new_mp_entry->mp_params.cep;
 
 		new_mp_entry->mp_params.cep.entry_name = calloc(1,
 			entry_name_size);
@@ -781,9 +777,8 @@ cache_read(struct cache_entry_ *entry, const char *key, size_t key_size,
 
 	if (find_res->fifo_policy_item->connected_item != NULL) {
 		connected_item = find_res->fifo_policy_item->connected_item;
-		memcpy(&connected_item->last_request_time,
-			&find_res->fifo_policy_item->last_request_time,
-			sizeof(struct timeval));
+		connected_item->last_request_time = 
+			find_res->fifo_policy_item->last_request_time;
 		connected_item->request_count =
 			find_res->fifo_policy_item->request_count;
 
@@ -873,9 +868,8 @@ cache_write(struct cache_entry_ *entry, const char *key, size_t key_size,
 	if (common_entry->policies_size > 1) {
 		connected_policy_item =
 			common_entry->policies[1]->create_item_func();
-		memcpy(&connected_policy_item->creation_time,
-			&policy_item->creation_time,
-			sizeof(struct timeval));
+		connected_policy_item->creation_time =
+			policy_item->creation_time;
 		connected_policy_item->key = policy_item->key;
 		connected_policy_item->key_size = policy_item->key_size;
 
