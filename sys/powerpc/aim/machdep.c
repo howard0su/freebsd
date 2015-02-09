@@ -223,7 +223,11 @@ cpu_startup(void *dummy)
 	vm_pager_bufferinit();
 }
 
-extern char	kernel_text[], _end[];
+extern vm_offset_t	__startkernel, __endkernel;
+extern unsigned char	__bss_start[];
+extern unsigned char	__sbss_start[];
+extern unsigned char	__sbss_end[];
+extern unsigned char	_end[];
 
 #ifndef __powerpc64__
 /* Bits for running on 64-bit systems in 32-bit mode. */
@@ -233,26 +237,26 @@ extern void	*rfid_patch, *rfi_patch1, *rfi_patch2;
 extern void	*trapcode64;
 #endif
 
-extern void	*rstcode, *rstsize;
-extern void	*trapcode, *trapsize;
-extern void	*slbtrap, *slbtrapsize;
-extern void	*alitrap, *alisize;
-extern void	*dsitrap, *dsisize;
+extern void	*rstcode, *rstcodeend;
+extern void	*trapcode, *trapcodeend, *trapcode2;
+extern void	*slbtrap, *slbtrapend;
+extern void	*alitrap, *aliend;
+extern void	*dsitrap, *dsiend;
 extern void	*decrint, *decrsize;
 extern void     *extint, *extsize;
-extern void	*dblow, *dbsize;
+extern void	*dblow, *dbend;
 extern void	*imisstrap, *imisssize;
 extern void	*dlmisstrap, *dlmisssize;
 extern void	*dsmisstrap, *dsmisssize;
-char 		save_trap_init[0x2f00];		/* EXC_LAST */
 
 uintptr_t
-powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
-    vm_offset_t basekernel, void *mdp)
+powerpc_init(vm_offset_t fdt, vm_offset_t toc, vm_offset_t ofentry, void *mdp)
 {
 	struct		pcpu *pc;
+	vm_offset_t	startkernel, endkernel;
 	void		*generictrap;
-	size_t		trap_offset;
+	size_t		trap_offset, trapsize;
+	vm_offset_t	trap;
 	void		*kmdp;
         char		*env;
 	register_t	msr, scratch;
@@ -273,8 +277,9 @@ powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
 	trap_offset = 0;
 	cacheline_warn = 0;
 
-	/* Save trap vectors. */
-	ofw_save_trap_vec(save_trap_init);
+	/* First guess at start/end kernel positions */
+	startkernel = __startkernel;
+	endkernel = __endkernel;
 
 #ifdef WII
 	/*
@@ -285,6 +290,10 @@ powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
 	if ((vers & 0xfffff0e0) == (MPC750 << 16 | MPC750CL)) 
 		mdp = NULL;
 #endif
+
+	/* Check for ePAPR loader, which puts a magic value into r6 */
+	if (mdp == (void *)0x65504150)
+		mdp = NULL;
 
 	/*
 	 * Parse metadata if present and fetch parameters.  Must be done
@@ -305,7 +314,13 @@ powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
 			db_fetch_ksymtab(ksym_start, ksym_end);
 #endif
 		}
+	} else {
+		bzero(__sbss_start, __sbss_end - __sbss_start);
+		bzero(__bss_start, _end - __bss_start);
 	}
+
+	/* Store boot environment state */
+	OF_initial_setup((void *)fdt, NULL, (int (*)(void *))ofentry);
 
 	/*
 	 * Init params/tunables that can be overridden by the loader
@@ -380,6 +395,9 @@ powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
 			break;
 	#ifdef __powerpc64__
 		case IBMPOWER7:
+		case IBMPOWER7PLUS:
+		case IBMPOWER8:
+		case IBMPOWER8E:
 			/* XXX: get from ibm,slb-size in device tree */
 			n_slbs = 32;
 			break;
@@ -464,20 +482,6 @@ powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
 	#endif
 
 		/*
-		 * Copy a code snippet to restore 32-bit bridge mode
-		 * to the top of every non-generic trap handler
-		 */
-
-		trap_offset += (size_t)&restorebridgesize;
-		bcopy(&restorebridge, (void *)EXC_RST, trap_offset); 
-		bcopy(&restorebridge, (void *)EXC_DSI, trap_offset); 
-		bcopy(&restorebridge, (void *)EXC_ALI, trap_offset); 
-		bcopy(&restorebridge, (void *)EXC_PGM, trap_offset); 
-		bcopy(&restorebridge, (void *)EXC_MCHK, trap_offset); 
-		bcopy(&restorebridge, (void *)EXC_TRC, trap_offset); 
-		bcopy(&restorebridge, (void *)EXC_BPT, trap_offset); 
-
-		/*
 		 * Set the common trap entry point to the one that
 		 * knows to restore 32-bit operation on execution.
 		 */
@@ -492,36 +496,59 @@ powerpc_init(vm_offset_t startkernel, vm_offset_t endkernel,
 	generictrap = &trapcode;
 	#endif
 
-	bcopy(&rstcode, (void *)(EXC_RST + trap_offset),  (size_t)&rstsize);
+	trapsize = (size_t)&trapcodeend - (size_t)&trapcode;
+
+	/*
+	 * Copy generic handler into every possible trap. Special cases will get
+	 * different ones in a minute.
+	 */
+	for (trap = EXC_RST; trap < EXC_LAST; trap += 0x20)
+		bcopy(generictrap, (void *)trap, trapsize);
+
+	#ifndef __powerpc64__
+	if (cpu_features & PPC_FEATURE_64) {
+		/*
+		 * Copy a code snippet to restore 32-bit bridge mode
+		 * to the top of every non-generic trap handler
+		 */
+
+		trap_offset += (size_t)&restorebridgesize;
+		bcopy(&restorebridge, (void *)EXC_RST, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_DSI, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_ALI, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_PGM, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_MCHK, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_TRC, trap_offset); 
+		bcopy(&restorebridge, (void *)EXC_BPT, trap_offset); 
+	}
+	#endif
+
+	bcopy(&rstcode, (void *)(EXC_RST + trap_offset), (size_t)&rstcodeend -
+	    (size_t)&rstcode);
 
 #ifdef KDB
-	bcopy(&dblow,	(void *)(EXC_MCHK + trap_offset), (size_t)&dbsize);
-	bcopy(&dblow,   (void *)(EXC_PGM + trap_offset),  (size_t)&dbsize);
-	bcopy(&dblow,   (void *)(EXC_TRC + trap_offset),  (size_t)&dbsize);
-	bcopy(&dblow,   (void *)(EXC_BPT + trap_offset),  (size_t)&dbsize);
-#else
-	bcopy(generictrap, (void *)EXC_MCHK, (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_PGM,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_TRC,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_BPT,  (size_t)&trapsize);
+	bcopy(&dblow, (void *)(EXC_MCHK + trap_offset), (size_t)&dbend -
+	    (size_t)&dblow);
+	bcopy(&dblow, (void *)(EXC_PGM + trap_offset), (size_t)&dbend -
+	    (size_t)&dblow);
+	bcopy(&dblow, (void *)(EXC_TRC + trap_offset), (size_t)&dbend -
+	    (size_t)&dblow);
+	bcopy(&dblow, (void *)(EXC_BPT + trap_offset), (size_t)&dbend -
+	    (size_t)&dblow);
 #endif
-	bcopy(&alitrap,  (void *)(EXC_ALI + trap_offset),  (size_t)&alisize);
-	bcopy(&dsitrap,  (void *)(EXC_DSI + trap_offset),  (size_t)&dsisize);
-	bcopy(generictrap, (void *)EXC_ISI,  (size_t)&trapsize);
+	bcopy(&alitrap,  (void *)(EXC_ALI + trap_offset),  (size_t)&aliend -
+	    (size_t)&alitrap);
+	bcopy(&dsitrap,  (void *)(EXC_DSI + trap_offset),  (size_t)&dsiend -
+	    (size_t)&dsitrap);
+
 	#ifdef __powerpc64__
-	bcopy(&slbtrap, (void *)EXC_DSE,  (size_t)&slbtrapsize);
-	bcopy(&slbtrap, (void *)EXC_ISE,  (size_t)&slbtrapsize);
-	#endif
-	bcopy(generictrap, (void *)EXC_EXI,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_FPU,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_DECR, (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_SC,   (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_FPA,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_VEC,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_PERF,  (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_VECAST_G4, (size_t)&trapsize);
-	bcopy(generictrap, (void *)EXC_VECAST_G5, (size_t)&trapsize);
-	#ifndef __powerpc64__
+	/* Set TOC base so that the interrupt code can get at it */
+	*((void **)TRAP_GENTRAP) = &trapcode2;
+	*((register_t *)TRAP_TOCBASE) = toc;
+
+	bcopy(&slbtrap, (void *)EXC_DSE,(size_t)&slbtrapend - (size_t)&slbtrap);
+	bcopy(&slbtrap, (void *)EXC_ISE,(size_t)&slbtrapend - (size_t)&slbtrap);
+	#else
 	/* G2-specific TLB miss helper handlers */
 	bcopy(&imisstrap, (void *)EXC_IMISS,  (size_t)&imisssize);
 	bcopy(&dlmisstrap, (void *)EXC_DLMISS,  (size_t)&dlmisssize);
