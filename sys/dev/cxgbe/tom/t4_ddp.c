@@ -1856,6 +1856,16 @@ out:
 	return (error);
 }
 
+/* See comment above this macro in tcp_usrreq.c */
+#define INP_WLOCK_RECHECK(inp) do {					\
+	INP_WLOCK(inp);							\
+	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {		\
+		INP_WUNLOCK(inp);					\
+		return (ECONNRESET);					\
+	}								\
+	tp = intotcpcb(inp);						\
+} while(0)
+
 int
 t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 {
@@ -1874,9 +1884,11 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 
 	switch (sopt->sopt_name) {
 	case TCP_DDP_STATIC:
+	case TCP_DDP_COUNT:
 	case TCP_DDP_SIZE:
 	case TCP_DDP_MAP:
 	case TCP_DDP_READ:
+	case TCP_DDP_POST:
 		break;
 	default:
 		return (tcp_ctloutput(so, sopt));
@@ -1933,8 +1945,8 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			    &dsb);
 
 			/*
-			 * Relock everything and see if the VM object still
-			 * works.
+			 * Relock everything and see if the VM object can
+			 * be used.
 			 */
 			INP_WLOCK(inp);
 			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
@@ -2020,6 +2032,23 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
 			break;
+		case TCP_DDP_COUNT:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof(optval),
+			    sizeof(optval));
+			if (error)
+				return (error);
+
+			/* XXX: Only allow two for now. */
+			if (optval != 2)
+				return (EINVAL);
+			INP_WLOCK_RECHECK(inp);
+			if (toep->ddp_flags & DDP_STATIC_BUF) {
+				INP_WUNLOCK(inp);
+				return (EBUSY);
+			}
+			INP_WUNLOCK(inp);
+			break;
 		case TCP_DDP_SIZE:
 			INP_WUNLOCK(inp);
 			error = sooptcopyin(sopt, &optval, sizeof(optval),
@@ -2030,11 +2059,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			    optval > MAX_DDP_BUFFER_SIZE)
 				return (EINVAL);
 			optval = round_page(optval);
-			INP_WLOCK(inp);
-			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
-				INP_WUNLOCK(inp);
-				return (ECONNRESET);
-			}
+			INP_WLOCK_RECHECK(inp);
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
 				INP_WUNLOCK(inp);
 				return (EBUSY);
@@ -2055,6 +2080,12 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;
+		case TCP_DDP_COUNT:
+			/* XXX */
+			optval = 2;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof(optval));
+			break;			
 		case TCP_DDP_SIZE:
 			optval = toep->db_static_size;
 			INP_WUNLOCK(inp);
