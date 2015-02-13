@@ -132,6 +132,7 @@ struct callout_cpu {
 	int			cc_cancel;
 	int			cc_waiting;
 	int 			cc_firsttick;
+	char			cc_ktr_event_name[20];
 };
 
 #ifdef SMP
@@ -234,7 +235,7 @@ kern_timeout_callwheel_alloc(caddr_t v)
 }
 
 static void
-callout_cpu_init(struct callout_cpu *cc)
+callout_cpu_init(struct callout_cpu *cc, int cpu)
 {
 	struct callout *c;
 	int i;
@@ -245,6 +246,8 @@ callout_cpu_init(struct callout_cpu *cc)
 		TAILQ_INIT(&cc->cc_callwheel[i]);
 	}
 	cc_cme_cleanup(cc);
+	snprintf(cc->cc_ktr_event_name, sizeof(cc->cc_ktr_event_name),
+	    "callwheel cpu %d", cpu);
 	if (cc->cc_callout == NULL)
 		return;
 	for (i = 0; i < ncallout; i++) {
@@ -295,7 +298,7 @@ callout_cpu_switch(struct callout *c, struct callout_cpu *cc, int new_cpu)
 void
 kern_timeout_callwheel_init(void)
 {
-	callout_cpu_init(CC_CPU(timeout_cpu));
+	callout_cpu_init(CC_CPU(timeout_cpu), timeout_cpu);
 }
 
 /*
@@ -325,7 +328,7 @@ start_softclock(void *dummy)
 		cc->cc_callwheel = malloc(
 		    sizeof(struct callout_tailq) * callwheelsize, M_CALLOUT,
 		    M_WAITOK);
-		callout_cpu_init(cc);
+		callout_cpu_init(cc, cpu);
 	}
 #endif
 }
@@ -512,6 +515,8 @@ softclock_call_cc(struct callout *c, struct callout_cpu *cc, int *mpcalls,
 		CTR3(KTR_CALLOUT, "callout mpsafe %p func %p arg %p",
 		    c, c_func, c_arg);
 	}
+	KTR_STATE3(KTR_SCHED, "callout", cc->cc_ktr_event_name, "running",
+	    "func:%p", c_func, "arg:%p", c_arg, "direct:%d", direct);
 #ifdef DIAGNOSTIC
 	binuptime(&bt1);
 #endif
@@ -534,6 +539,7 @@ softclock_call_cc(struct callout *c, struct callout_cpu *cc, int *mpcalls,
 		lastfunc = c_func;
 	}
 #endif
+	KTR_STATE0(KTR_SCHED, "callout", cc->cc_ktr_event_name, "idle");
 	CTR1(KTR_CALLOUT, "callout %p finished", c);
 	if ((c_flags & CALLOUT_RETURNUNLOCKED) == 0)
 		class->lc_unlock(c_lock);

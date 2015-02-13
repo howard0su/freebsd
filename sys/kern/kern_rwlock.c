@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
+#include <sys/sched.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/turnstile.h>
@@ -387,6 +388,9 @@ _rw_rlock(struct rwlock *rw, const char *file, int line)
 					CTR3(KTR_LOCK,
 					    "%s: spinning on %p held by %p",
 					    __func__, rw, owner);
+				KTR_STATE1(KTR_SCHED, "thread",
+				    sched_tdname(curthread), "spinning",
+				    "lockname:\"%s\"", rw->lock_object.lo_name);
 				while ((struct thread*)RW_OWNER(rw->rw_lock) ==
 				    owner && TD_IS_RUNNING(owner)) {
 					cpu_spinwait();
@@ -394,16 +398,23 @@ _rw_rlock(struct rwlock *rw, const char *file, int line)
 					spin_cnt++;
 #endif
 				}
+				KTR_STATE0(KTR_SCHED, "thread",
+				    sched_tdname(curthread), "running");
 				continue;
 			}
 		} else if (spintries < ROWNER_RETRIES) {
 			spintries++;
+			KTR_STATE1(KTR_SCHED, "thread", sched_tdname(curthread),
+			    "spinning", "lockname:\"%s\"",
+			    rw->lock_object.lo_name);
 			for (i = 0; i < ROWNER_LOOPS; i++) {
 				v = rw->rw_lock;
 				if ((v & RW_LOCK_READ) == 0 || RW_CAN_READ(v))
 					break;
 				cpu_spinwait();
 			}
+			KTR_STATE0(KTR_SCHED, "thread", sched_tdname(curthread),
+			    "running");
 			if (i != ROWNER_LOOPS)
 				continue;
 		}
@@ -709,6 +720,9 @@ _rw_wlock_hard(struct rwlock *rw, uintptr_t tid, const char *file, int line)
 			if (LOCK_LOG_TEST(&rw->lock_object, 0))
 				CTR3(KTR_LOCK, "%s: spinning on %p held by %p",
 				    __func__, rw, owner);
+			KTR_STATE1(KTR_SCHED, "thread", sched_tdname(curthread),
+			    "spinning", "lockname:\"%s\"",
+			    rw->lock_object.lo_name);
 			while ((struct thread*)RW_OWNER(rw->rw_lock) == owner &&
 			    TD_IS_RUNNING(owner)) {
 				cpu_spinwait();
@@ -716,6 +730,8 @@ _rw_wlock_hard(struct rwlock *rw, uintptr_t tid, const char *file, int line)
 				spin_cnt++;
 #endif
 			}
+			KTR_STATE0(KTR_SCHED, "thread", sched_tdname(curthread),
+			    "running");
 			continue;
 		}
 		if ((v & RW_LOCK_READ) && RW_READERS(v) &&
@@ -727,11 +743,16 @@ _rw_wlock_hard(struct rwlock *rw, uintptr_t tid, const char *file, int line)
 				}
 			}
 			spintries++;
+			KTR_STATE1(KTR_SCHED, "thread", sched_tdname(curthread),
+			    "spinning", "lockname:\"%s\"",
+			    rw->lock_object.lo_name);
 			for (i = 0; i < ROWNER_LOOPS; i++) {
 				if ((rw->rw_lock & RW_LOCK_WRITE_SPINNER) == 0)
 					break;
 				cpu_spinwait();
 			}
+			KTR_STATE0(KTR_SCHED, "thread", sched_tdname(curthread),
+			    "running");
 #ifdef KDTRACE_HOOKS
 			spin_cnt += ROWNER_LOOPS - i;
 #endif
