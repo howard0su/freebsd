@@ -194,6 +194,11 @@ struct tcphdr {
  * consumed the data from this read, it passes the 'bufid' parameter
  * to "set" TCP_DDP_POST.  This returns the associated buffer to the
  * driver for a future read.
+ *
+ * Attempts to use read() or recv() on a static DDP socket will fail.
+ * However, TCP_DDP_READ will honor the blocking / non-blocking state
+ * of the socket.  The socket can also be selected for read using
+ * select(), poll(), or kevent() like a normal socket.
  */
 struct tcp_ddp_map {
 	void *address;
