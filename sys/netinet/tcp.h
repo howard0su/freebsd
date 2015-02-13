@@ -170,15 +170,45 @@ struct tcphdr {
 #define	TCP_VENDOR	SO_VENDOR
 
 /* XXX: Temporary values or location */
+
+/*
+ * Static DDP is an optional feature for offloaded TCP connections to
+ * permit zero-copy receive.
+ *
+ * Static DDP uses a ring buffer of N buffers of a specific size.  The
+ * number of buffers is determined by the driver, but TCP_DDP_SIZE can
+ * be used to set or get the size of an individual buffer.  This
+ * parameter must be set before static DDP is enabled.
+ *
+ * An application enables static DDP via TCP_STATIC_DDP.  Once it has
+ * been enabled, the zero-copy buffers can be mapped into the
+ * application's address space as one virtually contiguous block via
+ * TCP_DDP_MAP.
+ *
+ * To "read" from a socket using static DDP, an application uses
+ * TCP_DDP_READ to get a the next chunk of available data.  This
+ * socket option returns a 'struct tcp_ddp_read' structure.  The
+ * 'offset' and 'length' fields identify the location and size of the
+ * next available chunk of data.  These are relative to the mapping
+ * returned by TCP_DDP_MAP.  The next invocation of TCP_DDP_READ will
+ * assume that the previously returned data has been consumed by the
+ * application and will return that region of the buffer to the driver
+ * for a future read.
+ *
+ * Attempts to use read() or recv() on a static DDP socket will fail.
+ * However, TCP_DDP_READ will honor the blocking / non-blocking state
+ * of the socket.  The socket can also be selected for read using
+ * select(), poll(), or kevent() like a normal socket.
+ */
 struct tcp_ddp_read {
 	size_t offset;
 	size_t length;
 };
 
-#define	TCP_DDP_STATIC	TCP_VENDOR /* Use static buffers for DDP */
-#define	TCP_DDP_SIZE	(TCP_VENDOR + 1)
-#define	TCP_DDP_MAP	(TCP_VENDOR + 2)
-#define	TCP_DDP_READ	(TCP_VENDOR + 3)
+#define	TCP_DDP_STATIC	TCP_VENDOR
+#define	TCP_DDP_SIZE	(TCP_DDP_STATIC + 1)
+#define	TCP_DDP_MAP	(TCP_DDP_STATIC + 2)
+#define	TCP_DDP_READ	(TCP_DDP_STATIC + 3)
 
 #define	TCP_CA_NAME_MAX	16	/* max congestion control name length */
 
