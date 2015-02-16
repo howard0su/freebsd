@@ -1352,6 +1352,7 @@ create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
 		pp[bucket] = malloc(pages * sizeof(vm_page_t), M_CXGBE,
 		    M_WAITOK);
 	VM_OBJECT_WLOCK(dsb->obj);
+	dsb->obj->pg_color = 0;
 	vm_object_set_flag(dsb->obj, OBJ_COLORED);
 	for (idx = 0; idx < pages * nitems(dsb->db); idx++) {
 		m = vm_page_grab(dsb->obj, idx, VM_ALLOC_NORMAL |
