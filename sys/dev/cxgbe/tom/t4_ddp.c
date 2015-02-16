@@ -456,6 +456,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		SOCKBUF_LOCK(sb);
 		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
 		buf = sd->queued[db_idx];
+		sd->queued[db_idx] = NULL;
 		KASSERT(buf != NULL, ("no DDP buffer queued"));
 		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
 		buf->db_idx = -1;
