@@ -1565,7 +1565,7 @@ ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
 	/* Common case first. */
 	if (__predict_true((toep->ddp_flags & DDP_STATIC_ACT) &&
 	    sb->sb_mb == NULL))
-		return (2);
+		return (nitems(sd->queued));
 
 	if (toep->ddp_flags & DDP_STATIC_ACT) {
 		/*
@@ -1589,7 +1589,7 @@ ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
 	TAILQ_FOREACH(buf, &sd->ready, link) {
 		avail--;
 	}
-	return (imin(avail - imin(needed, avail), 2));
+	return (imin(avail - imin(needed, avail), nitems(sd->queued)));
 }
 
 static int
@@ -1961,7 +1961,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			 * two.
 			 */
 			if (sd.count == 0)
-				sd.count = 2;
+				sd.count = nitems(sd.queued);
 
 			/*
 			 * If an explicit size is not specified, use
@@ -2054,7 +2054,8 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			if (error)
 				return (error);
 			/* XXX: 16 is rather arbitrary */
-			if (optval < 2 || optval > 16)
+			if (optval < nitems(toep->static_ddp.queued) ||
+			    optval > 16)
 				return (EINVAL);
 			INP_WLOCK_RECHECK(inp);
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
