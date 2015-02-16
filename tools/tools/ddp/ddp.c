@@ -50,7 +50,7 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "Usage: ddp [-Dw] [-s size] <host> [port]\n");
+	fprintf(stderr, "Usage: ddp [-Dw] [-c count] [-s size] <host> [port]\n");
 	exit(1);
 }
 
@@ -105,11 +105,19 @@ check_for_toe(int s)
 static char *ddp_buf;
 
 static void
-setup_static_ddp(int s, int size)
+setup_static_ddp(int s, int count, int size)
 {
+	struct tcp_ddp_map tdm;
 	socklen_t len;
 	int optval;
 
+	if (count != 0) {
+		optval = count;
+		len = sizeof(optval);
+		if (setsockopt(s, IPPROTO_TCP, TCP_DDP_COUNT, &optval,
+		    len) < 0)
+			err(1, "Failed to set static DDP buffer count");
+	}
 	if (size != 0) {
 		optval = size;
 		len = sizeof(optval);
@@ -125,12 +133,18 @@ setup_static_ddp(int s, int size)
 	if (optval == 0)
 		errx(1, "Static DDP doesn't claim to be enabled");
 	len = sizeof(optval);
+	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_COUNT, &optval, &len) < 0)
+		err(1, "Failed to fetch static DDP buffer count");
+	count = optval;
+	len = sizeof(optval);
 	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_SIZE, &optval, &len) < 0)
 		err(1, "Failed to fetch static DDP buffer size");
-	printf("Static DDP buffer size: %d\n", optval);
-	len = sizeof(ddp_buf);
-	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_MAP, &ddp_buf, &len) < 0)
+	size = optval;
+	printf("Static DDP using %d buffers of size %d\n", count, size);
+	len = sizeof(tdm);
+	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_MAP, &tdm, &len) < 0)
 		err(1, "Failed to map static DDP buffer");
+	ddp_buf = tdm.address;
 }
 
 static void
@@ -147,6 +161,9 @@ read_ddp(int s, const char *data, size_t len)
 	if (memcmp(ddp_buf + tdr.offset, data, len) != 0)
 		errx(1, "DDP data mismatch");
 	printf("Received DDP data matched\n");
+	if (setsockopt(s, IPPROTO_TCP, TCP_DDP_POST, &tdr.bufid,
+	    sizeof(tdr.bufid)) < 0)
+		err(1, "Failed to post static DDP buffer");
 }
 
 static void
@@ -180,14 +197,17 @@ main(int ac, char **av)
 	size_t linecap;
 	ssize_t linelen, nwritten;
 	bool static_ddp, static_ddp_active, wait;
-	int ch, s, size;
+	int ch, count, s, size;
 
 	size = 0;
 	wait = false;
 	static_ddp = false;
 	static_ddp_active = false;
-	while ((ch = getopt(ac, av, "Ds:w")) != -1)
+	while ((ch = getopt(ac, av, "c:Ds:w")) != -1)
 		switch (ch) {
+		case 'c':
+			count = atoi(optarg);
+			break;
 		case 'D':
 			static_ddp = true;
 			break;
@@ -208,7 +228,7 @@ main(int ac, char **av)
 	s = opensock(av[0], ac == 2 ? av[1] : "echo");
 	check_for_toe(s);
 	if (static_ddp && !wait) {
-		setup_static_ddp(s, size);
+		setup_static_ddp(s, count, size);
 		static_ddp_active = true;
 	}
 
@@ -230,7 +250,7 @@ main(int ac, char **av)
 			errx(1, "short write: %zd of %zd", nwritten, linelen);
 		if (static_ddp && !static_ddp_active) {
 			if (!wait) {
-				setup_static_ddp(s, size);
+				setup_static_ddp(s, count, size);
 				static_ddp_active = true;
 			} else
 				wait = false;
