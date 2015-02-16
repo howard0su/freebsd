@@ -68,6 +68,9 @@ __FBSDID("$FreeBSD$");
 #include "common/t4_tcb.h"
 #include "tom/t4_tom.h"
 
+static void	free_static_ddp_buffers(struct tom_data *td,
+		    struct static_ddp *sd);
+
 #define PPOD_SZ(n)	((n) * sizeof(struct pagepod))
 #define PPOD_SIZE	(PPOD_SZ(1))
 
@@ -150,7 +153,6 @@ free_ddp_buffer(struct tom_data *td, struct ddp_buffer *db)
 void
 release_ddp_resources(struct toepcb *toep)
 {
-	vm_offset_t kva;
 	int i;
 
 	for (i = 0; i < nitems(toep->db); i++) {
@@ -159,12 +161,7 @@ release_ddp_resources(struct toepcb *toep)
 			toep->db[i] = NULL;
 		}
 	}
-	if (toep->db_static != NULL) {
-		kva = (vm_offset_t)toep->db_static_buf;
-		vm_map_remove(kernel_map, kva, kva +
-		    IDX_TO_OFF(toep->db_static->size));
-		vm_object_deallocate(toep->db_static);
-	}
+	free_static_ddp_buffers(toep->td, &toep->ddp_static);
 }
 
 /* XXX: handle_ddp_data code duplication */
@@ -377,25 +374,22 @@ static void
 static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 {
 #ifdef INVARIANTS
-	size_t cc_total, cc_mb;
-	int i, cc_per[2];
+	struct static_ddp_buffer *buf;
+	struct static_ddp *sd;
+	size_t cc_ddp, cc_mb;
+	int i,;
 
+	sd = &toep->ddp_static;
 	cc_mb = m_length(sb->sb_mb, NULL);
-	cc_total = 0;
-	for (i = 0; i < nitems(toep->db); i++) {
-		cc_per[i] = toep->db[i]->offset -
-		    toep->db_static_data[i].read_index;
-		cc_total += cc_per[i];
+	cc_ddp = 0;
+	TAILQ_FOREACH(buf, &sd->ready, link) {
+		KASSERT(buf->valid_data != 0,
+		    ("ready DDP buffer with no data"));
+		cc_ddp += buf->valid_data;
 	}
-	KASSERT(toep->db_first_data == -1 || cc_per[toep->db_first_data] > 0,
-	    ("static DDP socket buffer has no data in first %d",
-	    toep->db_first_data));
-	KASSERT((cc_total == 0) == (toep->db_first_data == -1),
-	    ("static DDP socket buffer has data mismatch (cc %zu first %d)",
-	    cc_total, toep->db_first_data));
-	KASSERT(cc_total + cc_mb == sbused(sb),
+	KASSERT(cc_ddp + cc_mb == sbused(sb),
 	    ("static DDP socket buffer cc mismatch: %zu vs %u",
-	    cc_total + cc_mb, sbused(sb)));
+	    cc_ddp + cc_mb, sbused(sb)));
 #endif
 }
 
@@ -412,9 +406,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 
 	db_flag = report & F_DDP_BUF_IDX ? DDP_BUF1_ACTIVE : DDP_BUF0_ACTIVE;
 
-	KASSERT((report & F_DDP_INV) ||
-	    ((toep->ddp_flags & DDP_STATIC_BUF) && (report & F_DDP_PSH)),
-	    ("DDP buffer still valid"));
+	KASSERT((report & F_DDP_INV), ("DDP buffer still valid"));
 
 	INP_WLOCK(inp);
 	so = inp_inpcbtosocket(inp);
@@ -456,13 +448,19 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	tp->rcv_wnd -= len;
 #endif
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
+		struct static_ddp_buffer *buf;
+		struct static_ddp *sd;
 		int db_idx;
 
+		sd = &toep->ddp_static;
 		SOCKBUF_LOCK(sb);
 		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
-		if (toep->db_first_data == -1)
-			toep->db_first_data = db_idx;
-		toep->db[db_idx]->offset += len;
+		buf = sd->queued[db_idx];
+		KASSERT(buf != NULL, ("no DDP buffer queued"));
+		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
+		buf->db_idx = -1;
+		buf->valid_data = len;
+		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
 
 		/* XXX: Too much duplication. */
 		KASSERT(toep->sb_cc >= sbused(sb),
@@ -1325,140 +1323,169 @@ out:
 	return (error);
 }
 
-struct ddp_static_buf {
-	vm_object_t obj;
-	vm_offset_t kva;
-	/* XXX: This should use nitems(toep->db) or similar */
-	struct ddp_buffer *db[2];
-};
-
 static int
-create_static_ddp_buffer(struct tom_data *td, vm_size_t size,
-    struct ucred *cred, struct ddp_static_buf *dsb)
+create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
+    struct static_ddp *sd)
 {
 	vm_pindex_t idx, pages;
-	vm_page_t m, *pp[nitems(dsb->db)];
+	vm_page_t m, **pp;
+	vm_size_t total_size;
 	int bucket, rv;
 
-	bzero(dsb, sizeof(*dsb));
-	dsb->obj = vm_pager_allocate(OBJT_PHYS, NULL, size * nitems(dsb->db),
+	KASSERT((sd->size & PAGE_MASK) == 0, ("bad size %zu",
+	    (size_t)sd->size));
+	total_size = sd->size * sd->count;
+	sd->obj = vm_pager_allocate(OBJT_PHYS, NULL, total_size,
 	    VM_PROT_DEFAULT, 0, cred);
+	sd->buffers = malloc(sizeof(struct static_ddp_buffer) * sd->count,
+	    M_CXGBE, M_WAITOK | M_ZERO);
+	pp = malloc(sizeof(vm_page_t) * sd->count, M_CXGBE, M_WAITOK);
+	for (bucket = 0; bucket < sd->count; bucket++) {
+		sd->buffers[bucket].db_idx = -1;
+		sd->buffers[bucket].bufid = bucket;
+	}		
 
 	/* Fault in pages. */
-	KASSERT((size & PAGE_MASK) == 0, ("bad size %zu", (size_t)size));
-	pages = OFF_TO_IDX(size);
-	KASSERT(dsb->obj->size == pages * nitems(dsb->db), ("bad object size"));
-	for (bucket = 0; bucket < nitems(dsb->db); bucket++)
+	pages = OFF_TO_IDX(sd->size);
+	KASSERT(sd->obj->size == pages * sd->count, ("bad object size"));
+	for (bucket = 0; bucket < sd->count; bucket++)
 		pp[bucket] = malloc(pages * sizeof(vm_page_t), M_CXGBE,
 		    M_WAITOK);
-	VM_OBJECT_WLOCK(dsb->obj);
-	vm_object_set_flag(dsb->obj, OBJ_COLORED);
-	for (idx = 0; idx < pages * nitems(dsb->db); idx++) {
-		m = vm_page_grab(dsb->obj, idx, VM_ALLOC_NORMAL |
-		    VM_ALLOC_COUNT(pages * nitems(dsb->db) - idx - 1) |
+	VM_OBJECT_WLOCK(sd->obj);
+	sd->obj->pg_color = 0;
+	vm_object_set_flag(sd->obj, OBJ_COLORED);
+	for (idx = 0; idx < sd->obj->size; idx++) {
+		m = vm_page_grab(sd->obj, idx, VM_ALLOC_NORMAL |
+		    VM_ALLOC_COUNT(sd->obj->size - idx - 1) |
 		    VM_ALLOC_WIRED | VM_ALLOC_ZERO);
 		m->valid = VM_PAGE_BITS_ALL;
 		pp[idx / pages][idx % pages] = m;
 		vm_page_xunbusy(m);
 	}
-	vm_object_reference_locked(dsb->obj);
-	VM_OBJECT_WUNLOCK(dsb->obj);
+	vm_object_reference_locked(sd->obj);
+	VM_OBJECT_WUNLOCK(sd->obj);
 
 	/* Map the object into the kernel for sockbuf copying. */
-	dsb->kva = vm_map_min(kernel_map);
-	rv = vm_map_find(kernel_map, dsb->obj, 0, &dsb->kva,
-	    size * nitems(dsb->db), 0, VMFS_OPTIMAL_SPACE,
-	    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE, 0);
+	sd->kva = vm_map_min(kernel_map);
+	rv = vm_map_find(kernel_map, sd->obj, 0, &sd->kva, total_size, 0,
+	    VMFS_OPTIMAL_SPACE, VM_PROT_READ | VM_PROT_WRITE,
+	    VM_PROT_READ | VM_PROT_WRITE, 0);
 	if (rv == KERN_SUCCESS) {
-		rv = vm_map_wire(kernel_map, dsb->kva, dsb->kva + size *
-		    nitems(dsb->db), VM_MAP_WIRE_SYSTEM);
+		rv = vm_map_wire(kernel_map, sd->kva, sd->kva + total_size,
+		    VM_MAP_WIRE_SYSTEM);
 		if (rv != KERN_SUCCESS)
-			vm_map_remove(kernel_map, dsb->kva,
-			    dsb->kva + size * nitems(dsb->db));
+			vm_map_remove(kernel_map, sd->kva, sd->kva +
+			    total_size);
 	}
 	if (rv != KERN_SUCCESS) {
-		vm_object_deallocate(dsb->obj);
-		for (bucket = 0; bucket < nitems(dsb->db); bucket++)
+		for (bucket = 0; bucket < sd->count; bucket++)
 			free(pp[bucket], M_CXGBE);
+		free(pp, M_CXGBE);
+		free(sd->buffers, M_CXGBE);
+		vm_object_deallocate(sd->obj);
 		return (ENOMEM);
 	}
 	
-	for (bucket = 0; bucket < nitems(dsb->db); bucket++) {
-		dsb->db[bucket] = alloc_ddp_buffer(td, pp[bucket], pages, 0,
-		    size);
-		if (dsb->db[bucket] == NULL) {
-			for (bucket = 0; bucket < nitems(dsb->db); bucket++)
-				if (dsb->db[bucket] != NULL)
-					free_ddp_buffer(td, dsb->db[bucket]);
+	for (bucket = 0; bucket < sd->count; bucket++) {
+		sd->buffers[bucket].db = alloc_ddp_buffer(td, pp[bucket],
+		    pages, 0, sd->size);
+		if (sd->buffers[bucket].db == NULL) {
+			for (bucket = 0; bucket < sd->count; bucket++)
+				if (sd->buffers[bucket].db != NULL)
+					free_ddp_buffer(td,
+					    sd->buffers[bucket].db);
 				else
 					free(pp[bucket], M_CXGBE);
-			vm_map_remove(kernel_map, dsb->kva,
-			    dsb->kva + size * nitems(dsb->db));
-			vm_object_deallocate(dsb->obj);
+			vm_map_remove(kernel_map, sd->kva, sd->kva +
+			    total_size);
+			free(pp, M_CXGBE);
+			free(sd->buffers, M_CXGBE);
+			vm_object_deallocate(sd->obj);
 			return (ENOMEM);
 		}
 	}
+	free(pp, M_CXGBE);
 
 	return (0);
 }
 
 static void
-free_static_ddp_buffer(struct tom_data *td, struct ddp_static_buf *dsb)
+free_static_ddp_buffers(struct tom_data *td, struct static_ddp *sd)
 {
 	int i;
 
-	for (i = 0; i < nitems(dsb->db); i++)
-		free_ddp_buffer(td, dsb->db[i]);
-	if (dsb->obj != NULL) {
-		vm_map_remove(kernel_map, dsb->kva, dsb->kva +
-		    IDX_TO_OFF(dsb->obj->size));
-		vm_object_deallocate(dsb->obj);
+	if (sd->buffers != NULL) {
+		for (i = 0; i < sd->count; i++)
+			free_ddp_buffer(td, sd->buffers[i].db);
+		free(sd->buffers, M_CXGBE);
+	}
+	if (sd->obj != NULL) {
+		vm_map_remove(kernel_map, sd->kva, sd->kva +
+		    IDX_TO_OFF(sd->obj->size));
+		vm_object_deallocate(sd->obj);
 	}
 }
 
 static int
-map_object(vm_object_t obj, vm_offset_t *vaddr)
+map_object(vm_object_t obj, struct tcp_ddp_map *tdm)
 {
 	struct vmspace *vms;
 	struct thread *td;
 	struct proc *p;
+	vm_offset_t vaddr;
 	int rv;
 
 	td = curthread;
 	p = td->td_proc;
 	vms = curthread->td_proc->p_vmspace;
 	PROC_LOCK(p);
-	*vaddr = round_page((vm_offset_t)vms->vm_daddr +
+	vaddr = round_page((vm_offset_t)vms->vm_daddr +
 	    lim_max(p, RLIMIT_DATA));
 	PROC_UNLOCK(p);
-	rv = vm_map_find(&vms->vm_map, obj, 0, vaddr, IDX_TO_OFF(obj->size), 0,
-	    VMFS_OPTIMAL_SPACE, VM_PROT_READ, VM_PROT_READ, MAP_PREFAULT |
+	rv = vm_map_find(&vms->vm_map, obj, 0, &vaddr, IDX_TO_OFF(obj->size),
+	    0, VMFS_OPTIMAL_SPACE, VM_PROT_READ, VM_PROT_READ, MAP_PREFAULT |
 	    MAP_DISABLE_SYNCER | MAP_INHERIT_SHARE);
-	if (rv == KERN_SUCCESS)
+	if (rv == KERN_SUCCESS) {
+		tdm->address = (void *)vaddr;
+		tdm->length = IDX_TO_OFF(obj->size);
 		return (0);
+	}
 	vm_object_deallocate(obj);
 	return (vm_mmap_to_errno(rv));
 }
 
 static struct wrqe *
-mk_update_tcb_for_static_ddp_init(struct adapter *sc, struct toepcb *toep,
-    struct ddp_buffer *db[2], uint64_t ddp_flags, uint64_t ddp_flags_mask)
+mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
+    struct static_ddp_buffer *buf0, struct static_ddp_buffer *buf1,
+    uint64_t ddp_flags, uint64_t ddp_flags_mask)
 {
+	struct static_ddp *sd = &toep->ddp_static;
 	struct wrqe *wr;
 	struct work_request_hdr *wrh;
 	struct ulp_txpkt *ulpmc;
 	int len;
 
 	/*
-	 * We'll send a compound work request that has 5 SET_TCB_FIELDs and an
+	 * Compose a compound work request that has 1, 3, or 5
+	 * SET_TCB_FIELDs (2 for each possible buffer) and an
 	 * RX_DATA_ACK (with RX_MODULATE to speed up delivery).
 	 *
-	 * The work request header is 16B and always ends at a 16B boundary.
-	 * The ULPTX master commands that follow must all end at 16B boundaries
-	 * too so we round up the size to 16.
+	 * The work request header is 16B and always ends at a 16B
+	 * boundary.  The ULPTX master commands that follow must all
+	 * end at 16B boundaries too so we round up the size to 16.
 	 */
-	len = sizeof(*wrh) + 5 * roundup2(LEN__SET_TCB_FIELD_ULP, 16) +
+	len = sizeof(*wrh) + roundup2(LEN__SET_TCB_FIELD_ULP, 16) +
 	    roundup2(LEN__RX_DATA_ACK_ULP, 16);
+	if (buf0 != NULL) {
+		KASSERT(buf0->db_idx == -1, ("DDP buffer already queued"));
+		KASSERT(sd->queued[0] == NULL, ("DDP buffer 0 is active"));
+		len += 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
+	}
+	if (buf1 != NULL) {
+		KASSERT(buf1->db_idx == -1, ("DDP buffer already queued"));
+		KASSERT(sd->queued[1] == NULL, ("DDP buffer 1 is active"));
+		len += 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
+	}
 
 	wr = alloc_wrqe(len, toep->ctrlq);
 	if (wr == NULL)
@@ -1467,33 +1494,44 @@ mk_update_tcb_for_static_ddp_init(struct adapter *sc, struct toepcb *toep,
 	INIT_ULPTX_WRH(wrh, len, 1, 0);	/* atomic */
 	ulpmc = (struct ulp_txpkt *)(wrh + 1);
 
-	/* Write buffer 0's tag */
-	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
-	    W_TCB_RX_DDP_BUF0_TAG,
-	    V_TCB_RX_DDP_BUF0_TAG(M_TCB_RX_DDP_BUF0_TAG),
-	    V_TCB_RX_DDP_BUF0_TAG(db[0]->tag));
+	if (buf0 != NULL) {
+		/* Write buffer 0's tag */
+		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+		    W_TCB_RX_DDP_BUF0_TAG,
+		    V_TCB_RX_DDP_BUF0_TAG(M_TCB_RX_DDP_BUF0_TAG),
+		    V_TCB_RX_DDP_BUF0_TAG(buf0->db->tag));
 
-	/* Write buffer 1's tag */
-	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
-	    W_TCB_RX_DDP_BUF1_TAG,
-	    V_TCB_RX_DDP_BUF1_TAG(M_TCB_RX_DDP_BUF0_TAG),
-	    V_TCB_RX_DDP_BUF1_TAG(db[1]->tag));
+		/* Update buffer 0's offset and total length */
+		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+		    W_TCB_RX_DDP_BUF0_OFFSET,
+		    V_TCB_RX_DDP_BUF0_OFFSET(M_TCB_RX_DDP_BUF0_OFFSET) |
+		    V_TCB_RX_DDP_BUF0_LEN(M_TCB_RX_DDP_BUF0_LEN),
+		    V_TCB_RX_DDP_BUF0_OFFSET(0) |
+		    V_TCB_RX_DDP_BUF0_LEN(buf0->db->len));
 
-	/* Update the current offset in the DDP buffer and its total length */
-	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
-	    W_TCB_RX_DDP_BUF0_OFFSET,
-	    V_TCB_RX_DDP_BUF0_OFFSET(M_TCB_RX_DDP_BUF0_OFFSET) |
-	    V_TCB_RX_DDP_BUF0_LEN(M_TCB_RX_DDP_BUF0_LEN),
-	    V_TCB_RX_DDP_BUF0_OFFSET(0) |
-	    V_TCB_RX_DDP_BUF0_LEN(db[0]->len));
+		buf0->db_idx = 0;
+		sd->queued[0] = buf0;
+	}
 
-	/* XXX: jhb: why the shifts? */
-	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
-	    W_TCB_RX_DDP_BUF1_OFFSET,
-	    V_TCB_RX_DDP_BUF1_OFFSET(M_TCB_RX_DDP_BUF1_OFFSET) |
-	    V_TCB_RX_DDP_BUF1_LEN((u64)M_TCB_RX_DDP_BUF1_LEN << 32),
-	    V_TCB_RX_DDP_BUF1_OFFSET(0) |
-	    V_TCB_RX_DDP_BUF1_LEN((u64)db[1]->len << 32));
+	if (buf1 != NULL) {
+		/* Write buffer 1's tag */
+		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+		    W_TCB_RX_DDP_BUF1_TAG,
+		    V_TCB_RX_DDP_BUF1_TAG(M_TCB_RX_DDP_BUF0_TAG),
+		    V_TCB_RX_DDP_BUF1_TAG(buf1->db->tag));
+
+		/* Update buffer 1's offset and total length */
+		/* XXX: jhb: why the shifts? */
+		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
+		    W_TCB_RX_DDP_BUF1_OFFSET,
+		    V_TCB_RX_DDP_BUF1_OFFSET(M_TCB_RX_DDP_BUF1_OFFSET) |
+		    V_TCB_RX_DDP_BUF1_LEN((u64)M_TCB_RX_DDP_BUF1_LEN << 32),
+		    V_TCB_RX_DDP_BUF1_OFFSET(0) |
+		    V_TCB_RX_DDP_BUF1_LEN((u64)buf1->db->len << 32));
+
+		buf1->db_idx = 1;
+		sd->queued[1] = buf1;
+	}
 
 	/* Update DDP flags */
 	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep, W_TCB_RX_DDP_FLAGS,
@@ -1505,22 +1543,84 @@ mk_update_tcb_for_static_ddp_init(struct adapter *sc, struct toepcb *toep,
 	return (wr);
 }
 
+/*
+ * Determine how many DDP buffers to queue.  Normally the maximum of
+ * two buffers are allowed.  However, when attaching to a socket, at
+ * least one DDP buffer needs to be kept available to copy data out of
+ * the socket buffer and provide it to userland.  If there is more
+ * pending data in the socket buffer than can fit in a single DDP
+ * buffer, additional buffers are held back for copying.  Note that at
+ * the time we enable DDP there may still be additional data pending
+ * that is not yet in the socket buffer, so we continue * to hold back
+ * at least one buffer until we see a DDP completion message.
+ */
 static int
-enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb, int buf_flag)
+ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
+    struct sockbuf *sb)
+{
+	struct static_ddp_buffer *buf;
+	int avail, needed;
+
+	/* Common case first. */
+	if (__predict_true((toep->ddp_flags & DDP_STATIC_ACT) &&
+	    sb->sb_mb == NULL))
+		return (2);
+
+	if (toep->ddp_flags & DDP_STATIC_ACT) {
+		/*
+		 * No more non-DDP data will arrive, just hold back
+		 * enough buffers to satisfy the existing non-DDP
+		 * data.
+		 */
+		needed = howmany(m_length(sb->sb_mb, NULL), sd->size);
+	} else {
+		/*
+		 * No DDP data yet, ensure at least one buffer is
+		 * available.
+		 */
+		needed = imin(howmany(sbused(sb), sd->size), 1);
+	}
+	avail = sd->count;
+	if (sd->queued[0] != NULL)
+		avail--;
+	if (sd->queued[1] != NULL)
+		avail--;
+	TAILQ_FOREACH(buf, &sd->ready, link) {
+		avail--;
+	}
+	return (imin(avail - imin(needed, avail), 2));
+}
+
+static int
+enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
+    struct sockbuf *sb)
 {
 	struct adapter *sc = td_adapter(toep->td);
 	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
-	int i;
+	struct static_ddp_buffer *buf, *buf0, *buf1;
+	int buf_flag, count, i;
 
-	KASSERT(buf_flag == 0 || buf_flag == DDP_BUF1_ACTIVE,
-	    ("%s: bad buf_flag", __func__));
 	KASSERT((toep->ddp_flags & (DDP_OK | DDP_SC_REQ)) == DDP_OK,
 	    ("%s: toep %p has bad ddp_flags 0x%x",
 	    __func__, toep, toep->ddp_flags));
 
 	CTR3(KTR_CXGBE, "%s: tid %u (time %u)",
 	    __func__, toep->tid, time_uptime);
+
+	/* Queue up to two buffers for DDP. */
+	count = ddp_buffer_count(toep, sd, sb);
+	buf_flag = 0;
+	if (count > 0) {
+		buf0 = &sd->buffers[0];
+		buf_flag |= DDP_BUF0_ACTIVE;
+	} else
+		buf0 = NULL;
+	if (count > 1) {
+		buf1 = &sd->buffers[1];
+		buf_flag |= DDP_BUF1_ACTIVE;
+	} else
+		buf1 = NULL;
 
 	if (!(toep->ddp_flags & DDP_ON))
 		toep->ddp_flags |= DDP_SC_REQ;
@@ -1543,160 +1643,131 @@ enable_static_ddp(struct toepcb *toep, struct ddp_static_buf *dsb, int buf_flag)
 	ddp_flags_mask |= V_TF_DDP_INDICATE_OUT(1);
 
 	/* Mark free buffers valid. */
-	if (buf_flag == DDP_BUF1_ACTIVE)
+	if (buf_flag & DDP_BUF0_ACTIVE)
+		ddp_flags |= V_TF_DDP_BUF0_VALID(1);
+	if (buf_flag & DDP_BUF1_ACTIVE)
 		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
 	ddp_flags_mask |= V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1);
 
 	/* Disable flushing. */
 	ddp_flags_mask |= V_TF_DDP_BUF0_FLUSH(1) | V_TF_DDP_BUF1_FLUSH(1);
 
-	/*
-	 * Send a CPL_RX_DATA_DDP when a PSH packet arrives, but don't
-	 * invalidate the DDP buffer if it is only partially used.  We
-	 * keep track of how much of the DDP buffer has been used (and
-	 * how much has been provided to userland), but allow multiple
-	 * PSH packets to be packed into a single DDP buffer.  For any
-	 * socket read we will always know how much pending data is in
-	 * the not-yet-filled DDP buffer and be able to return that
-	 * immediately both for blocking and non-blocking sockets.
-	 */
-	ddp_flags |= V_TF_DDP_PSHF_ENABLE_0(1) | V_TF_DDP_PUSH_DISABLE_0(1) |
-	    V_TF_DDP_PSH_NO_INVALIDATE0(1) | V_TF_DDP_PSHF_ENABLE_1(1) |
-	    V_TF_DDP_PUSH_DISABLE_1(1) | V_TF_DDP_PSH_NO_INVALIDATE1(1);
+	/* Complete and invalidate buffers on PSH using the PSH timer. */
 	ddp_flags_mask |= V_TF_DDP_PSHF_ENABLE_0(1) |
 	    V_TF_DDP_PUSH_DISABLE_0(1)| V_TF_DDP_PSH_NO_INVALIDATE0(1) |
 	    V_TF_DDP_PSHF_ENABLE_1(1) | V_TF_DDP_PUSH_DISABLE_1(1) |
 	    V_TF_DDP_PSH_NO_INVALIDATE1(1);
 
 	/* Set active buffer. */
-	if (buf_flag == DDP_BUF1_ACTIVE)
-		ddp_flags |= V_TF_DDP_ACTIVE_BUF(1);
 	ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
 
-	wr = mk_update_tcb_for_static_ddp_init(sc, toep, dsb->db, ddp_flags,
+	wr = mk_update_tcb_for_static_ddp(sc, toep, buf0, buf1, ddp_flags,
 	    ddp_flags_mask);
 	if (wr == NULL)
 		return (ENOMEM);
 	t4_wrq_tx(sc, wr);
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
-	toep->db_static = dsb->obj;
-	toep->db_static_buf = (void *)dsb->kva;
-	toep->db_static_size = IDX_TO_OFF(dsb->obj->size) / nitems(toep->db);
-	toep->db_first_data = -1;
-	for (i = 0; i < nitems(toep->db); i++)
-		toep->db[i] = dsb->db[i];
+	TAILQ_INIT(&toep->ddp_static.avail);
+	TAILQ_INIT(&toep->ddp_static.ready);
+	toep->ddp_static.obj = sd->obj;
+	toep->ddp_static.kva = sd->kva;
+	toep->ddp_static.size = sd->size;
+	toep->ddp_static.count = sd->count;
+	toep->ddp_static.buffers = sd->buffers;
+	buf = sd->buffers;
+	for (i = 0; i < sd->count; i++, buf++) {
+		if (buf == buf0 || buf == buf1) {
+			KASSERT(buf->db_idx >= 0,
+			    ("initial DDP buffers are not queued"));
+			continue;
+		}
+		TAILQ_INSERT_TAIL(&toep->ddp_static.avail, buf, link);
+	}
 	return (0);
 }
 
-static struct wrqe *
-mk_update_tcb_for_static_ddp_refresh(struct adapter *sc, struct toepcb *toep,
-    uint64_t ddp_flags, uint64_t ddp_flags_mask)
-{
-	struct wrqe *wr;
-	struct work_request_hdr *wrh;
-	struct ulp_txpkt *ulpmc;
-	int len;
-
-	/*
-	 * We'll send a compound work request that has 2 or 3 SET_TCB_FIELDs
-	 * and an RX_DATA_ACK (with RX_MODULATE to speed up delivery).
-	 *
-	 * The work request header is 16B and always ends at a 16B boundary.
-	 * The ULPTX master commands that follow must all end at 16B boundaries
-	 * too so we round up the size to 16.
-	 */
-	len = sizeof(*wrh) + 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
-	if ((ddp_flags & (V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1))) ==
-	    (V_TF_DDP_BUF0_VALID(1) | V_TF_DDP_BUF1_VALID(1)))
-		len += roundup2(LEN__SET_TCB_FIELD_ULP, 16);
-	len += roundup2(LEN__RX_DATA_ACK_ULP, 16);
-
-	wr = alloc_wrqe(len, toep->ctrlq);
-	if (wr == NULL)
-		return (NULL);
-	wrh = wrtod(wr);
-	INIT_ULPTX_WRH(wrh, len, 1, 0);	/* atomic */
-	ulpmc = (struct ulp_txpkt *)(wrh + 1);
-
-	/* Reset the offset of each DDP buffer being re-enabled. */
-	if (ddp_flags & V_TF_DDP_BUF0_VALID(1))
-		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
-		    W_TCB_RX_DDP_BUF0_OFFSET,
-		    V_TCB_RX_DDP_BUF0_OFFSET(M_TCB_RX_DDP_BUF0_OFFSET),
-		    V_TCB_RX_DDP_BUF0_OFFSET(0));
-
-	if (ddp_flags & V_TF_DDP_BUF1_VALID(1))
-		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
-		    W_TCB_RX_DDP_BUF1_OFFSET,
-		    V_TCB_RX_DDP_BUF1_OFFSET(M_TCB_RX_DDP_BUF1_OFFSET),
-		    V_TCB_RX_DDP_BUF1_OFFSET(0));
-
-	/* Update DDP flags */
-	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep, W_TCB_RX_DDP_FLAGS,
-	    ddp_flags_mask, ddp_flags);
-
-	/* Gratuitous RX_DATA_ACK with RX_MODULATE set to speed up delivery. */
-	ulpmc = mk_rx_data_ack_ulp(ulpmc, toep);
-
-	return (wr);
-}
-
-static void
-refresh_static_ddp(struct toepcb *toep)
+static int
+post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 {
 	struct adapter *sc = td_adapter(toep->td);
+	struct static_ddp *sd = &toep->ddp_static;
+	struct static_ddp_buffer *buf;
 	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
-	int buf_flag;
+	int buf_flag, count, i;
 
-	/*
-	 * Assume any inactive buffer that has no pending data to
-	 * return to userland can now be re-used.
-	 *
-	 * As a special case, hold back buffer 0 to be used for any
-	 * non-DDP copies until the first DDP completion posts.
-	 */
-	buf_flag = 0;
-	ddp_flags = 0;
-	if (!(toep->ddp_flags & DDP_BUF0_ACTIVE) &&
-	    toep->ddp_flags & DDP_STATIC_ACT &&
-	    toep->db[0]->offset == toep->db_static_data[0].read_index) {
-		toep->db[0]->offset = 0;
-		toep->db_static_data[0].read_index = 0;
-		ddp_flags |= V_TF_DDP_BUF0_VALID(1);
-		buf_flag |= DDP_BUF0_ACTIVE;
+	/* The buffer must be a valid ID that is owned by userland. */
+	if (bufid < 0 || bufid >= sd->count)
+		return (EINVAL);
+	TAILQ_FOREACH(buf, &sd->avail, link) {
+		if (buf->bufid == bufid)
+			return (EINVAL);
 	}
-	if (!(toep->ddp_flags & DDP_BUF1_ACTIVE) &&
-	    toep->db[1]->offset == toep->db_static_data[1].read_index) {
-		toep->db[1]->offset = 0;
-		toep->db_static_data[1].read_index = 0;
-		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
-		buf_flag |= DDP_BUF1_ACTIVE;
+	TAILQ_FOREACH(buf, &sd->ready, link) {
+		if (buf->bufid == bufid)
+			return (EINVAL);
 	}
-	if (ddp_flags == 0)
-		return;
+	buf = &sd->buffers[bufid];
+	for (i = 0; i < nitems(sd->queued); i++)
+		if (sd->queued[i] == buf)
+			return (EINVAL);
 
-	ddp_flags_mask = ddp_flags;
-	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
-		ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
-	wr = mk_update_tcb_for_static_ddp_refresh(sc, toep, ddp_flags,
-	    ddp_flags_mask);
-	if (wr == NULL)
-		return;
+	buf->valid_data = 0;
+	buf->db->offset = 0;
+
+	count = ddp_buffer_count(toep, sd, sb);
+	if (count == 0 ||
+	    (toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) ==
+	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
+		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
+		return (0);
+	}
+
+	if (!(toep->ddp_flags & DDP_BUF0_ACTIVE)) {
+		/* Use buffer 0. */
+		buf_flag = DDP_BUF0_ACTIVE;
+		ddp_flags = V_TF_DDP_BUF0_VALID(1);
+		ddp_flags_mask = V_TF_DDP_BUF0_VALID(1);
+
+		/* If both buffers are free, set this buffer as active. */
+		if (!(toep->ddp_flags & DDP_BUF1_ACTIVE))
+			ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
+
+		wr = mk_update_tcb_for_static_ddp(sc, toep, buf, NULL,
+		    ddp_flags, ddp_flags_mask);
+	} else {
+		/* Use buffer 1. */
+		buf_flag = DDP_BUF1_ACTIVE;
+		ddp_flags = V_TF_DDP_BUF1_VALID(1);
+		ddp_flags_mask = V_TF_DDP_BUF1_VALID(1);
+		
+		wr = mk_update_tcb_for_static_ddp(sc, toep, NULL, buf,
+		    ddp_flags, ddp_flags_mask);
+	}
+	if (wr == NULL) {
+		/*
+		 * XXX: If neither buffer is active and there are no
+		 * other outstanding user buffers to be posted, then
+		 * we might hang forever.
+		 */
+		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
+		return (ENOMEM);
+	}
 	t4_wrq_tx(sc, wr);
-	
-	t4_set_tcb_field(sc, toep, 1, W_TCB_RX_DDP_FLAGS, ddp_flags_mask,
-	    ddp_flags);
 	toep->ddp_flags |= buf_flag;
+	return (0);
 }
 
 static int
 read_static_data(struct socket *so, struct toepcb *toep,
     struct tcp_ddp_read *tdr)
 {
+	struct static_ddp_buffer *buf;
+	struct static_ddp *sd;
 	struct sockbuf *sb;
-	int db_idx, error, write_index;
+	int error;
 
+	sd = &toep->ddp_static;
 	sb = &so->so_rcv;
 
 	/* Prevent other readers from entering the socket. */
@@ -1704,11 +1775,6 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	SOCKBUF_LOCK(sb);
 	if (error)
 		goto out;
-
-	if (sb->sb_mb == NULL &&
-	    (toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) !=
-	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
-		refresh_static_ddp(toep);
 
 	/* We will never ever get anything unless we are or were connected. */
 	if (!(so->so_state & (SS_ISCONNECTED|SS_ISDISCONNECTED))) {
@@ -1766,43 +1832,34 @@ deliver:
 
 	/*
 	 * Copy any non-DDP data in the socket buffer out to free space
-	 * in an inactive DDP buffer.
+	 * in an available DDP buffer.
 	 */
 	if (sb->sb_mb != NULL) {
 		struct mbuf *m;
 		size_t count, len, offset;
 
 		/*
-		 * During the copy stage, buffer 0 should always be
-		 * inactive.  If there is a lot of data to copy out,
-		 * then buffer 1 might also be inactive.
+		 * Grab the first available buffer and copy non-DDP
+		 * data into it.
 		 */
-		KASSERT(!(toep->ddp_flags & DDP_BUF0_ACTIVE),
-		    ("copying non-DDP data, but buffer 0 active"));
-
-		/*
-		 * Since the application has called read, it has
-		 * consumed any pending data, so we can always use
-		 * the full space of any inactive buffer.  If both
-		 * buffers are inactive then we can treat it as one
-		 * large buffer to write into.
-		 */
-		offset = 0;
-		if (!(toep->ddp_flags & DDP_BUF1_ACTIVE))
-			len = toep->db_static_size * 2;
-		else
-			len = toep->db_static_size;
+		KASSERT(!TAILQ_EMPTY(&sd->avail),
+		    ("no avail buffer to copy non-DDP data into"));
+		buf = TAILQ_FIRST(&sd->avail);
+		TAILQ_REMOVE(&sd->avail, buf, link);
+		offset = buf->bufid * sd->size;
+		len = sd->size;
 
 		/*
 		 * Copy up to 'len' bytes out of the socket buffer into
 		 * the static buffer.
 		 */
+		tdr->bufid = buf->bufid;
 		tdr->offset = offset;
 		tdr->length = 0;
 		for (m = sb->sb_mb; m != NULL && len > 0; m = m->m_next) {
 			count = min(m->m_len, len);
-			bcopy(mtod(m, char *), (char *)toep->db_static_buf +
-			    offset, count);
+			bcopy(mtod(m, char *), (char *)sd->kva + offset,
+			    count);
 			offset += count;
 			len -= count;
 			tdr->length += count;
@@ -1810,44 +1867,17 @@ deliver:
 		sbdrop_locked(sb, tdr->length);
 		goto out;
 	}
-	    
-	KASSERT(toep->db_first_data == 0 || toep->db_first_data == 1,
-	    ("%s: db_first_data wrong (%d)", __func__, toep->db_first_data));
 
-	/*
-	 * Provide the current data between the read_index and the
-	 * write offset to userland and update the read_index.
-	 */
-	db_idx = toep->db_first_data;
-	write_index = toep->db[db_idx]->offset;
-	tdr->offset = db_idx * toep->db_static_size +
-	    toep->db_static_data[db_idx].read_index;
-	tdr->length = write_index - toep->db_static_data[db_idx].read_index;
-	toep->db_static_data[db_idx].read_index = write_index;
+	KASSERT(!TAILQ_EMPTY(&sd->ready), ("no ready DDP buffer"));
+
+	buf = TAILQ_FIRST(&sd->ready);
+	TAILQ_REMOVE(&sd->ready, buf, link);
+	tdr->bufid = buf->bufid;
+	tdr->offset = buf->bufid * sd->size;
+	tdr->length = buf->valid_data;
 	sb->sb_acc -= tdr->length;
 	sb->sb_ccc -= tdr->length;
 
-	/*
-	 * If there is pending data still, then this DDP buffer must have
-	 * been invalidated and the other DDP buffer must contain the
-	 * data.
-	 */
-	if (sbavail(sb) > 0) {
-#ifdef INVARIANTS
-		int buf_flag;
-
-		buf_flag = db_idx == 0 ? DDP_BUF0_ACTIVE : DDP_BUF1_ACTIVE;
-#endif
-		toep->db_first_data ^= 1;
-		KASSERT(toep->db[toep->db_first_data]->offset !=
-		    toep->db_static_data[toep->db_first_data].read_index,
-		    ("other static DDP buffer doesn't have data"));
-		KASSERT(!(toep->ddp_flags & buf_flag),
-		    ("other static DDP buffer has data, but current one "
-		    "is active"));
-	} else
-		toep->db_first_data = -1;
-		
 out:
 	SOCKBUF_LOCK_ASSERT(sb);
 	static_ddp_sbcheck(toep, sb);
@@ -1872,12 +1902,11 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	struct toepcb *toep;
+	struct tcp_ddp_map tdm;
 	struct tcp_ddp_read tdr;
-	struct ddp_static_buf dsb;
-	vm_offset_t vaddr;
+	struct static_ddp sd;
 	vm_object_t obj;
-	vm_size_t size;
-	int buf_flag, error, i, old, optval;
+	int error, i, old, optval;
 
 	if (sopt->sopt_level != IPPROTO_TCP)
 		return (tcp_ctloutput(so, sopt));
@@ -1912,7 +1941,9 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 		switch (sopt->sopt_name) {
 		case TCP_DDP_STATIC:
 			old = (toep->ddp_flags & DDP_STATIC_BUF) != 0;
-			size = toep->db_static_size;
+			bzero(&sd, sizeof(sd));
+			sd.count = toep->ddp_static.count;
+			sd.size = toep->ddp_static.size;
 			INP_WUNLOCK(inp);
 			error = sooptcopyin(sopt, &optval, sizeof(optval),
 			    sizeof(optval));
@@ -1921,49 +1952,55 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			if ((optval != 0) == old)
 				return (0);
 			if (optval == 0)
-				/* Disabling static buffers is not supported. */
+				/* Disabling static DDP is not supported. */
 				return (EBUSY);
+
+			/*
+			 * If an explicit count is not specified, use
+			 * two.
+			 */
+			if (sd.count == 0)
+				sd.count = 2;
 
 			/*
 			 * If an explicit size is not specified, use
 			 * the current size of the receive socket
 			 * buffer.
 			 */
-			if (size == 0) {
+			if (sd.size == 0) {
 				SOCKBUF_LOCK(&so->so_rcv);
-				size = so->so_rcv.sb_hiwat;
+				sd.size = so->so_rcv.sb_hiwat;
 				SOCKBUF_UNLOCK(&so->so_rcv);
-				size = round_page(size);
-				if (size < PAGE_SIZE)
-					size = PAGE_SIZE;
-				if (size > MAX_DDP_BUFFER_SIZE)
-					size = MAX_DDP_BUFFER_SIZE;
+				sd.size = round_page(sd.size);
+				if (sd.size < PAGE_SIZE)
+					sd.size = PAGE_SIZE;
+				if (sd.size > MAX_DDP_BUFFER_SIZE)
+					sd.size = MAX_DDP_BUFFER_SIZE;
 			}
 
-			/* Create a new VM object of the appropriate size. */
-			create_static_ddp_buffer(toep->td, size, so->so_cred,
-			    &dsb);
+			/* Create static DDP buffers. */
+			create_static_ddp_buffers(toep->td, so->so_cred, &sd);
 
 			/*
-			 * Relock everything and see if the VM object can
-			 * be used.
+			 * Relock everything and see if the buffers
+			 * can be used.
 			 */
 			INP_WLOCK(inp);
 			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
 				INP_WUNLOCK(inp);
-				free_static_ddp_buffer(toep->td, &dsb);
+				free_static_ddp_buffers(toep->td, &sd);
 				return (ECONNRESET);
 			}
 			tp = intotcpcb(inp);
 			toep = tp->t_toe;
-			
+
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
 				/*
 				 * Raced with another thread to create
 				 * the VM object.
 				 */
 				INP_WUNLOCK(inp);
-				free_static_ddp_buffer(toep->td, &dsb);
+				free_static_ddp_buffers(toep->td, &sd);
 				return (0);
 			}
 
@@ -1974,7 +2011,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			for (i = 0; i < nitems(toep->db); i++) {
 				if (toep->db[i] != NULL) {
 					INP_WUNLOCK(inp);
-					free_static_ddp_buffer(toep->td, &dsb);
+					free_static_ddp_buffers(toep->td, &sd);
 					return (EBUSY);
 				}
 			}
@@ -1984,15 +2021,15 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			 */
 			if (toep->ddp_flags & DDP_SC_REQ) {
 				INP_WUNLOCK(inp);
-				free_static_ddp_buffer(toep->td, &dsb);
+				free_static_ddp_buffers(toep->td, &sd);
 				return (EBUSY);
 			}
-				
-			for (i = 0; i < nitems(dsb.db); i++) {
+
+			for (i = 0; i < sd.count; i++) {
 				if (write_page_pods(td_adapter(toep->td), toep,
-				    dsb.db[i]) != 0) {
+				    sd.buffers[i].db) != 0) {
 					INP_WUNLOCK(inp);
-					free_static_ddp_buffer(toep->td, &dsb);
+					free_static_ddp_buffers(toep->td, &sd);
 					return (ENOMEM);
 				}
 			}
@@ -2003,34 +2040,11 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			 * XXX: Fail for so_error or SBS_CANTRCVMORE?
 			 */
 
-			/*
-			 * Always hold back at least one buffer until
-			 * we know for certain that the connection is
-			 * in DDP mode.  This can be used to copy data
-			 * out of the socket buffer as well as any
-			 * pending CPL messages and provide them to
-			 * userland.  Once we receive the first DDP
-			 * completion we know that all in-flight
-			 * non-DDP data has settled and can enable use
-			 * of both buffers once all pending data in
-			 * the socket buffer is drained.
-			 *
-			 * If the socket buffer has more pending data
-			 * than can fit in a single DDP buffer, hold
-			 * back both DDP buffers.
-			 */
-			buf_flag = DDP_BUF1_ACTIVE;
-			if (sbused(&so->so_rcv) > size)
-				buf_flag = 0;
-			error = enable_static_ddp(toep, &dsb, buf_flag);
-			if (error) {
-				SOCKBUF_UNLOCK(&so->so_rcv);
-				INP_WUNLOCK(inp);
-				free_static_ddp_buffer(toep->td, &dsb);
-				break;
-			}
+			error = enable_static_ddp(toep, &sd, &so->so_rcv);
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			INP_WUNLOCK(inp);
+			if (error)
+				free_static_ddp_buffers(toep->td, &sd);
 			break;
 		case TCP_DDP_COUNT:
 			INP_WUNLOCK(inp);
@@ -2038,15 +2052,15 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			    sizeof(optval));
 			if (error)
 				return (error);
-
-			/* XXX: Only allow two for now. */
-			if (optval != 2)
+			/* XXX: 16 is rather arbitrary */
+			if (optval < 2 || optval > 16)
 				return (EINVAL);
 			INP_WLOCK_RECHECK(inp);
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
 				INP_WUNLOCK(inp);
 				return (EBUSY);
 			}
+			toep->ddp_static.count = optval;
 			INP_WUNLOCK(inp);
 			break;
 		case TCP_DDP_SIZE:
@@ -2064,7 +2078,24 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				INP_WUNLOCK(inp);
 				return (EBUSY);
 			}
-			toep->db_static_size = optval;
+			toep->ddp_static.size = optval;
+			INP_WUNLOCK(inp);
+			break;
+		case TCP_DDP_POST:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof(optval),
+			    sizeof(optval));
+			if (error)
+				return (error);
+			if (optval < 0)
+				return (EINVAL);
+			INP_WLOCK_RECHECK(inp);
+			if (!(toep->ddp_flags & DDP_STATIC_BUF)) {
+				INP_WUNLOCK(inp);
+				return (ENXIO);
+			}
+			error = post_static_ddp_buffer(toep, optval,
+			    &so->so_rcv);
 			INP_WUNLOCK(inp);
 			break;
 		default:
@@ -2081,19 +2112,18 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;
 		case TCP_DDP_COUNT:
-			/* XXX */
-			optval = 2;
+			optval = toep->ddp_static.count;
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;			
 		case TCP_DDP_SIZE:
-			optval = toep->db_static_size;
+			optval = toep->ddp_static.size;
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof(optval));
 			break;			
 		case TCP_DDP_MAP:
 			if (toep->ddp_flags & DDP_STATIC_BUF) {
-				obj = toep->db_static;
+				obj = toep->ddp_static.obj;
 				vm_object_reference(obj);
 			} else
 				obj = NULL;
@@ -2102,21 +2132,25 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				error = ENXIO;
 				break;
 			}
-			error = map_object(obj, &vaddr);
+			error = map_object(obj, &tdm);
 			if (error == 0)
-				error = sooptcopyout(sopt, &vaddr,
-				    sizeof(vaddr));
+				error = sooptcopyout(sopt, &tdm,
+				    sizeof(tdm));
 			break;
 		case TCP_DDP_READ:
 			if (!(toep->ddp_flags & DDP_STATIC_BUF)) {
 				INP_WUNLOCK(inp);
-				error = EINVAL;
+				error = ENXIO;
 				break;
 			}
 			INP_WUNLOCK(inp);
 			error = read_static_data(so, toep, &tdr);
 			if (error == 0)
 				error = sooptcopyout(sopt, &tdr, sizeof(tdr));
+			break;
+		default:
+			INP_WUNLOCK(inp);
+			error = EINVAL;
 			break;
 		}
 		break;

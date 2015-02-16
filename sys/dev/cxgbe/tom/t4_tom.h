@@ -97,28 +97,41 @@ struct ddp_buffer {
 };
 
 /*
- * Data is placed into the DDP buffer by the NIC starting at offset 0.
- * As data completion messages arrive, the offset field in the
- * associated ddp_buffer is updated (offsets less than offset contain
- * valid data placed by the card until the buffer is fully consumed).
+ * Static DDP buffers can be in one of the following states:
  *
- * When userland reads data from the buffer, it is given a range of
- * bytes starting at the current read_index and ending at one byte
- * before the current write offset, and the read_index is advanced to
- * the current write offset.  Offset less than read_index contain
- * valid data that has already been given to userland.
- *
- * For a bulk transfer connection there should only be one completion
- * message for each buffer either to note that the buffer has been
- * fully consumed, or when the FIN arrives.  However, for connections
- * using PSH packets, each PSH packet will trigger a separate data
- * completion message.  These connections may satisfy multiple reads
- * from a single DDP buffer before it is fully consumed.
+ * - Available to the driver.  The buffer is owned by the driver but
+ *   is not queued to the NIC.  These buffers are on the 'avail'
+ *   list.
+ * - Queued for DDP.  The buffer is owned by the card and currently being
+ *   used for DDP.  The 'db_idx' field holds the DDP index it is using on
+ *   the card (0 or 1), and the buffer's pointer is stored at
+ *   queued[db_idx].
+ * - Ready to read.  The buffer contains data placed via DDP and is
+ *   waiting to be "read".  These buffers are in FIFO order in the
+ *   'ready' list.
+ * - Owned by userland.  The buffer has been returned to userland for
+ *   a read, but has not been posted.  Once the buffer is posted it will
+ *   be moved to the available state.
  */
-struct static_ddp_state {
-	int read_index;
+struct static_ddp_buffer {
+	TAILQ_ENTRY(static_ddp_buffer) link;
+	struct ddp_buffer *db;
+	int valid_data;
+	int db_idx;
+	int bufid;
 };
 
+struct static_ddp {
+	TAILQ_HEAD(, static_ddp_buffer) avail;
+	TAILQ_HEAD(, static_ddp_buffer) ready;
+	struct vm_object *obj;	/* split into 'count' equal-sized buffers */
+	vm_offset_t kva;	/* kernel mapping used for copying */
+	vm_size_t size;		/* size of each static buffer */
+	int count;		/* number of static buffers */
+	struct static_ddp_buffer *buffers;
+	struct static_ddp_buffer *queued[2];
+};
+	
 struct toepcb {
 	TAILQ_ENTRY(toepcb) link; /* toep_list */
 	u_int flags;		/* miscellaneous flags */
@@ -148,11 +161,7 @@ struct toepcb {
 	struct ddp_buffer *db[2];
 	time_t ddp_disabled;
 	uint8_t ddp_score;
-	struct vm_object *db_static; /* split into two equal-sized buffers */
-	void *db_static_buf;
-	vm_size_t db_static_size;
-	int db_first_data;	/* If both have data, which is first */
-	struct static_ddp_state db_static_data[2];
+	struct static_ddp ddp_static;
 
 	/* Tx software descriptor */
 	uint8_t txsd_total;
