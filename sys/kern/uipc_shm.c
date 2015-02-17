@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
+#include <sys/filio.h>
 #include <sys/fnv_hash.h>
 #include <sys/kernel.h>
 #include <sys/uio.h>
@@ -133,7 +134,7 @@ static struct fileops shm_ops = {
 	.fo_read = shm_read,
 	.fo_write = shm_write,
 	.fo_truncate = shm_truncate,
-	.fo_ioctl = invfo_ioctl,
+	.fo_ioctl = shm_ioctl,
 	.fo_poll = invfo_poll,
 	.fo_kqfilter = invfo_kqfilter,
 	.fo_stat = shm_stat,
@@ -352,6 +353,41 @@ shm_truncate(struct file *fp, off_t length, struct ucred *active_cred,
 		return (error);
 #endif
 	return (shm_dotruncate(shmfd, length));
+}
+
+static int
+shm_ioctl(struct file *fp, u_long com, void *data, struct ucred *active_cred,
+    struct thread *td)
+{
+	struct shmfd *shmfd;
+	int error, rval;
+
+	shmfd = fp->f_data;
+	switch (com) {
+	case FIOGMEMATTR:
+		*(int *)data = shmfd->shm_object->memattr;
+		error = 0;
+		break;
+	case FIOSMEMATTR:
+		VM_OBJECT_WLOCK(shmfd->shm_object);
+		rval = vm_object_set_memattr(shmfd->shm_object, *(int *)data);
+		VM_OBJECT_WUNLOCK(shmfd->shm_object);
+		switch (rval) {
+		case KERN_SUCCESS:
+			error = 0;
+			break;
+		case KERN_INVALID_ARGUMENT:
+			error = EINVAL;
+			break;
+		case KERN_FAILURE:
+			error = EBUSY;
+			break;
+		default:
+			error = EINVAL;
+			break;
+		}
+	}
+	return (EOPNOTSUPP);
 }
 
 static int

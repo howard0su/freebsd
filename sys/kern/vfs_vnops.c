@@ -1478,6 +1478,40 @@ vn_ioctl(fp, com, data, active_cred, td)
 		case FIONBIO:
 		case FIOASYNC:
 			return (0);
+		case FIOGMEMATTR:
+			vn_lock(vp, LK_SHARED | LK_RETRY);
+			if (vp->v_object != NULL) {
+				*(int *)data = vp->v_object->memattr;
+				error = 0;
+			} else
+				error = EINVAL;
+			VOP_UNLOCK(vp, 0);
+			break;
+		case FIOSMEMATTR:
+			vn_lock(vp, LK_SHARED | LK_RETRY);
+			if (vp->v_object != NULL) {			
+				VM_OBJECT_WLOCK(vp->v_object);
+				rval = vm_object_set_memattr(vp->v_object,
+				    *(int *)data);
+				VM_OBJECT_WUNLOCK(vp->v_object);
+				switch (rval) {
+				case KERN_SUCCESS:
+					error = 0;
+					break;
+				case KERN_INVALID_ARGUMENT:
+					error = EINVAL;
+					break;
+				case KERN_FAILURE:
+					error = EBUSY;
+					break;
+				default:
+					error = EINVAL;
+					break;
+				}
+			} else
+				error = EINVAL;
+			VOP_UNLOCK(vp, 0);
+			break;
 		default:
 			return (VOP_IOCTL(vp, com, data, fp->f_flag,
 			    active_cred, td));
