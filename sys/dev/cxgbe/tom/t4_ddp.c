@@ -377,7 +377,7 @@ static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 	struct static_ddp_buffer *buf;
 	struct static_ddp *sd;
 	size_t cc_ddp, cc_mb;
-	int i,;
+	int i;
 
 	sd = &toep->ddp_static;
 	cc_mb = m_length(sb->sb_mb, NULL);
@@ -2054,7 +2054,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			if (error)
 				return (error);
 			/* XXX: 16 is rather arbitrary */
-			if (optval < nitems(toep->static_ddp.queued) ||
+			if (optval < nitems(toep->ddp_static.queued) ||
 			    optval > 16)
 				return (EINVAL);
 			INP_WLOCK_RECHECK(inp);
