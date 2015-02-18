@@ -477,7 +477,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		static_ddp_sbcheck(toep, sb);
 		toep->sb_cc = sbused(sb);
 		toep->ddp_flags |= DDP_STATIC_ACT;
-		static_ddp_requeue(toep, sd, sb);
 		goto wakeup;
 	}
 	m = get_ddp_mbuf(len);
@@ -506,6 +505,8 @@ wakeup:
 	sorwakeup_locked(so);
 	SOCKBUF_UNLOCK_ASSERT(sb);
 
+	if (toep->ddp_flags & DDP_STATIC_BUF)
+		static_ddp_requeue(toep, sd, sb);		
 	INP_WUNLOCK(inp);
 	return (0);
 }
