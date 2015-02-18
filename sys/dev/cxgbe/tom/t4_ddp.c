@@ -1578,7 +1578,7 @@ ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
 		 * No DDP data yet, ensure at least one buffer is
 		 * available.
 		 */
-		needed = imin(howmany(sbused(sb), sd->size), 1);
+		needed = imax(howmany(sbused(sb), sd->size), 1);
 	}
 	avail = sd->count;
 	if (sd->queued[0] != NULL)
