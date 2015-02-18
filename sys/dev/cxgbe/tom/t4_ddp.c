@@ -1588,6 +1588,8 @@ ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
 	TAILQ_FOREACH(buf, &sd->ready, link) {
 		avail--;
 	}
+	CTR3(KTR_CXGBE, "%s: needed = %d, avail = %d", __func__, needed,
+	    avail);
 	return (imin(avail - imin(needed, avail), nitems(sd->queued)));
 }
 
