@@ -70,8 +70,7 @@ __FBSDID("$FreeBSD$");
 
 static void	free_static_ddp_buffers(struct tom_data *td,
 		    struct static_ddp *sd);
-static void	static_ddp_requeue(struct toepcb *toep, struct static_ddp *sd,
-		    struct sockbuf *sb);
+static void	static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb);
 
 #define PPOD_SZ(n)	((n) * sizeof(struct pagepod))
 #define PPOD_SIZE	(PPOD_SZ(1))
@@ -506,7 +505,7 @@ wakeup:
 	SOCKBUF_UNLOCK_ASSERT(sb);
 
 	if (toep->ddp_flags & DDP_STATIC_BUF)
-		static_ddp_requeue(toep, sd, sb);		
+		static_ddp_requeue(toep, sb);		
 	INP_WUNLOCK(inp);
 	return (0);
 }
@@ -1693,15 +1692,16 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 }
 
 static void
-static_ddp_requeue(struct toepcb *toep, struct static_ddp *sd,
-    struct sockbuf *sb)
+static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 {
 	struct adapter *sc = td_adapter(toep->td);
+	struct static_ddp *sd;
 	struct static_ddp_buffer *buf0, *buf1;
 	uint64_t ddp_flags, ddp_flags_mask;
 	struct wrqe *wr;
 	int buf_flag, count;
 
+	sd = &toep->ddp_static;
 	buf0 = NULL;
 	buf1 = NULL;
 	ddp_flags = 0;
