@@ -70,6 +70,8 @@ __FBSDID("$FreeBSD$");
 
 static void	free_static_ddp_buffers(struct tom_data *td,
 		    struct static_ddp *sd);
+static void	static_ddp_requeue(struct toepcb *toep, struct static_ddp *sd,
+		    struct sockbuf *sb);
 
 #define PPOD_SZ(n)	((n) * sizeof(struct pagepod))
 #define PPOD_SIZE	(PPOD_SZ(1))
@@ -475,6 +477,7 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		static_ddp_sbcheck(toep, sb);
 		toep->sb_cc = sbused(sb);
 		toep->ddp_flags |= DDP_STATIC_ACT;
+		static_ddp_requeue(toep, sd, sb);
 		goto wakeup;
 	}
 	m = get_ddp_mbuf(len);
@@ -1686,6 +1689,59 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 		TAILQ_INSERT_TAIL(&toep->ddp_static.avail, buf, link);
 	}
 	return (0);
+}
+
+static void
+static_ddp_requeue(struct toepcb *toep, struct static_ddp *sd,
+    struct sockbuf *sb)
+{
+	struct adapter *sc = td_adapter(toep->td);
+	struct static_ddp_buffer *buf0, *buf1;
+	uint64_t ddp_flags, ddp_flags_mask;
+	struct wrqe *wr;
+	int buf_flag, count;
+
+	buf0 = NULL;
+	buf1 = NULL;
+	ddp_flags = 0;
+	ddp_flags_mask = 0;
+	buf_flag = 0;
+	count = ddp_buffer_count(toep, sd, sb);
+	if (count > 0 && sd->queued[0] == NULL && !TAILQ_EMPTY(&sd->avail)) {
+		buf0 = TAILQ_FIRST(&sd->avail);
+		TAILQ_REMOVE(&sd->avail, buf0, link);
+		buf_flag |= DDP_BUF0_ACTIVE;
+		ddp_flags |= V_TF_DDP_BUF0_VALID(1);
+		ddp_flags_mask |= V_TF_DDP_BUF0_VALID(1);
+		count--;
+	}
+	if (count > 0 && sd->queued[1] == NULL && !TAILQ_EMPTY(&sd->avail)) {
+		buf1 = TAILQ_FIRST(&sd->avail);
+		TAILQ_REMOVE(&sd->avail, buf1, link);
+		buf_flag |= DDP_BUF1_ACTIVE;
+		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
+		ddp_flags_mask |= V_TF_DDP_BUF1_VALID(1);
+	}
+	if (buf_flag == 0)
+		return;
+	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
+		ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
+	wr = mk_update_tcb_for_static_ddp(sc, toep, buf0, buf1, ddp_flags,
+	    ddp_flags_mask);
+	if (wr == NULL) {
+		/*
+		 * XXX: If neither buffer is active and there are no
+		 * other outstanding user buffers to be posted, then
+		 * we might hang forever.
+		 */
+		if (buf0 != NULL)
+			TAILQ_INSERT_TAIL(&sd->avail, buf0, link);
+		if (buf1 != NULL)
+			TAILQ_INSERT_TAIL(&sd->avail, buf1, link);
+		return;
+	}
+	t4_wrq_tx(sc, wr);
+	toep->ddp_flags |= buf_flag;	
 }
 
 static int
