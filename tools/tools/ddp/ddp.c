@@ -199,6 +199,7 @@ main(int ac, char **av)
 	bool static_ddp, static_ddp_active, wait;
 	int ch, count, s, size;
 
+	count = 0;
 	size = 0;
 	wait = false;
 	static_ddp = false;
