@@ -377,7 +377,6 @@ static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
 	struct static_ddp_buffer *buf;
 	struct static_ddp *sd;
 	size_t cc_ddp, cc_mb;
-	int i;
 
 	sd = &toep->ddp_static;
 	cc_mb = m_length(sb->sb_mb, NULL);
