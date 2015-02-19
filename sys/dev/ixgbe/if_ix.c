@@ -3593,6 +3593,8 @@ static uint64_t
 ixgbe_get_counter(struct ifnet *ifp, ift_counter cnt)
 {
 	struct adapter *adapter;
+	struct tx_ring *txr;
+	uint64_t rv;
 
 	adapter = if_getsoftc(ifp);
 
@@ -3613,6 +3615,12 @@ ixgbe_get_counter(struct ifnet *ifp, ift_counter cnt)
 		return (0);
 	case IFCOUNTER_IQDROPS:
 		return (adapter->iqdrops);
+	case IFCOUNTER_OQDROPS:
+		rv = 0;
+		txr = adapter->tx_rings;
+		for (int i = 0; i < adapter->num_queues; i++, txr++)
+			rv += txr->br->br_drops;
+		return (rv);
 	case IFCOUNTER_IERRORS:
 		return (adapter->ierrors);
 	default:
@@ -3791,6 +3799,9 @@ ixgbe_add_hw_stats(struct adapter *adapter)
 		SYSCTL_ADD_UQUAD(ctx, queue_list, OID_AUTO, "tx_packets",
 				CTLFLAG_RD, &txr->total_packets,
 				"Queue Packets Transmitted");
+		SYSCTL_ADD_UQUAD(ctx, queue_list, OID_AUTO, "br_drops",
+				CTLFLAG_RD, &txr->br->br_drops,
+				"Packets dropped in buf_ring");
 	}
 
 	for (int i = 0; i < adapter->num_queues; i++, rxr++) {
