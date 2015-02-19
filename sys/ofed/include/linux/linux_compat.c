@@ -343,7 +343,8 @@ linux_dev_read(struct cdev *dev, struct uio *uio, int ioflag)
 		bytes = filp->f_op->read(filp, uio->uio_iov->iov_base,
 		    uio->uio_iov->iov_len, &uio->uio_offset);
 		if (bytes >= 0) {
-			uio->uio_iov->iov_base += bytes;
+			uio->uio_iov->iov_base =
+			    ((uint8_t *)uio->uio_iov->iov_base) + bytes;
 			uio->uio_iov->iov_len -= bytes;
 			uio->uio_resid -= bytes;
 		} else
@@ -377,7 +378,8 @@ linux_dev_write(struct cdev *dev, struct uio *uio, int ioflag)
 		bytes = filp->f_op->write(filp, uio->uio_iov->iov_base,
 		    uio->uio_iov->iov_len, &uio->uio_offset);
 		if (bytes >= 0) {
-			uio->uio_iov->iov_base += bytes;
+			uio->uio_iov->iov_base =
+			    ((uint8_t *)uio->uio_iov->iov_base) + bytes;
 			uio->uio_iov->iov_len -= bytes;
 			uio->uio_resid -= bytes;
 		} else
@@ -498,7 +500,8 @@ linux_file_read(struct file *file, struct uio *uio, struct ucred *active_cred,
 		bytes = filp->f_op->read(filp, uio->uio_iov->iov_base,
 		    uio->uio_iov->iov_len, &uio->uio_offset);
 		if (bytes >= 0) {
-			uio->uio_iov->iov_base += bytes;
+			uio->uio_iov->iov_base =
+			    ((uint8_t *)uio->uio_iov->iov_base) + bytes;
 			uio->uio_iov->iov_len -= bytes;
 			uio->uio_resid -= bytes;
 		} else
@@ -709,6 +712,20 @@ vunmap(void *addr)
 	kfree(vmmap);
 }
 
+
+char *
+kasprintf(gfp_t gfp, const char *fmt, ...)
+{
+	va_list ap;
+	char *p;
+
+	va_start(ap, fmt);
+	p = kvasprintf(gfp, fmt, ap);
+	va_end(ap);
+
+	return p;
+}
+
 static void
 linux_compat_init(void)
 {
@@ -736,7 +753,6 @@ linux_compat_init(void)
 	for (i = 0; i < VMMAP_HASH_SIZE; i++)
 		LIST_INIT(&vmmaphead[i]);
 }
-
 SYSINIT(linux_compat, SI_SUB_DRIVERS, SI_ORDER_SECOND, linux_compat_init, NULL);
 
 static void
