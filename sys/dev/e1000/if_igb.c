@@ -1046,9 +1046,8 @@ igb_mq_start_locked(struct ifnet *ifp, struct tx_ring *txr)
 		}
 		drbr_advance(ifp, txr->br);
 		enq++;
-		if_inc_counter(ifp, IFCOUNTER_OBYTES, next->m_pkthdr.len);
-		if (next->m_flags & M_MCAST)
-			if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
+		if (next->m_flags & M_MCAST && adapter->vf_ifp)
+			adapter->stats->mptc++;
 		ETHER_BPF_MTAP(ifp, next);
 		if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
 			break;
@@ -4055,7 +4054,9 @@ static bool
 igb_txeof(struct tx_ring *txr)
 {
 	struct adapter		*adapter = txr->adapter;
+#ifdef DEV_NETMAP
 	struct ifnet		*ifp = adapter->ifp;
+#endif /* DEV_NETMAP */
 	u32			work, processed = 0;
 	u16			limit = txr->process_limit;
 	struct igb_tx_buf	*buf;
@@ -4130,7 +4131,6 @@ igb_txeof(struct tx_ring *txr)
 		}
 		++txr->packets;
 		++processed;
-		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 		txr->watchdog_time = ticks;
 
 		/* Try the next packet */
@@ -5124,7 +5124,6 @@ igb_rxeof(struct igb_queue *que, int count, int *done)
 
 		if (eop) {
 			rxr->fmp->m_pkthdr.rcvif = ifp;
-			if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
 			rxr->rx_packets++;
 			/* capture data for AIM */
 			rxr->packets++;
@@ -5560,6 +5559,18 @@ igb_get_counter(if_t ifp, ift_counter cnt)
 	stats = (struct e1000_hw_stats *)adapter->stats;
 
 	switch (cnt) {
+	case IFCOUNTER_IPACKETS:
+		return (stats->gprc);
+	case IFCOUNTER_OPACKETS:
+		return (stats->gptc);
+	case IFCOUNTER_IBYTES:
+		return (stats->gorc);
+	case IFCOUNTER_OBYTES:
+		return (stats->gotc);
+	case IFCOUNTER_IMCASTS:
+		return (stats->mprc);
+	case IFCOUNTER_OMCASTS:
+		return (stats->mptc);
 	case IFCOUNTER_IERRORS:
 		return (adapter->dropped_pkts + stats->rxerrc +
 		    stats->crcerrs + stats->algnerrc +
