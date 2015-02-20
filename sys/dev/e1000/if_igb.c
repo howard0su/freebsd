@@ -5554,6 +5554,10 @@ igb_get_counter(if_t ifp, ift_counter cnt)
 {
 	struct adapter *adapter;
 	struct e1000_hw_stats *stats;
+#ifndef IGB_LEGACY_TX
+	struct tx_ring *txr;
+	uint64_t rv;
+#endif
 
 	adapter = if_getsoftc(ifp);
 	stats = (struct e1000_hw_stats *)adapter->stats;
@@ -5574,12 +5578,22 @@ igb_get_counter(if_t ifp, ift_counter cnt)
 	case IFCOUNTER_IERRORS:
 		return (adapter->dropped_pkts + stats->rxerrc +
 		    stats->crcerrs + stats->algnerrc +
-		    stats->ruc + stats->roc + stats->mpc + stats->cexterr);
+		    stats->ruc + stats->roc + stats->cexterr);
 	case IFCOUNTER_OERRORS:
 		return (stats->ecol + stats->latecol +
 		    adapter->watchdog_events);
 	case IFCOUNTER_COLLISIONS:
 		return (stats->colc);
+	case IFCOUNTER_IQDROPS:
+		return (stats->mpc);
+#ifndef IGB_LEGACY_TX
+	case IFCOUNTER_OQDROPS:
+		rv = 0;
+		txr = adapter->tx_rings;
+		for (int i = 0; i < adapter->num_queues; i++, txr++)
+			rv += txr->br->br_drops;
+		return (rv);
+#endif
 	default:
 		return (if_get_counter_default(ifp, cnt));
 	}
