@@ -510,7 +510,8 @@ wakeup:
 }
 
 void
-handle_ddp_close(struct toepcb *toep, struct sockbuf *sb, __be32 rcv_nxt)
+handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
+    __be32 rcv_nxt)
 {
 	struct mbuf *m;
 	int len;
