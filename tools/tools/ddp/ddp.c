@@ -37,6 +37,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <ctype.h>
 #include <err.h>
 #include <malloc_np.h>
 #include <netdb.h>
@@ -50,12 +51,13 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "Usage: ddp [-Dw] [-c count] [-s size] <host> [port]\n");
+	fprintf(stderr, "Usage: ddp [-Dw] [-b burst] [-c count] [-s size] "
+	    "[-S size] <host> [port]\n");
 	exit(1);
 }
 
 static int
-opensock(const char *host, const char *port)
+opensock(const char *host, const char *port, int rcv_size)
 {
 	struct addrinfo hints, *res, *res0;
 	int error, optval, s;
@@ -86,6 +88,13 @@ opensock(const char *host, const char *port)
 	if (setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval))
 	    < 0)
 		err(1, "setsockopt(TCP_NODELAY)");
+
+	/* Set SO_RCVBUF. */
+	if (rcv_size > 0) {
+		if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rcv_size,
+		    sizeof(rcv_size)) < 0)
+			err(1, "setsockopt(SO_RCVBUF)");
+	}
 	return (s);
 }
 
@@ -153,17 +162,21 @@ read_ddp(int s, const char *data, size_t len)
 	struct tcp_ddp_read tdr;
 	socklen_t olen;
 
-	olen = sizeof(tdr);
-	if (getsockopt(s, IPPROTO_TCP, TCP_DDP_READ, &tdr, &olen) < 0)
-		err(1, "Failed to read from static DDP buffer");
-	if (tdr.length != len)
-		errx(1, "short DDP read: %zu vs %zu", tdr.length, len);
-	if (memcmp(ddp_buf + tdr.offset, data, len) != 0)
-		errx(1, "DDP data mismatch");
+	while (len > 0) {
+		olen = sizeof(tdr);
+		if (getsockopt(s, IPPROTO_TCP, TCP_DDP_READ, &tdr, &olen) < 0)
+			err(1, "Failed to read from static DDP buffer");
+		if (tdr.length > len)
+			errx(1, "long DDP read: %zu vs %zu", tdr.length, len);
+		if (memcmp(ddp_buf + tdr.offset, data, tdr.length) != 0)
+			errx(1, "DDP data mismatch");		
+		if (setsockopt(s, IPPROTO_TCP, TCP_DDP_POST, &tdr.bufid,
+		    sizeof(tdr.bufid)) < 0)
+			err(1, "Failed to post static DDP buffer");
+		data += tdr.length;
+		len -= tdr.length;
+	}
 	printf("Received DDP data matched\n");
-	if (setsockopt(s, IPPROTO_TCP, TCP_DDP_POST, &tdr.bufid,
-	    sizeof(tdr.bufid)) < 0)
-		err(1, "Failed to post static DDP buffer");
 }
 
 static void
@@ -175,19 +188,46 @@ read_plain(int s, const char *data, size_t len)
 
 	if (buflen < len) {
 		buf = realloc(buf, len);
+		if (buf == NULL)
+			err(1, "realloc");
 		buflen = malloc_usable_size(buf);
 	}
 
-	nread = read(s, buf, buflen);
-	if (nread < 0)
-		err(1, "socket read");
-	if (nread == 0)
-		errx(1, "socket EOF");
-	if ((size_t)nread != len)
-		errx(1, "short read: %zd vs %zu", nread, len);
-	if (memcmp(data, buf, len) != 0)
-		errx(1, "data mismatch");
+	while (len > 0) {
+		nread = read(s, buf, buflen);
+		if (nread < 0)
+			err(1, "socket read");
+		if (nread == 0)
+			errx(1, "socket EOF");
+		if ((size_t)nread > len)
+			errx(1, "long read: %zd vs %zu", nread, len);
+		if (memcmp(data, buf, nread) != 0)
+			errx(1, "data mismatch");
+		data += nread;
+		len -= nread;
+	}
 	printf("Received data matched\n");
+}
+
+static char *
+build_burst(int len)
+{
+	char *buf;
+	int c, i;
+
+	if (len <= 0)
+		err(1, "Invalid burst length");
+	buf = malloc(len);
+	c = 0;
+	for (i = 0; i < len; i++) {
+		while (!isprint(c)) {
+			c++;
+			if (c == 128)
+				c = 0;
+		}
+		buf[i] = c;
+	}
+	return (buf);
 }
 
 int
@@ -197,20 +237,28 @@ main(int ac, char **av)
 	size_t linecap;
 	ssize_t linelen, nwritten;
 	bool static_ddp, static_ddp_active, wait;
-	int ch, count, s, size;
+	int ch, burst, count, rcv_size, s, size;
 
+	burst = 0;
 	count = 0;
+	rcv_size = 0;
 	size = 0;
 	wait = false;
 	static_ddp = false;
 	static_ddp_active = false;
-	while ((ch = getopt(ac, av, "c:Ds:w")) != -1)
+	while ((ch = getopt(ac, av, "b:c:DS:s:w")) != -1)
 		switch (ch) {
+		case 'b':
+			burst = atoi(optarg);
+			break;
 		case 'c':
 			count = atoi(optarg);
 			break;
 		case 'D':
 			static_ddp = true;
+			break;
+		case 'S':
+			rcv_size = atoi(optarg);
 			break;
 		case 's':
 			size = atoi(optarg);
@@ -226,7 +274,7 @@ main(int ac, char **av)
 
 	if (ac < 1 || ac > 2)
 		usage();
-	s = opensock(av[0], ac == 2 ? av[1] : "echo");
+	s = opensock(av[0], ac == 2 ? av[1] : "echo", rcv_size);
 	check_for_toe(s);
 	if (static_ddp && !wait) {
 		setup_static_ddp(s, count, size);
@@ -236,14 +284,19 @@ main(int ac, char **av)
 	line = NULL;
 	linecap = 0;
 	for (;;) {
-		linelen = getline(&line, &linecap, stdin);
-		if (linelen < 0) {
-			if (feof(stdin))
-				break;
-			errx(1, "stdin returned an error");
+		if (burst) {
+			line = build_burst(burst);
+			linelen = burst;
+		} else {
+			linelen = getline(&line, &linecap, stdin);
+			if (linelen < 0) {
+				if (feof(stdin))
+					break;
+				errx(1, "stdin returned an error");
+			}
+			if (linelen == 0)
+				errx(1, "zero-length line");
 		}
-		if (linelen == 0)
-			errx(1, "zero-length line");
 		nwritten = write(s, line, linelen);
 		if (nwritten < 0)
 			err(1, "socket write");
@@ -260,6 +313,10 @@ main(int ac, char **av)
 			read_ddp(s, line, linelen);
 		else
 			read_plain(s, line, linelen);
+		if (burst) {
+			free(line);
+			burst = 0;
+		}
 	}
 	close(s);
 	return (0);
