@@ -482,19 +482,19 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		sb->sb_acc += len;
 		static_ddp_sbcheck(toep, sb);
 		toep->ddp_flags |= DDP_STATIC_ACT;
-		goto wakeup;
+	} else {
+		m = get_ddp_mbuf(len);
+
+		SOCKBUF_LOCK(sb);
+		if (report & F_DDP_BUF_COMPLETE)
+			toep->ddp_score = DDP_HIGH_SCORE;
+		else
+			discourage_ddp(toep);
+
+		sbappendstream_locked(sb, m, 0);
 	}
-	m = get_ddp_mbuf(len);
-
-	SOCKBUF_LOCK(sb);
-	if (report & F_DDP_BUF_COMPLETE)
-		toep->ddp_score = DDP_HIGH_SCORE;
-	else
-		discourage_ddp(toep);
-
-	sbappendstream_locked(sb, m, 0);
-wakeup:
 	toep->sb_cc = sbused(sb);
+wakeup:
 	KASSERT(toep->ddp_flags & db_flag,
 	    ("%s: DDP buffer not active. toep %p, ddp_flags 0x%x, report 0x%x",
 	    __func__, toep, toep->ddp_flags, report));
@@ -568,12 +568,11 @@ handle_ddp_close(struct toepcb *toep, struct sockbuf *sb, __be32 rcv_nxt)
 		sb->sb_ccc += len;
 		sb->sb_acc += len;
 		static_ddp_sbcheck(toep, sb);
-		goto out;
-	}
-	m = get_ddp_mbuf(len);
+	} else {
+		m = get_ddp_mbuf(len);
 
-	sbappendstream_locked(sb, m, 0);
-out:
+		sbappendstream_locked(sb, m, 0);
+	}
 	toep->sb_cc = sbused(sb);
 }
 
