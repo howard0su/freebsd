@@ -1944,6 +1944,7 @@ restart:
 		if (sbavail(sb) > 0)
 			goto deliver;
 		else {
+			tdr->bufid = 0;
 			tdr->offset = 0;
 			tdr->length = 0;
 			goto out;
