@@ -51,7 +51,7 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "Usage: ddp [-Dw] [-b burst] [-c count] [-s size] "
+	fprintf(stderr, "Usage: ddp [-DFw] [-b burst] [-c count] [-s size] "
 	    "[-S size] <host> [port]\n");
 	exit(1);
 }
@@ -236,17 +236,18 @@ main(int ac, char **av)
 	char *line;
 	size_t linecap;
 	ssize_t linelen, nwritten;
-	bool static_ddp, static_ddp_active, wait;
+	bool force_fin, static_ddp, static_ddp_active, wait;
 	int ch, burst, count, rcv_size, s, size;
 
 	burst = 0;
 	count = 0;
 	rcv_size = 0;
 	size = 0;
+	force_fin = false;
 	wait = false;
 	static_ddp = false;
 	static_ddp_active = false;
-	while ((ch = getopt(ac, av, "b:c:DS:s:w")) != -1)
+	while ((ch = getopt(ac, av, "b:c:DFS:s:w")) != -1)
 		switch (ch) {
 		case 'b':
 			burst = atoi(optarg);
@@ -256,6 +257,9 @@ main(int ac, char **av)
 			break;
 		case 'D':
 			static_ddp = true;
+			break;
+		case 'F':
+			force_fin = true;
 			break;
 		case 'S':
 			rcv_size = atoi(optarg);
@@ -303,6 +307,10 @@ main(int ac, char **av)
 			err(1, "socket write");
 		if (nwritten != linelen)
 			errx(1, "short write: %zd of %zd", nwritten, linelen);
+		if (force_fin) {
+			if (shutdown(s, SHUT_WR) < 0)
+				err(1, "shutdown(SHUT_WR)");
+		}
 		if (static_ddp && !static_ddp_active) {
 			setup_static_ddp(s, count, size);
 			static_ddp_active = true;
@@ -313,6 +321,8 @@ main(int ac, char **av)
 			read_plain(s, line, linelen);
 		if (burst)
 			burst = 0;
+		if (force_fin)
+			break;
 	}
 	close(s);
 	return (0);
