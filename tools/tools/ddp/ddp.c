@@ -304,11 +304,8 @@ main(int ac, char **av)
 		if (nwritten != linelen)
 			errx(1, "short write: %zd of %zd", nwritten, linelen);
 		if (static_ddp && !static_ddp_active) {
-			if (!wait) {
-				setup_static_ddp(s, count, size);
-				static_ddp_active = true;
-			} else
-				wait = false;
+			setup_static_ddp(s, count, size);
+			static_ddp_active = true;
 		}
 		if (static_ddp_active)
 			read_ddp(s, line, linelen);
