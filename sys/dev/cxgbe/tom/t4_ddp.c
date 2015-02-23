@@ -427,11 +427,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	}
 
 	tp = intotcpcb(inp);
-#if 1
-	CTR6(KTR_CXGBE, "%s: tid %u, seq 0x%x, len %d, buf %d, ddp_flags %#x",
-	    __func__, toep->tid, be32toh(rcv_nxt), len,
-	    db_flag == DDP_BUF0_ACTIVE ? 0 : 1, toep->ddp_flags);
-#endif
 
 	/*
 	 * For RX_DDP_COMPLETE, len will be zero and rcv_nxt is the
@@ -483,6 +478,11 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		toep->ddp_flags |= DDP_STATIC_ACT;
 		goto wakeup;
 	}
+#if 1
+	CTR6(KTR_CXGBE, "%s: tid %u, seq 0x%x, len %d, buf %d, ddp_flags %#x",
+	    __func__, toep->tid, be32toh(rcv_nxt), len,
+	    db_flag == DDP_BUF0_ACTIVE ? 0 : 1, toep->ddp_flags);
+#endif
 	m = get_ddp_mbuf(len);
 
 	SOCKBUF_LOCK(sb);
@@ -1847,6 +1847,12 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	}
 
 restart:
+	/*
+	 * XXX: Need to handle the case that sb_mb is non-NULL and
+	 * sd->avail is empty because userland hasn't posted previously
+	 * delievered buffers.
+	 */
+
 	/* Abort if socket has reported problems. */
 	if (so->so_error != 0) {
 		if (sbavail(sb) > 0)
