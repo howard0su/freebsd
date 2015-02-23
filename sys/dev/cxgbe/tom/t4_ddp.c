@@ -68,6 +68,9 @@ __FBSDID("$FreeBSD$");
 #include "common/t4_tcb.h"
 #include "tom/t4_tom.h"
 
+/* Used to mark static DDP buffer mbufs. */
+#define	EXT_FLAG_STATIC_DDP	EXT_FLAG_VENDOR1
+
 static void	free_static_ddp_buffers(struct tom_data *td,
 		    struct static_ddp *sd);
 static struct mbuf *get_ddp_mbuf(int len);
@@ -155,10 +158,6 @@ free_ddp_buffer(struct tom_data *td, struct ddp_buffer *db)
 void
 release_ddp_resources(struct toepcb *toep)
 {
-	struct static_ddp_buffer *buf;
-	struct static_ddp *sd;
-	struct inpcb *inp = toep->inp;
-	struct sockbuf *sb = &inp->inp_socket->so_rcv;
 	int i;
 
 	for (i = 0; i < nitems(toep->db); i++) {
@@ -167,16 +166,7 @@ release_ddp_resources(struct toepcb *toep)
 			toep->db[i] = NULL;
 		}
 	}
-	if (toep->ddp_flags & DDP_STATIC_BUF) {
-		sd = &toep->ddp_static;
-		SOCKBUF_LOCK(sb);
-		TAILQ_FOREACH(buf, &sd->ready, link) {
-			sb->sb_acc -= buf->valid_data;
-			sb->sb_ccc -= buf->valid_data;
-		}
-		SOCKBUF_UNLOCK(sb);
-		free_static_ddp_buffers(toep->td, sd);
-	}
+	free_static_ddp_buffers(toep->td, &toep->static_ddp);
 }
 
 /* XXX: handle_ddp_data code duplication */
@@ -386,25 +376,35 @@ discourage_ddp(struct toepcb *toep)
 }
 
 static void
-static_ddp_sbcheck(struct toepcb *toep, struct sockbuf *sb)
+free_static_ddp_mbuf(struct mbuf *m, void *arg1, void *arg2)
 {
-#ifdef INVARIANTS
-	struct static_ddp_buffer *buf;
-	struct static_ddp *sd;
-	size_t cc_ddp, cc_mb;
 
-	sd = &toep->ddp_static;
-	cc_mb = m_length(sb->sb_mb, NULL);
-	cc_ddp = 0;
-	TAILQ_FOREACH(buf, &sd->ready, link) {
-		KASSERT(buf->valid_data != 0,
-		    ("ready DDP buffer with no data"));
-		cc_ddp += buf->valid_data;
-	}
-	KASSERT(cc_ddp + cc_mb == sbused(sb),
-	    ("static DDP socket buffer cc mismatch: %zu vs %u",
-	    cc_ddp + cc_mb, sbused(sb)));
-#endif
+	panic("freeing a static DDP buffer");
+}
+
+static struct mbuf *
+get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buf *buf,
+    int db_idx, int len)
+{
+	struct mbuf *m;
+
+	m = m_get(M_NOWAIT, MT_DATA);
+	if (m == NULL)
+		CXGBE_UNIMPLEMENTED("mbuf alloc failure");
+	m_extaddref(m, NULL, sd->size, &buf->ref_cnt, free_static_ddp_mbuf,
+	    buf, NULL);
+	m->m_len = len;
+	m->m_ext.ext_flags |= EXT_FLAG_STATIC_DDP;
+
+	return (m);
+}
+
+static inline int
+is_static_ddp_mbuf(struct mbuf *m)
+{
+
+	return (m->m_flags & M_EXT &&
+	    m->m_ext.ext_flags & EXT_FLAG_STATIC_DDP);
 }
 
 static int
@@ -474,7 +474,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		int db_idx;
 
 		sd = &toep->ddp_static;
-		SOCKBUF_LOCK(sb);
 		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
 		KASSERT(sd->active_id == db_idx,
 		    ("completed DDP buffer (%d) != active_id (%d)", db_idx,
@@ -484,17 +483,19 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		KASSERT(buf != NULL, ("no DDP buffer queued"));
 		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
 		buf->db_idx = -1;
+#if 0
 		buf->valid_data = len;
+#endif
 		if (sd->queued[db_idx ^ 1] == NULL)
 			sd->active_id = -1;
 		else
 			sd->active_id = db_idx ^ 1;
-		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
-
-		sb->sb_ccc += len;
-		sb->sb_acc += len;
-		static_ddp_sbcheck(toep, sb);
 		toep->ddp_flags |= DDP_STATIC_ACT;
+		sd->ready++;
+
+		m = get_static_ddp_mbuf(sd, buf, len);
+
+		SOCKBUF_LOCK(sb);
 	} else {
 		m = get_ddp_mbuf(len);
 
@@ -503,9 +504,8 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 			toep->ddp_score = DDP_HIGH_SCORE;
 		else
 			discourage_ddp(toep);
-
-		sbappendstream_locked(sb, m, 0);
 	}
+	sbappendstream_locked(sb, m, 0);
 	toep->sb_cc = sbused(sb);
 wakeup:
 	KASSERT(toep->ddp_flags & db_flag,
@@ -547,7 +547,7 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
 		struct static_ddp_buffer *buf;
 		struct static_ddp *sd;
-		int db_idx, left;
+		int db_idx;
 
 		/*
 		 * We assume that the 'len' remaining bytes were placed
@@ -564,13 +564,15 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 		KASSERT(buf != NULL, ("no DDP buffer queued"));
 		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
 		buf->db_idx = -1;
-		buf->valid_data = imin(len, sd->size);
-		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
+		m = get_static_ddp_mbuf(sd, buf, imin(len, sd->size));
 		CTR3(KTR_CXGBE, "%s: queued first buf %d len %d", __func__,
-		    db_idx, buf->valid_data);
-		left = len - buf->valid_data;
-		if (left != 0) {
-			KASSERT(left <= sd->size,
+		    db_idx, m->m_len);
+		len -= m->m_len;
+		sd->ready++;
+		if (len != 0) {
+			sbappendstream_locked(sb, m, 0);
+
+			KASSERT(len <= sd->size,
 			    ("too much DDP data at close"));
 			db_idx ^= 1;
 			buf = sd->queued[db_idx];
@@ -579,20 +581,14 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 			KASSERT(buf->db_idx == db_idx,
 			    ("DDP buffer index mismatch"));
 			buf->db_idx = -1;
-			buf->valid_data = left;
-			TAILQ_INSERT_TAIL(&sd->ready, buf, link);
+			m = get_static_ddp_mbuf(sd, buf, len);
 			CTR3(KTR_CXGBE, "%s: queued second buf %d len %d",
-			    __func__, db_idx, buf->valid_data);
+			    __func__, db_idx, m->m_len);
+			sd->ready++;
 		}
-
-		sb->sb_ccc += len;
-		sb->sb_acc += len;
-		static_ddp_sbcheck(toep, sb);
-	} else {
+	} else
 		m = get_ddp_mbuf(len);
-
-		sbappendstream_locked(sb, m, 0);
-	}
+	sbappendstream_locked(sb, m, 0);
 	toep->sb_cc = sbused(sb);
 }
 
@@ -1674,9 +1670,7 @@ ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
 		avail--;
 	if (sd->queued[1] != NULL)
 		avail--;
-	TAILQ_FOREACH(buf, &sd->ready, link) {
-		avail--;
-	}
+	avail -= sd->ready;
 	CTR3(KTR_CXGBE, "%s: needed = %d, avail = %d", __func__, needed,
 	    avail);
 	return (imin(avail - imin(needed, avail), nitems(sd->queued)));
@@ -1763,11 +1757,11 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 		sd->active_id = -1;
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
 	TAILQ_INIT(&toep->ddp_static.avail);
-	TAILQ_INIT(&toep->ddp_static.ready);
 	toep->ddp_static.obj = sd->obj;
 	toep->ddp_static.kva = sd->kva;
 	toep->ddp_static.size = sd->size;
 	toep->ddp_static.count = sd->count;
+	toep->ddp_static.ready = 0;
 	toep->ddp_static.buffers = sd->buffers;
 	buf = sd->buffers;
 	for (i = 0; i < sd->count; i++, buf++) {
@@ -1854,6 +1848,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 		if (buf->bufid == bufid)
 			return (EINVAL);
 	}
+	/* XXX: a ready check needed here */
 	TAILQ_FOREACH(buf, &sd->ready, link) {
 		if (buf->bufid == bufid)
 			return (EINVAL);
@@ -1919,6 +1914,7 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	struct static_ddp_buffer *buf;
 	struct static_ddp *sd;
 	struct sockbuf *sb;
+	struct mbuf *m;
 	int error;
 
 	sd = &toep->ddp_static;
@@ -1995,8 +1991,8 @@ deliver:
 	 * Copy any non-DDP data in the socket buffer out to free space
 	 * in an available DDP buffer.
 	 */
-	if (sb->sb_mb != NULL) {
-		struct mbuf *m;
+	m = sb->sb_mb;
+	if (!is_static_ddp_mbuf(m)) {
 		size_t count, len, offset;
 
 		/*
@@ -2017,7 +2013,9 @@ deliver:
 		tdr->bufid = buf->bufid;
 		tdr->offset = offset;
 		tdr->length = 0;
-		for (m = sb->sb_mb; m != NULL && len > 0; m = m->m_next) {
+		for (; m != NULL && len > 0; m = m->m_next) {
+			if (is_static_ddp_mbuf(m))
+				break;
 			count = min(m->m_len, len);
 			bcopy(mtod(m, char *), (char *)sd->kva + offset,
 			    count);
@@ -2029,8 +2027,7 @@ deliver:
 		goto out;
 	}
 
-	KASSERT(!TAILQ_EMPTY(&sd->ready), ("no ready DDP buffer"));
-
+	/* XXX: got to here */
 	buf = TAILQ_FIRST(&sd->ready);
 	TAILQ_REMOVE(&sd->ready, buf, link);
 	tdr->bufid = buf->bufid;

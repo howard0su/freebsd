@@ -107,8 +107,8 @@ struct ddp_buffer {
  *   the card (0 or 1), and the buffer's pointer is stored at
  *   queued[db_idx].
  * - Ready to read.  The buffer contains data placed via DDP and is
- *   waiting to be "read".  These buffers are in FIFO order in the
- *   'ready' list.
+ *   waiting to be "read".  These buffers are queued with special
+ *   mbufs on the socket buffer and are counted in 'ready'.
  * - Owned by userland.  The buffer has been returned to userland for
  *   a read, but has not been posted.  Once the buffer is posted it will
  *   be moved to the available state.
@@ -116,19 +116,29 @@ struct ddp_buffer {
 struct static_ddp_buffer {
 	TAILQ_ENTRY(static_ddp_buffer) link;
 	struct ddp_buffer *db;
+#if 0
 	int valid_data;
+#endif
 	int db_idx;
 	int bufid;
+	int ref_cnt;
 };
 
 struct static_ddp {
+	/*
+	 * XXX: Eventually make this an mbuf queue so we can reliably
+	 * allocate mbufs when doing a posted buffer.
+	 */
 	TAILQ_HEAD(, static_ddp_buffer) avail;
+#if 0
 	TAILQ_HEAD(, static_ddp_buffer) ready;
+#endif
 	struct vm_object *obj;	/* split into 'count' equal-sized buffers */
 	vm_offset_t kva;	/* kernel mapping used for copying */
-	vm_size_t size;		/* size of each static buffer */
+	int size;		/* size of each static buffer */
 	int count;		/* number of static buffers */
 	int active_id;		/* currently active buffer */
+	int ready;		/* number of ready buffers */
 	struct static_ddp_buffer *buffers;
 	struct static_ddp_buffer *queued[2];
 };
