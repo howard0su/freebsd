@@ -175,7 +175,7 @@ release_ddp_resources(struct toepcb *toep)
 			sb->sb_ccc -= buf->valid_data;
 		}
 		SOCKBUF_UNLOCK(sb);
-		free_static_ddp_buffers(toep->td, &sd);
+		free_static_ddp_buffers(toep->td, sd);
 	}
 }
 
