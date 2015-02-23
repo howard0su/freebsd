@@ -553,6 +553,8 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 		buf->db_idx = -1;
 		buf->valid_data = imin(len, sd->size);
 		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
+		CTR3(KTR_CXGBE, "%s: queued first buf %d len %d", __func__,
+		    db_idx, buf->valid_data);
 		left = len - buf->valid_data;
 		if (left != 0) {
 			KASSERT(left <= sd->size,
@@ -566,6 +568,8 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 			buf->db_idx = -1;
 			buf->valid_data = left;
 			TAILQ_INSERT_TAIL(&sd->ready, buf, link);
+			CTR3(KTR_CXGBE, "%s: queued second buf %d len %d",
+			    __func__, db_idx, buf->valid_data);
 		}
 
 		sb->sb_ccc += len;
