@@ -313,10 +313,8 @@ main(int ac, char **av)
 			read_ddp(s, line, linelen);
 		else
 			read_plain(s, line, linelen);
-		if (burst) {
-			free(line);
+		if (burst)
 			burst = 0;
-		}
 	}
 	close(s);
 	return (0);
