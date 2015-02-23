@@ -515,6 +515,8 @@ handle_ddp_close(struct toepcb *toep, struct sockbuf *sb, __be32 rcv_nxt)
 	struct mbuf *m;
 	int len;
 
+	SOCKBUF_LOCK_ASSERT(sb);
+	INP_WLOCK_ASSERT(toep->inp);
 	len = be32toh(rcv_nxt) - tp->rcv_nxt;
 	if (len == 0)
 		return;
@@ -1812,16 +1814,8 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 		return;
 	}
 	t4_wrq_tx(sc, wr);
-	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
-		/*
-		 * handle_ddp_close() reads this with only the
-		 * SOCKBUF_LOCK held, and it can't drop that to
-		 * acquire INP_WLOCK().
-		 */
-		SOCKBUF_LOCK(sb);
+	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
 		sd->active_id = 0;
-		SOCKBUF_UNLOCK(sb);
-	}
 	toep->ddp_flags |= buf_flag;	
 }
 
@@ -1895,12 +1889,8 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 	t4_wrq_tx(sc, wr);
 	toep->ddp_flags |= buf_flag;
 	if (buf_flag == DDP_BUF0_ACTIVE &&
-	    !(toep->ddp_flags & DDP_BUF1_ACTIVE)) {
-		/* See comment in static_ddp_requeue(). */
-		SOCKBUF_LOCK(sb);
+	    !(toep->ddp_flags & DDP_BUF1_ACTIVE))
 		sd->active_id = 0;
-		SOCKBUF_UNLOCK(sb);
-	}
 	return (0);
 }
 
