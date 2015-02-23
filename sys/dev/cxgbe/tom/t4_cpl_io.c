@@ -1105,7 +1105,7 @@ do_peer_close(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	sb = &so->so_rcv;
 	SOCKBUF_LOCK(sb);
 	if (__predict_false(toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))) {
-		handle_ddp_close(toep, sb);
+		handle_ddp_close(toep, sb, cpl->rcv_nxt);
 	}
 	socantrcvmore_locked(so);	/* unlocks the sockbuf */
 
