@@ -2237,7 +2237,25 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				return (error);
 			if (optval < 0)
 				return (EINVAL);
-			INP_WLOCK_RECHECK(inp);
+			INP_WLOCK(inp);
+			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
+				INP_WUNLOCK(inp);
+
+				/*
+				 * Do not fail attempts to post into a
+				 * closed socket.  There may still be
+				 * pending data to read, and if this
+				 * fails the application may abort.
+				 * Instead, just return success.  No
+				 * more data can be received, so there
+				 * is no need to requeue the buffer,
+				 * and it will be freed when the pcb
+				 * is torn down regardless of what
+				 * happens here.
+				 */
+				return (0);
+			}
+			tp = intotcpcb(inp);
 			if (!(toep->ddp_flags & DDP_STATIC_BUF)) {
 				INP_WUNLOCK(inp);
 				return (ENXIO);
