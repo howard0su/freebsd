@@ -128,6 +128,7 @@ struct static_ddp {
 	vm_offset_t kva;	/* kernel mapping used for copying */
 	vm_size_t size;		/* size of each static buffer */
 	int count;		/* number of static buffers */
+	int active_id;		/* currently active buffer */
 	struct static_ddp_buffer *buffers;
 	struct static_ddp_buffer *queued[2];
 };
@@ -327,6 +328,7 @@ int t4_tcp_ctloutput_ddp(struct socket *, struct sockopt *);
 struct mbuf *get_ddp_mbuf(int);
 void enable_ddp(struct adapter *, struct toepcb *toep);
 void release_ddp_resources(struct toepcb *toep);
+void handle_ddp_close(struct toepcb *, struct sockbuf *, uint32_t);
 void insert_ddp_data(struct toepcb *, uint32_t);
 
 /* ULP related */

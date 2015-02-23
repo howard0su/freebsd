@@ -455,12 +455,19 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		sd = &toep->ddp_static;
 		SOCKBUF_LOCK(sb);
 		db_idx = db_flag == DDP_BUF0_ACTIVE ? 0 : 1;
+		KASSERT(sd->active_id == db_idx,
+		    ("completed DDP buffer (%d) != active_id (%d)", db_idx,
+		    sd->active_id));
 		buf = sd->queued[db_idx];
 		sd->queued[db_idx] = NULL;
 		KASSERT(buf != NULL, ("no DDP buffer queued"));
 		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
 		buf->db_idx = -1;
 		buf->valid_data = len;
+		if (sd->queued[db_idx ^ 1] == NULL)
+			sd->active_id = -1;
+		else
+			sd->active_id = db_idx ^ 1;
 		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
 
 		/* XXX: Too much duplication. */
@@ -478,11 +485,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		toep->ddp_flags |= DDP_STATIC_ACT;
 		goto wakeup;
 	}
-#if 1
-	CTR6(KTR_CXGBE, "%s: tid %u, seq 0x%x, len %d, buf %d, ddp_flags %#x",
-	    __func__, toep->tid, be32toh(rcv_nxt), len,
-	    db_flag == DDP_BUF0_ACTIVE ? 0 : 1, toep->ddp_flags);
-#endif
 	m = get_ddp_mbuf(len);
 
 	SOCKBUF_LOCK(sb);
@@ -513,6 +515,74 @@ wakeup:
 		static_ddp_requeue(toep, sb);		
 	INP_WUNLOCK(inp);
 	return (0);
+}
+
+void
+handle_ddp_close(struct toepcb *toep, struct sockbuf *sb, __be32 rcv_nxt)
+{
+	struct mbuf *m;
+	int len;
+
+	len = be32toh(rcv_nxt) - tp->rcv_nxt;
+	if (len == 0)
+		return;
+
+	tp->rcv_nxt += len;
+	KASSERT(toep->sb_cc >= sbused(sb),
+	    ("%s: sb %p has more data (%d) than last time (%d).",
+	    __func__, sb, sbused(sb), toep->sb_cc));
+	toep->rx_credits += toep->sb_cc - sbused(sb);
+#ifdef USE_DDP_RX_FLOW_CONTROL
+	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
+#endif
+
+	if (toep->ddp_flags & DDP_STATIC_BUF) {
+		struct static_ddp_buffer *buf;
+		struct static_ddp *sd;
+		int db_idx, left;
+
+		/*
+		 * We assume that the 'len' remaining bytes were placed
+		 * into the "active" DDP buffer spilling over into the
+		 * other DDP buffer.  The firmware doesn't tell us which
+		 * buffer was active, so we track that in 'active_id'.
+		 */
+		sd = &toep->ddp_static;
+		KASSERT(sd->active_id != -1,
+		    ("handle_ddp_close: data but no active buffer"));
+		db_idx = sd->active_id;
+		buf = sd->queued[db_idx];
+		sd->queued[db_idx] = NULL;
+		KASSERT(buf != NULL, ("no DDP buffer queued"));
+		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
+		buf->db_idx = -1;
+		buf->valid_data = imin(len, sd->size);
+		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
+		left = len - buf->valid_data;
+		if (left != 0) {
+			KASSERT(left <= sd->size,
+			    ("too much DDP data at close"));
+			db_idx ^= 1;
+			buf = sd->queued[db_idx];
+			sd->queued[db_idx] = NULL;
+			KASSERT(buf != NULL, ("no DDP buffer queued"));
+			KASSERT(buf->db_idx == db_idx,
+			    ("DDP buffer index mismatch"));
+			buf->db_idx = -1;
+			buf->valid_data = left;
+			TAILQ_INSERT_TAIL(&sd->ready, buf, link);
+		}
+
+		sb->sb_ccc += len;
+		sb->sb_acc += len;
+		static_ddp_sbcheck(toep, sb);
+		goto out;
+	}
+	m = get_ddp_mbuf(len);
+
+	sbappendstream_locked(sb, m, 0);
+out:
+	toep->sb_cc = sbused(sb);
 }
 
 #define DDP_ERR (F_DDP_PPOD_MISMATCH | F_DDP_LLIMIT_ERR | F_DDP_ULIMIT_ERR |\
@@ -1676,6 +1746,10 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 	if (wr == NULL)
 		return (ENOMEM);
 	t4_wrq_tx(sc, wr);
+	if (buf0 != NULL)
+		sd->active_id = 0;
+	else
+		sd->active_id = -1;
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
 	TAILQ_INIT(&toep->ddp_static.avail);
 	TAILQ_INIT(&toep->ddp_static.ready);
@@ -1747,6 +1821,16 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 		return;
 	}
 	t4_wrq_tx(sc, wr);
+	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
+		/*
+		 * handle_ddp_close() reads this with only the
+		 * SOCKBUF_LOCK held, and it can't drop that to
+		 * acquire INP_WLOCK().
+		 */
+		SOCKBUF_LOCK(sb);
+		sd->active_id = 0;
+		SOCKBUF_UNLOCK(sb);
+	}
 	toep->ddp_flags |= buf_flag;	
 }
 
@@ -1819,6 +1903,13 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 	}
 	t4_wrq_tx(sc, wr);
 	toep->ddp_flags |= buf_flag;
+	if (buf_flag == DDP_BUF0_ACTIVE &&
+	    !(toep->ddp_flags & DDP_BUF1_ACTIVE)) {
+		/* See comment in static_ddp_requeue(). */
+		SOCKBUF_LOCK(sb);
+		sd->active_id = 0;
+		SOCKBUF_UNLOCK(sb);
+	}
 	return (0);
 }
 
