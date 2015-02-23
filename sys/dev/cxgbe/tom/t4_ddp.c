@@ -70,6 +70,7 @@ __FBSDID("$FreeBSD$");
 
 static void	free_static_ddp_buffers(struct tom_data *td,
 		    struct static_ddp *sd);
+static struct mbuf *get_ddp_mbuf(int len);
 static void	static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb);
 
 #define PPOD_SZ(n)	((n) * sizeof(struct pagepod))
@@ -447,6 +448,13 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	KASSERT(tp->rcv_wnd >= len, ("%s: negative window size", __func__));
 	tp->rcv_wnd -= len;
 #endif
+	KASSERT(toep->sb_cc >= sbused(sb),
+	    ("%s: sb %p has more data (%d) than last time (%d).",
+	    __func__, sb, sbused(sb), toep->sb_cc));
+	toep->rx_credits += toep->sb_cc - sbused(sb);
+#ifdef USE_DDP_RX_FLOW_CONTROL
+	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
+#endif
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
 		struct static_ddp_buffer *buf;
 		struct static_ddp *sd;
@@ -470,18 +478,9 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 			sd->active_id = db_idx ^ 1;
 		TAILQ_INSERT_TAIL(&sd->ready, buf, link);
 
-		/* XXX: Too much duplication. */
-		KASSERT(toep->sb_cc >= sbused(sb),
-		    ("%s: sb %p has more data (%d) than last time (%d).",
-		    __func__, sb, sbused(sb), toep->sb_cc));
-		toep->rx_credits += toep->sb_cc - sbused(sb);
-#ifdef USE_DDP_RX_FLOW_CONTROL
-		toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
-#endif
 		sb->sb_ccc += len;
 		sb->sb_acc += len;
 		static_ddp_sbcheck(toep, sb);
-		toep->sb_cc = sbused(sb);
 		toep->ddp_flags |= DDP_STATIC_ACT;
 		goto wakeup;
 	}
@@ -493,16 +492,9 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	else
 		discourage_ddp(toep);
 
-	KASSERT(toep->sb_cc >= sbused(sb),
-	    ("%s: sb %p has more data (%d) than last time (%d).",
-	    __func__, sb, sbused(sb), toep->sb_cc));
-	toep->rx_credits += toep->sb_cc - sbused(sb);
-#ifdef USE_DDP_RX_FLOW_CONTROL
-	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
-#endif
 	sbappendstream_locked(sb, m, 0);
-	toep->sb_cc = sbused(sb);
 wakeup:
+	toep->sb_cc = sbused(sb);
 	KASSERT(toep->ddp_flags & db_flag,
 	    ("%s: DDP buffer not active. toep %p, ddp_flags 0x%x, report 0x%x",
 	    __func__, toep, toep->ddp_flags, report));
@@ -1123,7 +1115,7 @@ soreceive_rcvoob(struct socket *so, struct uio *uio, int flags)
 
 static char ddp_magic_str[] = "nothing to see here";
 
-struct mbuf *
+static struct mbuf *
 get_ddp_mbuf(int len)
 {
 	struct mbuf *m;
