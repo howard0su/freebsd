@@ -155,6 +155,10 @@ free_ddp_buffer(struct tom_data *td, struct ddp_buffer *db)
 void
 release_ddp_resources(struct toepcb *toep)
 {
+	struct static_ddp_buffer *buf;
+	struct static_ddp *sd;
+	struct inpcb *inp = toep->inp;
+	struct sockbuf *sb = &inp->inp_socket->so_rcv;
 	int i;
 
 	for (i = 0; i < nitems(toep->db); i++) {
@@ -163,7 +167,16 @@ release_ddp_resources(struct toepcb *toep)
 			toep->db[i] = NULL;
 		}
 	}
-	free_static_ddp_buffers(toep->td, &toep->ddp_static);
+	if (toep->ddp_flags & DDP_STATIC_BUF) {
+		sd = &toep->ddp_static;
+		SOCKBUF_LOCK(sb);
+		TAILQ_FOREACH(buf, &sd->ready, link) {
+			sb->sb_acc -= buf->valid_data;
+			sb->sb_ccc -= buf->valid_data;
+		}
+		SOCKBUF_UNLOCK(sb);
+		free_static_ddp_buffers(toep->td, &sd);
+	}
 }
 
 /* XXX: handle_ddp_data code duplication */
