@@ -287,6 +287,7 @@ main(int ac, char **av)
 		if (burst) {
 			line = build_burst(burst);
 			linelen = burst;
+			linecap = burst;
 		} else {
 			linelen = getline(&line, &linecap, stdin);
 			if (linelen < 0) {
