@@ -166,7 +166,7 @@ release_ddp_resources(struct toepcb *toep)
 			toep->db[i] = NULL;
 		}
 	}
-	free_static_ddp_buffers(toep->td, &toep->static_ddp);
+	free_static_ddp_buffers(toep->td, &toep->ddp_static);
 }
 
 /* XXX: handle_ddp_data code duplication */
@@ -383,8 +383,8 @@ free_static_ddp_mbuf(struct mbuf *m, void *arg1, void *arg2)
 }
 
 static struct mbuf *
-get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buf *buf,
-    int db_idx, int len)
+get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buffer *buf,
+    int len)
 {
 	struct mbuf *m;
 
@@ -405,6 +405,22 @@ is_static_ddp_mbuf(struct mbuf *m)
 
 	return (m->m_flags & M_EXT &&
 	    m->m_ext.ext_flags & EXT_FLAG_STATIC_DDP);
+}
+
+static struct mbuf *
+dequeue_static_ddp_buf(struct static_ddp *sd, int db_idx, int len)
+{
+	struct static_ddp_buffer *buf;
+
+	buf = sd->queued[db_idx];
+	sd->queued[db_idx] = NULL;
+	KASSERT(buf != NULL, ("no DDP buffer queued"));
+	KASSERT(buf->state == QUEUED, ("DDP buffer wasn't queued"));
+	KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
+	buf->db_idx = -1;
+	buf->state = READY;
+	sd->ready++;
+	return (get_static_ddp_mbuf(sd, buf, len));
 }
 
 static int
@@ -469,7 +485,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
 #endif
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
-		struct static_ddp_buffer *buf;
 		struct static_ddp *sd;
 		int db_idx;
 
@@ -478,22 +493,12 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		KASSERT(sd->active_id == db_idx,
 		    ("completed DDP buffer (%d) != active_id (%d)", db_idx,
 		    sd->active_id));
-		buf = sd->queued[db_idx];
-		sd->queued[db_idx] = NULL;
-		KASSERT(buf != NULL, ("no DDP buffer queued"));
-		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
-		buf->db_idx = -1;
-#if 0
-		buf->valid_data = len;
-#endif
+		m = dequeue_static_ddp_buf(sd, db_idx, len);
 		if (sd->queued[db_idx ^ 1] == NULL)
 			sd->active_id = -1;
 		else
 			sd->active_id = db_idx ^ 1;
 		toep->ddp_flags |= DDP_STATIC_ACT;
-		sd->ready++;
-
-		m = get_static_ddp_mbuf(sd, buf, len);
 
 		SOCKBUF_LOCK(sb);
 	} else {
@@ -545,7 +550,6 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 #endif
 
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
-		struct static_ddp_buffer *buf;
 		struct static_ddp *sd;
 		int db_idx;
 
@@ -559,32 +563,19 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 		KASSERT(sd->active_id != -1,
 		    ("handle_ddp_close: data but no active buffer"));
 		db_idx = sd->active_id;
-		buf = sd->queued[db_idx];
-		sd->queued[db_idx] = NULL;
-		KASSERT(buf != NULL, ("no DDP buffer queued"));
-		KASSERT(buf->db_idx == db_idx, ("DDP buffer index mismatch"));
-		buf->db_idx = -1;
-		m = get_static_ddp_mbuf(sd, buf, imin(len, sd->size));
+		m = dequeue_static_ddp_buf(sd, db_idx, imin(len, sd->size));
 		CTR3(KTR_CXGBE, "%s: queued first buf %d len %d", __func__,
 		    db_idx, m->m_len);
 		len -= m->m_len;
-		sd->ready++;
 		if (len != 0) {
 			sbappendstream_locked(sb, m, 0);
 
 			KASSERT(len <= sd->size,
 			    ("too much DDP data at close"));
 			db_idx ^= 1;
-			buf = sd->queued[db_idx];
-			sd->queued[db_idx] = NULL;
-			KASSERT(buf != NULL, ("no DDP buffer queued"));
-			KASSERT(buf->db_idx == db_idx,
-			    ("DDP buffer index mismatch"));
-			buf->db_idx = -1;
-			m = get_static_ddp_mbuf(sd, buf, len);
+			m = dequeue_static_ddp_buf(sd, db_idx, len);
 			CTR3(KTR_CXGBE, "%s: queued second buf %d len %d",
 			    __func__, db_idx, m->m_len);
-			sd->ready++;
 		}
 	} else
 		m = get_ddp_mbuf(len);
@@ -1428,6 +1419,7 @@ create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
 	for (bucket = 0; bucket < sd->count; bucket++) {
 		sd->buffers[bucket].db_idx = -1;
 		sd->buffers[bucket].bufid = bucket;
+		sd->buffers[bucket].state = AVAILABLE;
 	}		
 
 	/* Fault in pages. */
@@ -1563,11 +1555,15 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 	    roundup2(LEN__RX_DATA_ACK_ULP, 16);
 	if (buf0 != NULL) {
 		KASSERT(buf0->db_idx == -1, ("DDP buffer already queued"));
+		KASSERT(buf0->state == AVAILABLE,
+		    ("DDP buffer not available"));
 		KASSERT(sd->queued[0] == NULL, ("DDP buffer 0 is active"));
 		len += 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
 	}
 	if (buf1 != NULL) {
 		KASSERT(buf1->db_idx == -1, ("DDP buffer already queued"));
+		KASSERT(buf1->state == AVAILABLE,
+		    ("DDP buffer not available"));
 		KASSERT(sd->queued[1] == NULL, ("DDP buffer 1 is active"));
 		len += 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
 	}
@@ -1595,6 +1591,7 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 		    V_TCB_RX_DDP_BUF0_LEN(buf0->db->len));
 
 		buf0->db_idx = 0;
+		buf0->state = QUEUED;
 		sd->queued[0] = buf0;
 	}
 
@@ -1615,6 +1612,7 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 		    V_TCB_RX_DDP_BUF1_LEN((u64)buf1->db->len << 32));
 
 		buf1->db_idx = 1;
+		buf1->state = QUEUED;
 		sd->queued[1] = buf1;
 	}
 
@@ -1636,14 +1634,13 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
  * pending data in the socket buffer than can fit in a single DDP
  * buffer, additional buffers are held back for copying.  Note that at
  * the time we enable DDP there may still be additional data pending
- * that is not yet in the socket buffer, so we continue * to hold back
+ * that is not yet in the socket buffer, so we continue to hold back
  * at least one buffer until we see a DDP completion message.
  */
 static int
 ddp_buffer_count(struct toepcb *toep, struct static_ddp *sd,
     struct sockbuf *sb)
 {
-	struct static_ddp_buffer *buf;
 	int avail, needed;
 
 	/* Common case first. */
@@ -1839,26 +1836,16 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 	struct static_ddp_buffer *buf;
 	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
-	int buf_flag, count, i;
+	int buf_flag, count;
 
 	/* The buffer must be a valid ID that is owned by userland. */
 	if (bufid < 0 || bufid >= sd->count)
 		return (EINVAL);
-	TAILQ_FOREACH(buf, &sd->avail, link) {
-		if (buf->bufid == bufid)
-			return (EINVAL);
-	}
-	/* XXX: a ready check needed here */
-	TAILQ_FOREACH(buf, &sd->ready, link) {
-		if (buf->bufid == bufid)
-			return (EINVAL);
-	}
 	buf = &sd->buffers[bufid];
-	for (i = 0; i < nitems(sd->queued); i++)
-		if (sd->queued[i] == buf)
-			return (EINVAL);
+	if (buf->state != USER)
+		return (EINVAL);
 
-	buf->valid_data = 0;
+	buf->state = AVAILABLE;
 	buf->db->offset = 0;
 
 	count = ddp_buffer_count(toep, sd, sb);
@@ -1935,8 +1922,11 @@ read_static_data(struct socket *so, struct toepcb *toep,
 restart:
 	/*
 	 * XXX: Need to handle the case that sb_mb is non-NULL and
-	 * sd->avail is empty because userland hasn't posted previously
-	 * delievered buffers.
+	 * sd->avail is empty because userland hasn't posted
+	 * previously delivered buffers.  One option is to block just
+	 * as if we were waiting for data.  Another option is to
+	 * explicitly fail with an error if we feel that this is
+	 * always a programming error.
 	 */
 
 	/* Abort if socket has reported problems. */
@@ -2027,18 +2017,16 @@ deliver:
 		goto out;
 	}
 
-	/* XXX: got to here */
-	buf = TAILQ_FIRST(&sd->ready);
-	TAILQ_REMOVE(&sd->ready, buf, link);
+	buf = m->m_ext.ext_arg1;
 	tdr->bufid = buf->bufid;
 	tdr->offset = buf->bufid * sd->size;
-	tdr->length = buf->valid_data;
-	sb->sb_acc -= tdr->length;
-	sb->sb_ccc -= tdr->length;
+	tdr->length = m->m_len;
+	sd->ready--;
+	buf->state = USER;
+	sbdrop_locked(sb, tdr->length);
 
 out:
 	SOCKBUF_LOCK_ASSERT(sb);
-	static_ddp_sbcheck(toep, sb);
 	SOCKBUF_UNLOCK(sb);
 	sbunlock(sb);
 	return (error);

@@ -113,12 +113,17 @@ struct ddp_buffer {
  *   a read, but has not been posted.  Once the buffer is posted it will
  *   be moved to the available state.
  */
+enum static_ddp_buffer_state {
+	AVAILABLE,
+	QUEUED,
+	READY,
+	USER
+};
+
 struct static_ddp_buffer {
 	TAILQ_ENTRY(static_ddp_buffer) link;
 	struct ddp_buffer *db;
-#if 0
-	int valid_data;
-#endif
+	enum static_ddp_buffer_state state;
 	int db_idx;
 	int bufid;
 	int ref_cnt;
@@ -130,9 +135,6 @@ struct static_ddp {
 	 * allocate mbufs when doing a posted buffer.
 	 */
 	TAILQ_HEAD(, static_ddp_buffer) avail;
-#if 0
-	TAILQ_HEAD(, static_ddp_buffer) ready;
-#endif
 	struct vm_object *obj;	/* split into 'count' equal-sized buffers */
 	vm_offset_t kva;	/* kernel mapping used for copying */
 	int size;		/* size of each static buffer */
