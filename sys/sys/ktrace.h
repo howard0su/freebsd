@@ -219,6 +219,12 @@ struct ktr_faultend {
 };
 
 /*
+ * KTR_PROCINFO - process resource usage on exit
+ */
+#define KTR_PROCINFO	15
+	/* record contains struct kinfo_proc */
+
+/*
  * KTR_DROP - If this bit is set in ktr_type, then at least one event
  * between the previous record and this record was dropped.
  */
@@ -242,6 +248,7 @@ struct ktr_faultend {
 #define KTRFAC_CAPFAIL	(1<<KTR_CAPFAIL)
 #define KTRFAC_FAULT	(1<<KTR_FAULT)
 #define KTRFAC_FAULTEND	(1<<KTR_FAULTEND)
+#define KTRFAC_PROCINFO	(1<<KTR_PROCINFO)
 
 /*
  * trace flags (also in p_traceflags)
@@ -263,6 +270,7 @@ void	ktrsysret(int, int, register_t);
 void	ktrprocctor(struct proc *);
 void	ktrprocexec(struct proc *, struct ucred **, struct vnode **);
 void	ktrprocexit(struct thread *);
+void	ktrprocinfo(struct proc *);
 void	ktrprocfork(struct proc *, struct proc *);
 void	ktruserret(struct thread *);
 void	ktrstruct(const char *, void *, size_t);

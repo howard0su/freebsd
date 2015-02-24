@@ -48,9 +48,7 @@ extern int errno;
 #include <sys/param.h>
 #include <sys/capsicum.h>
 #include <sys/errno.h>
-#define _KERNEL
 #include <sys/time.h>
-#undef _KERNEL
 #include <sys/uio.h>
 #include <sys/ktrace.h>
 #include <sys/ioctl.h>
@@ -59,6 +57,7 @@ extern int errno;
 #include <sys/sysent.h>
 #include <sys/umtx.h>
 #include <sys/un.h>
+#include <sys/user.h>
 #include <sys/queue.h>
 #include <sys/wait.h>
 #include <arpa/inet.h>
@@ -114,6 +113,7 @@ void ktrstruct(char *, size_t);
 void ktrcapfail(struct ktr_cap_fail *);
 void ktrfault(struct ktr_fault *);
 void ktrfaultend(struct ktr_faultend *);
+void ktrprocinfo(struct ktr_header *, struct kinfo_proc *);
 void limitfd(int fd);
 void usage(void);
 void ioctlname(unsigned long, int);
@@ -446,6 +446,9 @@ main(int argc, char *argv[])
 		case KTR_FAULTEND:
 			ktrfaultend((struct ktr_faultend *)m);
 			break;
+		case KTR_PROCINFO:
+			ktrprocinfo(&ktr_header, (struct kinfo_proc *)m);
+			break;
 		default:
 			printf("\n");
 			break;
@@ -628,6 +631,9 @@ dumpheader(struct ktr_header *kth)
 	case KTR_FAULTEND:
 		type = "PRET";
 		break;
+	case KTR_PROCINFO:
+		type = "PROC";
+		break;
 	default:
 		sprintf(unknown, "UNKNOWN(%d)", kth->ktr_type);
 		type = unknown;
@@ -663,7 +669,7 @@ dumpheader(struct ktr_header *kth)
 		}
 		if (timestamp & TIMESTAMP_RELATIVE) {
 			temp = kth->ktr_time;
-			timevalsub(&kth->ktr_time, &prevtime);
+			timersub(&kth->ktr_time, &prevtime, &kth->ktr_time);
 			prevtime = temp;
 			printf("%jd.%06ld ", (intmax_t)kth->ktr_time.tv_sec,
 			    kth->ktr_time.tv_usec);
@@ -1958,6 +1964,18 @@ ktrfaultend(struct ktr_faultend *ktr)
 
 	vmresultname(ktr->result);
 	printf("\n");
+}
+
+void
+ktrprocinfo(struct ktr_header *kh, struct kinfo_proc *kp)
+{
+	struct timeval wall;
+
+	timersub(&kh->ktr_time, &kp->ki_start, &wall);
+	printf("comm=\"%s\" ppid=%d cpu=%ld.%06u wall=%ld.%06u child=%ld.%06u\n",
+	    kp->ki_comm, kp->ki_ppid, kp->ki_runtime / 1000000,
+	    kp->ki_runtime % 1000000, wall.tv_sec, wall.tv_usec,
+	    kp->ki_childtime.tv_sec, kp->ki_childtime.tv_usec);
 }
 
 #if defined(__amd64__) || defined(__i386__)

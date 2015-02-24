@@ -437,6 +437,8 @@ exit1(struct thread *td, int rv)
 	if (ttyvp != NULL)
 		vrele(ttyvp);
 #ifdef KTRACE
+	if (KTRPOINT(td, KTR_PROCINFO))
+		ktrprocinfo(p);
 	ktrprocexit(td);
 #endif
 	/*

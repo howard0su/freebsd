@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/sysent.h>
 #include <sys/syslog.h>
 #include <sys/sysproto.h>
+#include <sys/user.h>
 
 #include <security/mac/mac_framework.h>
 
@@ -104,6 +105,7 @@ struct ktr_request {
 		struct	ktr_csw ktr_csw;
 		struct	ktr_fault ktr_fault;
 		struct	ktr_faultend ktr_faultend;
+		struct	kinfo_proc ktr_procinfo;
 	} ktr_data;
 	STAILQ_ENTRY(ktr_request) ktr_list;
 };
@@ -123,6 +125,7 @@ static int data_lengths[] = {
 	[KTR_CAPFAIL] = sizeof(struct ktr_cap_fail),
 	[KTR_FAULT] = sizeof(struct ktr_fault),
 	[KTR_FAULTEND] = sizeof(struct ktr_faultend),
+	[KTR_PROCINFO] = sizeof(struct kinfo_proc),
 };
 
 static STAILQ_HEAD(, ktr_request) ktr_free;
@@ -834,6 +837,26 @@ ktrfaultend(result)
 		return;
 	kf = &req->ktr_data.ktr_faultend;
 	kf->result = result;
+	ktr_enqueuerequest(td, req);
+	ktrace_exit(td);
+}
+
+/*
+ * When a zombie process is harvested, save a copy of the process'
+ * state including resource usage.
+ */
+void
+ktrprocinfo(struct proc *p)
+{
+	struct thread *td = curthread;
+	struct ktr_request *req;
+
+	req = ktr_getrequest(KTR_PROCINFO);
+	if (req == NULL)
+		return;
+	PROC_LOCK(p);
+	fill_kinfo_proc(p, &req->ktr_data.ktr_procinfo);
+	PROC_UNLOCK(p);
 	ktr_enqueuerequest(td, req);
 	ktrace_exit(td);
 }
