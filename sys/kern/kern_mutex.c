@@ -40,6 +40,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_ddb.h"
 #include "opt_global.h"
 #include "opt_hwpmc_hooks.h"
+#include "opt_inspection.h"
 #include "opt_kdtrace.h"
 #include "opt_sched.h"
 
@@ -61,6 +62,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/turnstile.h>
 #include <sys/vmmeter.h>
 #include <sys/lock_profile.h>
+#ifdef INSPECTION
+#include <sys/inspect.h>
+#endif
 
 #include <machine/atomic.h>
 #include <machine/bus.h>
@@ -282,6 +286,20 @@ _mtx_unlock_spin_flags(struct mtx *m, int opts, const char *file, int line)
 	__mtx_unlock_spin(m);
 }
 
+#ifdef INSPECTION
+/* Trim useless garbage from filenames. */
+static const char *
+fixup_filename(const char *file)
+{
+
+	if (file == NULL)
+		return (NULL);
+	while (strncmp(file, "../", 3) == 0)
+		file += 3;
+	return (file);
+}
+#endif
+
 /*
  * The important part of mtx_trylock{,_flags}()
  * Tries to acquire lock `m.'  If this function is called on a mutex that
@@ -341,6 +359,12 @@ _mtx_lock_sleep(struct mtx *m, uintptr_t tid, int opts, const char *file,
 	uintptr_t v;
 #ifdef ADAPTIVE_MUTEXES
 	volatile struct thread *owner;
+#ifdef INSPECTION
+	struct thread *td = curthread;
+	struct bintime start;
+	char owner_desc[80];
+	struct sbuf sb;
+#endif
 #endif
 #ifdef KTR
 	int cont_logged = 0;
@@ -392,6 +416,20 @@ _mtx_lock_sleep(struct mtx *m, uintptr_t tid, int opts, const char *file,
 		if (v != MTX_UNOWNED) {
 			owner = (struct thread *)(v & ~MTX_FLAGMASK);
 			if (TD_IS_RUNNING(owner)) {
+#ifdef INSPECTION
+				if (td->td_inspect & INSPECT_LOCKS) {
+					sbuf_new(&sb, owner_desc,
+					    sizeof(owner_desc), SBUF_FIXEDLEN);
+					sbuf_printf(&sb, "pid %ld, %s",
+					    (long)owner->td_proc->p_pid,
+					    owner->td_proc->p_comm);
+					sbuf_printf(&sb, " running on CPU %d",
+					    owner->td_oncpu);
+					sbuf_finish(&sb);
+					binuptime(&start);
+				} else
+					start.sec = start.frac = 0;
+#endif
 				if (LOCK_LOG_TEST(&m->lock_object, 0))
 					CTR3(KTR_LOCK,
 					    "%s: spinning on %p held by %p",
@@ -403,6 +441,16 @@ _mtx_lock_sleep(struct mtx *m, uintptr_t tid, int opts, const char *file,
 					spin_cnt++;
 #endif
 				}
+#ifdef INSPECTION
+				if (start.sec != 0 && start.frac != 0 &&
+				    td->td_inspect & INSPECT_LOCKS) {
+					inspect_finish(&start,
+					    inspect_minwait_lock, "spun",
+					    "on %s (%s) at %s:%d",
+					    m->lock_object.lo_name, owner_desc,
+					    fixup_filename(file), line);
+				}
+#endif
 				continue;
 			}
 		}

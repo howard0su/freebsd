@@ -65,6 +65,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_sleepqueue_profiling.h"
 #include "opt_ddb.h"
 #include "opt_kdtrace.h"
+#include "opt_inspection.h"
 #include "opt_sched.h"
 
 #include <sys/param.h>
@@ -80,6 +81,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/signalvar.h>
 #include <sys/sleepqueue.h>
 #include <sys/sysctl.h>
+#ifdef INSPECTION
+#include <sys/inspect.h>
+#endif
 
 #include <vm/uma.h>
 
@@ -497,6 +501,10 @@ sleepq_switch(void *wchan, int pri)
 	struct sleepqueue_chain *sc;
 	struct sleepqueue *sq;
 	struct thread *td;
+#ifdef INSPECTION
+	struct bintime start;
+	const char *wmesg;
+#endif
 
 	td = curthread;
 	sc = SC_LOOKUP(wchan);
@@ -536,6 +544,13 @@ sleepq_switch(void *wchan, int pri)
 	if (prof_enabled)
 		sleepq_profile(td->td_wmesg);
 #endif
+#ifdef INSPECTION
+	if (td->td_inspect & INSPECT_SLEEPS) {
+		binuptime(&start);
+		wmesg = td->td_wmesg;
+	} else
+		wmesg = NULL;
+#endif
 	MPASS(td->td_sleepqueue == NULL);
 	sched_sleep(td, pri);
 	thread_lock_set(td, &sc->sc_lock);
@@ -545,6 +560,11 @@ sleepq_switch(void *wchan, int pri)
 	KASSERT(TD_IS_RUNNING(td), ("running but not TDS_RUNNING"));
 	CTR3(KTR_PROC, "sleepq resume: thread %p (pid %ld, %s)",
 	    (void *)td, (long)td->td_proc->p_pid, (void *)td->td_name);
+#ifdef INSPECTION
+	if (wmesg != NULL && td->td_inspect & INSPECT_SLEEPS)
+		inspect_finish(&start, inspect_minwait_sleep, "slept", "on %s",
+		    wmesg);
+#endif
 }
 
 /*

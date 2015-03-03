@@ -39,6 +39,7 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_hwpmc_hooks.h"
+#include "opt_inspection.h"
 #include "opt_kdtrace.h"
 #include "opt_sched.h"
 
@@ -63,6 +64,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/vmmeter.h>
 #include <sys/cpuset.h>
 #include <sys/sbuf.h>
+#ifdef INSPECTION
+#include <sys/inspect.h>
+#endif
 
 #ifdef HWPMC_HOOKS
 #include <sys/pmckern.h>
@@ -1842,6 +1846,12 @@ sched_switch(struct thread *td, struct thread *newtd, int flags)
 	struct mtx *mtx;
 	int srqflag;
 	int cpuid;
+#ifdef INSPECTION
+	struct bintime start;
+	char new_comm[MAXCOMLEN + 1];
+	pid_t new_pid;
+	int running;
+#endif
 
 	THREAD_LOCK_ASSERT(td, MA_OWNED);
 	KASSERT(newtd == NULL, ("sched_switch: Unsupported newtd argument"));
@@ -1858,6 +1868,11 @@ sched_switch(struct thread *td, struct thread *newtd, int flags)
 		td->td_flags &= ~TDF_NEEDRESCHED;
 	td->td_owepreempt = 0;
 	tdq->tdq_switchcnt++;
+#ifdef INSPECTION
+	running = 0;
+	new_pid = 0;
+	start.sec = start.frac = 0;
+#endif
 	/*
 	 * The lock pointer in an idle thread should never change.  Reset it
 	 * to CAN_RUN as well.
@@ -1882,11 +1897,22 @@ sched_switch(struct thread *td, struct thread *newtd, int flags)
 			    ("Thread %p shouldn't migrate", td));
 			mtx = sched_switch_migrate(tdq, td, srqflag);
 		}
+#ifdef INSPECTION
+		running = 1;
+#endif
 	} else {
 		/* This thread must be going to sleep. */
 		TDQ_LOCK(tdq);
 		mtx = thread_lock_block(td);
 		tdq_load_rem(tdq, td);
+#ifdef INSPECTION
+		if (td->td_inspect & INSPECT_PREEMPTIONS && running) {
+			new_pid = newtd->td_proc->p_pid;
+			bcopy(newtd->td_proc->p_comm, new_comm,
+			    sizeof(new_comm));
+			binuptime(&start);
+		}
+#endif
 	}
 	/*
 	 * We enter here with the thread blocked and assigned to the
@@ -1933,6 +1959,13 @@ sched_switch(struct thread *td, struct thread *newtd, int flags)
 #ifdef	HWPMC_HOOKS
 		if (PMC_PROC_IS_USING_PMCS(td->td_proc))
 			PMC_SWITCH_CONTEXT(td, PMC_FN_CSW_IN);
+#endif
+#ifdef INSPECTION
+		if (td->td_inspect & INSPECT_PREEMPTIONS && running) {
+			inspect_finish(&start, inspect_minwait_preempt,
+			    "preempted", "by pid %ld (%s)", (long)new_pid,
+			    new_comm);
+		}
 #endif
 	} else {
 		thread_unblock_switch(td, mtx);

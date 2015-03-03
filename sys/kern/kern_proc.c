@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
+#include "opt_inspection.h"
 #include "opt_kdtrace.h"
 #include "opt_ktrace.h"
 #include "opt_kstack_pages.h"
@@ -71,6 +72,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/jail.h>
 #include <sys/vnode.h>
 #include <sys/eventhandler.h>
+#ifdef INSPECTION
+#include <sys/inspect.h>
+#include <sys/ktr.h>
+#include <machine/stdarg.h>
+#endif
 
 #ifdef DDB
 #include <ddb/ddb.h>
@@ -2691,3 +2697,157 @@ static SYSCTL_NODE(_kern_proc, KERN_PROC_UMASK, umask, CTLFLAG_RD |
 static SYSCTL_NODE(_kern_proc, KERN_PROC_OSREL, osrel, CTLFLAG_RW |
 	CTLFLAG_ANYBODY | CTLFLAG_MPSAFE, sysctl_kern_proc_osrel,
 	"Process binary osreldate");
+
+#ifdef INSPECTION
+SYSCTL_NODE(, OID_AUTO, inspect, CTLFLAG_RD, NULL,
+    "Process and thread inspection");
+
+SYSCTL_NODE(_inspect, OID_AUTO, minwait, CTLFLAG_RD, NULL,
+    "Minimum thresholds in usec for inspection timed events to be logged");
+
+long	inspect_minwait_lock;
+SYSCTL_LONG(_inspect_minwait, OID_AUTO, lock, CTLFLAG_RW,
+    &inspect_minwait_lock, 0,
+    "Minimum threshold in usec for a lock sleep to be logged");
+
+long	inspect_minwait_sleep;
+SYSCTL_LONG(_inspect_minwait, OID_AUTO, sleep, CTLFLAG_RW,
+    &inspect_minwait_sleep, 0,
+    "Minimum threshold in usec for a sleep to be logged");
+
+long	inspect_minwait_preempt;
+SYSCTL_LONG(_inspect_minwait, OID_AUTO, preempt, CTLFLAG_RW,
+    &inspect_minwait_preempt, 0,
+    "Minimum threshold in usec for a preemption to be logged");
+
+#ifdef KTR
+static int inspect_clear_ktr = 1;
+SYSCTL_INT(_inspect, OID_AUTO, clear_ktr, CTLFLAG_RW, &inspect_clear_ktr, 0,
+    "Clear KTR tracing mask when an inspection point finishes");
+#endif
+
+static int
+sysctl_inspect_me(SYSCTL_HANDLER_ARGS)
+{
+	int error, value;
+
+	value = curthread->td_inspect;
+	error = sysctl_handle_int(oidp, &value, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	thread_lock(curthread);
+	curthread->td_inspect = value;
+	thread_unlock(curthread);
+	return (0);
+}
+SYSCTL_PROC(_inspect, OID_AUTO, me, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_ANYBODY,
+    0, 0, sysctl_inspect_me, "I",
+    "Adjust inspection state for the current thread");
+
+static int
+sysctl_inspect_proc(SYSCTL_HANDLER_ARGS)
+{
+	int *name = (int*) arg1;
+	u_int namelen = arg2;
+	struct thread *td, *td2;
+	struct proc *p;
+	int error, value;
+
+	if (namelen != 1)
+		return (EINVAL);
+	if (name[0] == -1) {
+		td = NULL;
+		p = curproc;
+		PROC_LOCK(p);
+	} else {
+		p = pfind((pid_t)name[0]);
+		td = NULL;
+		if (p == NULL) {
+			td = tdfind(name[0], -1);
+			if (td != NULL)
+				p = td->td_proc;
+		}
+		if (p == NULL)
+			return (ESRCH);
+	}
+	if (p->p_flag & P_WEXIT)
+		error = ESRCH;
+	else
+		error = p_cansee(curthread, p);
+	if (error) {
+		PROC_UNLOCK(p);
+		return (error);
+	}
+	if (td != NULL)
+		value = td->td_inspect;
+	else {
+		PROC_SLOCK(p);
+		value = 0;
+		FOREACH_THREAD_IN_PROC(p, td2) {
+			value |= td2->td_inspect;
+		}
+		PROC_SUNLOCK(p);
+	}
+	_PHOLD(p);
+	PROC_UNLOCK(p);
+	error = sysctl_handle_int(oidp, &value, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	PROC_SLOCK(p);
+	FOREACH_THREAD_IN_PROC(p, td2) {
+		if (td != NULL && td2 != td)
+			continue;
+		thread_lock(td2);
+		td2->td_inspect = value;
+		thread_unlock(td2);
+	}
+	PROC_SUNLOCK(p);
+	PRELE(p);
+	return (0);
+}
+SYSCTL_NODE(_inspect, OID_AUTO, proc, CTLFLAG_RW | CTLFLAG_MPSAFE |
+    CTLFLAG_ANYBODY, sysctl_inspect_proc,
+    "Adjust inspection state for a process");
+
+/*
+ * Compute the delta in usec between now and the time in 'start'.
+ */
+long
+inspect_duration(const struct bintime *start)
+{
+	struct bintime end;
+	struct timeval tv;
+
+	binuptime(&end);
+	bintime_sub(&end, start);
+	bintime2timeval(&end, &tv);
+	return (tv.tv_sec * 1000000 + tv.tv_usec);
+}
+
+/*
+ * Finish an inspection point.
+ */
+void
+inspect_finish(const struct bintime *start, long minwait, const char *action,
+    const char *fmt, ...)
+{
+	struct thread *td;
+	va_list ap;
+	long usec;
+
+	usec = inspect_duration(start);
+	if (usec < minwait)
+		return;
+#ifdef KTR
+	if (inspect_clear_ktr)
+		ktr_mask = 0;
+#endif
+	td = curthread;
+	printf("thread %ld (pid %ld, %s) %s for %ld us ", (long)td->td_tid,
+	    (long)td->td_proc->p_pid, td->td_proc->p_comm, action, usec);
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	printf("\n");
+}
+#endif /* INSPECTION */
