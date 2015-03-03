@@ -60,6 +60,7 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_ddb.h"
+#include "opt_inspection.h"
 #include "opt_kdtrace.h"
 #include "opt_turnstile_profiling.h"
 #include "opt_sched.h"
@@ -77,6 +78,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/sdt.h>
 #include <sys/sysctl.h>
 #include <sys/turnstile.h>
+#ifdef INSPECTION
+#include <sys/inspect.h>
+#include <sys/sbuf.h>
+#endif
 
 #include <vm/uma.h>
 
@@ -677,6 +682,11 @@ turnstile_wait(struct turnstile *ts, struct thread *owner, int queue)
 	struct turnstile_chain *tc;
 	struct thread *td, *td1;
 	struct lock_object *lock;
+#ifdef INSPECTION
+	struct bintime start;
+	char owner_desc[80];
+	struct sbuf sb;
+#endif
 
 	td = curthread;
 	mtx_assert(&ts->ts_lock, MA_OWNED);
@@ -732,6 +742,62 @@ turnstile_wait(struct turnstile *ts, struct thread *owner, int queue)
 	thread_lock_set(td, &ts->ts_lock);
 	td->td_turnstile = NULL;
 
+#ifdef INSPECTION
+	if (td->td_inspect & INSPECT_LOCKS) {
+		if (owner != NULL) {
+			sbuf_new(&sb, owner_desc, sizeof(owner_desc),
+			    SBUF_FIXEDLEN);
+			sbuf_printf(&sb, "pid %ld, %s",
+			    (long)owner->td_proc->p_pid,
+			    owner->td_proc->p_comm);
+			switch (owner->td_state) {
+			case TDS_INACTIVE:
+				sbuf_cat(&sb, " inactive");
+				break;
+			case TDS_CAN_RUN:
+				sbuf_cat(&sb, " can run");
+				break;
+			case TDS_RUNQ:
+				sbuf_cat(&sb, " on run queue");
+				break;
+			case TDS_RUNNING:
+				sbuf_printf(&sb, " running on CPU %d",
+				    owner->td_oncpu);
+				break;
+			case TDS_INHIBITED:
+				if (TD_IS_SWAPPED(owner))
+					sbuf_cat(&sb, " swapped out");
+				else if (TD_IS_SLEEPING(owner))
+					sbuf_printf(&sb, " sleeping on \"%s\"",
+					    owner->td_wmesg);
+				else if (TD_ON_LOCK(owner)) {
+					struct turnstile *its;
+					struct lock_object *ilock;
+					const char *name;
+
+					name = "???";
+					its = owner->td_blocked;
+					if (its != NULL) {
+						ilock = ts->ts_lockobj;
+						if (ilock != NULL)
+							name = ilock->lo_name;
+					}
+					sbuf_printf(&sb, " blocked on \"%s\"",
+					    name);
+				} else
+					sbuf_printf(&sb, " inhibited %x",
+					    owner->td_inhibitors);
+				break;
+			default:
+				sbuf_printf(&sb, " ??? %d", owner->td_state);
+				break;
+			}
+			sbuf_finish(&sb);
+		}
+		binuptime(&start);
+	} else
+		start.sec = start.frac = 0;
+#endif
 	/* Save who we are blocked on and switch. */
 	lock = ts->ts_lockobj;
 	td->td_tsqueue = queue;
@@ -751,6 +817,17 @@ turnstile_wait(struct turnstile *ts, struct thread *owner, int queue)
 	THREAD_LOCKPTR_ASSERT(td, &ts->ts_lock);
 	mi_switch(SW_VOL | SWT_TURNSTILE, NULL);
 
+#ifdef INSPECTION
+	if (start.sec != 0 && start.frac != 0 &&
+	    td->td_inspect & INSPECT_LOCKS) {
+		if (owner != NULL)
+			inspect_finish(&start, inspect_minwait_lock, "blocked",
+			    "on %s (%s)", lock->lo_name, owner_desc);
+		else
+			inspect_finish(&start, inspect_minwait_lock, "blocked",
+			    "on %s", lock->lo_name);
+	}
+#endif
 	if (LOCK_LOG_TEST(lock, 0))
 		CTR4(KTR_LOCK, "%s: td %d free from blocked on [%p] %s",
 		    __func__, td->td_tid, lock, lock->lo_name);

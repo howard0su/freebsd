@@ -61,6 +61,7 @@ SUBDIR=	alias \
 	hexdump \
 	${_iconv} \
 	id \
+	inspect \
 	ipcrm \
 	ipcs \
 	join \
