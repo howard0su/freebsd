@@ -28,7 +28,9 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_compat.h"
+#include "opt_inspection.h"
 #include "opt_posix.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
@@ -255,6 +257,9 @@ create_thread(struct thread *td, mcontext_t *ctx,
 	thread_link(newtd, p); 
 	bcopy(p->p_comm, newtd->td_name, sizeof(newtd->td_name));
 	thread_lock(td);
+#ifdef INSPECTION
+	newtd->td_inspect = td->td_inspect;
+#endif
 	/* let the scheduler know about these things. */
 	sched_fork_thread(td, newtd);
 	thread_unlock(td);

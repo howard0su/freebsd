@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_adaptive_mutexes.h"
 #include "opt_ddb.h"
 #include "opt_hwpmc_hooks.h"
+#include "opt_inspection.h"
 #include "opt_sched.h"
 
 #include <sys/param.h>
@@ -59,6 +60,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/turnstile.h>
 #include <sys/vmmeter.h>
 #include <sys/lock_profile.h>
+#ifdef INSPECTION
+#include <sys/inspect.h>
+#endif
 
 #include <machine/atomic.h>
 #include <machine/bus.h>
@@ -305,6 +309,20 @@ __mtx_unlock_spin_flags(volatile uintptr_t *c, int opts, const char *file,
 	__mtx_unlock_spin(m);
 }
 
+#ifdef INSPECTION
+/* Trim useless garbage from filenames. */
+static const char *
+fixup_filename(const char *file)
+{
+
+	if (file == NULL)
+		return (NULL);
+	while (strncmp(file, "../", 3) == 0)
+		file += 3;
+	return (file);
+}
+#endif
+
 /*
  * The important part of mtx_trylock{,_flags}()
  * Tries to acquire lock `m.'  If this function is called on a mutex that
@@ -372,6 +390,12 @@ __mtx_lock_sleep(volatile uintptr_t *c, uintptr_t tid, int opts,
 	uintptr_t v;
 #ifdef ADAPTIVE_MUTEXES
 	volatile struct thread *owner;
+#ifdef INSPECTION
+	struct thread *td = curthread;
+	struct bintime start;
+	char owner_desc[80];
+	struct sbuf sb;
+#endif
 #endif
 #ifdef KTR
 	int cont_logged = 0;
@@ -428,6 +452,20 @@ __mtx_lock_sleep(volatile uintptr_t *c, uintptr_t tid, int opts,
 		if (v != MTX_UNOWNED) {
 			owner = (struct thread *)(v & ~MTX_FLAGMASK);
 			if (TD_IS_RUNNING(owner)) {
+#ifdef INSPECTION
+				if (td->td_inspect & INSPECT_LOCKS) {
+					sbuf_new(&sb, owner_desc,
+					    sizeof(owner_desc), SBUF_FIXEDLEN);
+					sbuf_printf(&sb, "pid %ld, %s",
+					    (long)owner->td_proc->p_pid,
+					    owner->td_proc->p_comm);
+					sbuf_printf(&sb, " running on CPU %d",
+					    owner->td_oncpu);
+					sbuf_finish(&sb);
+					binuptime(&start);
+				} else
+					start.sec = start.frac = 0;
+#endif
 				if (LOCK_LOG_TEST(&m->lock_object, 0))
 					CTR3(KTR_LOCK,
 					    "%s: spinning on %p held by %p",
@@ -446,6 +484,16 @@ __mtx_lock_sleep(volatile uintptr_t *c, uintptr_t tid, int opts,
 				KTR_STATE0(KTR_SCHED, "thread",
 				    sched_tdname((struct thread *)tid),
 				    "running");
+#ifdef INSPECTION
+				if (start.sec != 0 && start.frac != 0 &&
+				    td->td_inspect & INSPECT_LOCKS) {
+					inspect_finish(&start,
+					    inspect_minwait_lock, "spun",
+					    "on %s (%s) at %s:%d",
+					    m->lock_object.lo_name, owner_desc,
+					    fixup_filename(file), line);
+				}
+#endif
 				continue;
 			}
 		}

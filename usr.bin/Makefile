@@ -64,6 +64,7 @@ SUBDIR=	${_addr2line} \
 	hexdump \
 	${_iconv} \
 	id \
+	inspect \
 	ipcrm \
 	ipcs \
 	join \

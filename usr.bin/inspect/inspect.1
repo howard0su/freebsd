@@ -1,0 +1,59 @@
+.\" - copyright, etc.
+.\"
+.Dd December 15, 2011
+.Dt INSPECT 1
+.Os
+.Sh NAME
+.Nm inspect
+.Nd enable kernel thread inspection
+.Sh SYNOPSIS
+.Nm
+.Op Fl c | Fl t Ar flags
+.Op Fl p Ar id
+.Nm
+.Op Fl t Ar flags
+.Ar command
+.Sh DESCRIPTION
+The
+.Nm
+utility enables kernel thread inspection for the specified process.
+When kernel thread inspection is enabled,
+the kernel will log certain exceptional events to the console when they occur.
+.Pp
+The utility may be used only with a kernel that has been built with the
+.Dq INSPECTION
+option in the kernel configuration file.
+.Pp
+The options are:
+.Bl -tag -width indent
+.It Fl c
+Disable kernel thread inspection for all threads in the specified process.
+.It Fl p Ar id
+Enable (disable) inspection on the indicated process or thread id.
+.It Fl t Ar flags
+The string argument represents the events to be inspected, one per letter.
+The following events are supported:
+.Pp
+.Bl -tag -width flag -compact
+.It Cm l
+log blocking on a turnstile
+.Pq a lock
+.It Cm p
+log thread preemptions
+.It Cm s
+log sleeping on a wait channel or condition variable
+.El
+.It Ar command
+Execute
+.Ar command
+with the specified inspection enabled.
+.El
+.Sh EXAMPLES
+# trace all contested lock acquisitions for process id 34
+.Dl $ inspect -t l -p 34
+.Pp
+# trace all sleeps of an invocation of
+.Xr sleep 1
+.Dl $ inspect -t s sleep 1
+.Sh SEE ALSO
+.Xr ktrace 1
