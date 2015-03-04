@@ -1861,8 +1861,10 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
 	if (buf->mbuf == NULL) {
 		buf->mbuf = m;
 		setup_static_ddp_mbuf(sd, buf);
-	} else
+	} else {
+		printf("posted buffer has mbuf\n");
 		m_free(m);
+	}
 	buf->db->offset = 0;
 
 	count = ddp_buffer_count(toep, sd, sb);
