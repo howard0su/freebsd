@@ -1418,9 +1418,10 @@ create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
 	    M_CXGBE, M_WAITOK | M_ZERO);
 	pp = malloc(sizeof(vm_page_t) * sd->count, M_CXGBE, M_WAITOK);
 	for (bucket = 0; bucket < sd->count; bucket++) {
+		sd->buffers[bucket].state = AVAILABLE;
 		sd->buffers[bucket].db_idx = -1;
 		sd->buffers[bucket].bufid = bucket;
-		sd->buffers[bucket].state = AVAILABLE;
+		sd->buffers[bucket].ref_cnt = 1;
 	}		
 
 	/* Fault in pages. */
