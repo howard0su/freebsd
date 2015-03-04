@@ -382,17 +382,15 @@ free_static_ddp_mbuf(struct mbuf *m, void *arg1, void *arg2)
 	panic("freeing a static DDP buffer");
 }
 
-static struct mbuf *
-get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buffer *buf)
+static void
+setup_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buffer *buf)
 {
 	struct mbuf *m;
 
-	m = m_get(M_WAITOK, MT_DATA);
+	m = buf->mbuf;
 	m_extaddref(m, NULL, sd->size, &buf->ref_cnt, free_static_ddp_mbuf,
 	    buf, NULL);
 	m->m_ext.ext_flags |= EXT_FLAG_STATIC_DDP;
-
-	return (m);
 }
 
 static inline int
@@ -1421,8 +1419,8 @@ create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
 		sd->buffers[bucket].db_idx = -1;
 		sd->buffers[bucket].bufid = bucket;
 		sd->buffers[bucket].ref_cnt = 1;
-		sd->buffers[bucket].mbuf = get_static_ddp_mbuf(sd,
-		    &sd->buffers[bucket]);
+		sd->buffers[bucket].mbuf = m_get(M_WAITOK, MT_DATA);
+		setup_static_ddp_mbuf(sd, &sd->buffers[bucket]);
 	}		
 
 	/* Fault in pages. */
@@ -1838,7 +1836,8 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 }
 
 static int
-post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
+post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
+	struct mbuf *m)
 {
 	struct adapter *sc = td_adapter(toep->td);
 	struct static_ddp *sd = &toep->ddp_static;
@@ -1848,14 +1847,22 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 	int buf_flag, count;
 
 	/* The buffer must be a valid ID that is owned by userland. */
-	if (bufid < 0 || bufid >= sd->count)
+	if (bufid < 0 || bufid >= sd->count) {
+		m_free(m);
 		return (EINVAL);
+	}
 	buf = &sd->buffers[bufid];
-	if (buf->state != USER)
+	if (buf->state != USER) {
+		m_free(m);
 		return (EINVAL);
+	}
 
 	buf->state = AVAILABLE;
-	buf->mbuf = get_static_ddp_mbuf(sd, buf);
+	if (buf->mbuf == NULL) {
+		buf->mbuf = m;
+		setup_static_ddp_mbuf(sd, buf);
+	} else
+		m_free(m);
 	buf->db->offset = 0;
 
 	count = ddp_buffer_count(toep, sd, sb);
@@ -2062,6 +2069,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 	struct tcp_ddp_map tdm;
 	struct tcp_ddp_read tdr;
 	struct static_ddp sd;
+	struct mbuf *m;
 	vm_object_t obj;
 	int error, i, old, optval;
 
@@ -2247,6 +2255,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				return (error);
 			if (optval < 0)
 				return (EINVAL);
+			m = m_get(M_WAITOK, MT_DATA);
 			INP_WLOCK(inp);
 			if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
 				INP_WUNLOCK(inp);
@@ -2263,15 +2272,17 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				 * is torn down regardless of what
 				 * happens here.
 				 */
+				m_free(m);
 				return (0);
 			}
 			tp = intotcpcb(inp);
 			if (!(toep->ddp_flags & DDP_STATIC_BUF)) {
 				INP_WUNLOCK(inp);
+				m_free(m);
 				return (ENXIO);
 			}
 			error = post_static_ddp_buffer(toep, optval,
-			    &so->so_rcv);
+			    &so->so_rcv, m);
 			INP_WUNLOCK(inp);
 			break;
 		default:
