@@ -393,7 +393,6 @@ get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buffer *buf,
 		CXGBE_UNIMPLEMENTED("mbuf alloc failure");
 	m_extaddref(m, NULL, sd->size, &buf->ref_cnt, free_static_ddp_mbuf,
 	    buf, NULL);
-	KASSERT(buf->ref_cnt == 2, ("bad refcnt"));
 	m->m_len = len;
 	m->m_ext.ext_flags |= EXT_FLAG_STATIC_DDP;
 
