@@ -383,17 +383,13 @@ free_static_ddp_mbuf(struct mbuf *m, void *arg1, void *arg2)
 }
 
 static struct mbuf *
-get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buffer *buf,
-    int len)
+get_static_ddp_mbuf(struct static_ddp *sd, struct static_ddp_buffer *buf)
 {
 	struct mbuf *m;
 
-	m = m_get(M_NOWAIT, MT_DATA);
-	if (m == NULL)
-		CXGBE_UNIMPLEMENTED("mbuf alloc failure");
+	m = m_get(M_WAITOK, MT_DATA);
 	m_extaddref(m, NULL, sd->size, &buf->ref_cnt, free_static_ddp_mbuf,
 	    buf, NULL);
-	m->m_len = len;
 	m->m_ext.ext_flags |= EXT_FLAG_STATIC_DDP;
 
 	return (m);
@@ -411,6 +407,7 @@ static struct mbuf *
 dequeue_static_ddp_buf(struct static_ddp *sd, int db_idx, int len)
 {
 	struct static_ddp_buffer *buf;
+	struct mbuf *m;
 
 	buf = sd->queued[db_idx];
 	sd->queued[db_idx] = NULL;
@@ -420,7 +417,10 @@ dequeue_static_ddp_buf(struct static_ddp *sd, int db_idx, int len)
 	buf->db_idx = -1;
 	buf->state = READY;
 	sd->ready++;
-	return (get_static_ddp_mbuf(sd, buf, len));
+	m = buf->mbuf;
+	buf->mbuf = NULL;
+	m->m_len = len;
+	return (m);
 }
 
 static int
@@ -1421,6 +1421,8 @@ create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
 		sd->buffers[bucket].db_idx = -1;
 		sd->buffers[bucket].bufid = bucket;
 		sd->buffers[bucket].ref_cnt = 1;
+		sd->buffers[bucket].mbuf = get_static_ddp_mbuf(sd,
+		    &sd->buffers[bucket]);
 	}		
 
 	/* Fault in pages. */
@@ -1490,11 +1492,15 @@ create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
 static void
 free_static_ddp_buffers(struct tom_data *td, struct static_ddp *sd)
 {
+	struct static_ddp_buffer *buf;
 	int i;
 
 	if (sd->buffers != NULL) {
-		for (i = 0; i < sd->count; i++)
-			free_ddp_buffer(td, sd->buffers[i].db);
+		for (i = 0, buf = sd->buffers; i < sd->count; i++, buf++) {
+			free_ddp_buffer(td, buf->db);
+			if (buf->mbuf != NULL)
+				m_free(buf->mbuf);
+		}
 		free(sd->buffers, M_CXGBE);
 	}
 	if (sd->obj != NULL) {
@@ -1558,6 +1564,7 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 		KASSERT(buf0->db_idx == -1, ("DDP buffer already queued"));
 		KASSERT(buf0->state == AVAILABLE,
 		    ("DDP buffer not available"));
+		KASSERT(buf0->mbuf != NULL, ("DDP buffer missing mbuf"));
 		KASSERT(sd->queued[0] == NULL, ("DDP buffer 0 is active"));
 		len += 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
 	}
@@ -1565,6 +1572,7 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 		KASSERT(buf1->db_idx == -1, ("DDP buffer already queued"));
 		KASSERT(buf1->state == AVAILABLE,
 		    ("DDP buffer not available"));
+		KASSERT(buf1->mbuf != NULL, ("DDP buffer missing mbuf"));
 		KASSERT(sd->queued[1] == NULL, ("DDP buffer 1 is active"));
 		len += 2 * roundup2(LEN__SET_TCB_FIELD_ULP, 16);
 	}
@@ -1847,6 +1855,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb)
 		return (EINVAL);
 
 	buf->state = AVAILABLE;
+	buf->mbuf = get_static_ddp_mbuf(sd, buf);
 	buf->db->offset = 0;
 
 	count = ddp_buffer_count(toep, sd, sb);
@@ -2019,6 +2028,7 @@ deliver:
 	}
 
 	buf = m->m_ext.ext_arg1;
+	KASSERT(buf->mbuf == NULL, ("ready DDP buffer has mbuf"));
 	tdr->bufid = buf->bufid;
 	tdr->offset = buf->bufid * sd->size;
 	tdr->length = m->m_len;

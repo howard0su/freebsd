@@ -127,6 +127,7 @@ struct static_ddp_buffer {
 	int db_idx;
 	int bufid;
 	int ref_cnt;
+	struct mbuf *mbuf;
 };
 
 struct static_ddp {
