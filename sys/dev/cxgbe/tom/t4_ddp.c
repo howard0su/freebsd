@@ -514,8 +514,7 @@ wakeup:
 	KASSERT(toep->ddp_flags & db_flag,
 	    ("%s: DDP buffer not active. toep %p, ddp_flags 0x%x, report 0x%x",
 	    __func__, toep, toep->ddp_flags, report));
-	if (report & F_DDP_INV)
-		toep->ddp_flags &= ~db_flag;
+	toep->ddp_flags &= ~db_flag;
 	sorwakeup_locked(so);
 	SOCKBUF_UNLOCK_ASSERT(sb);
 
@@ -892,7 +891,7 @@ write_page_pods(struct adapter *sc, struct toepcb *toep, struct ddp_buffer *db)
 					idx += ddp_pgsz / PAGE_SIZE;
 				} else
 					ppod->addr[k] = 0;
-#if 1
+#if 0
 				CTR5(KTR_CXGBE,
 				    "%s: tid %d ppod[%d]->addr[%d] = %p",
 				    __func__, toep->tid, i, k,
