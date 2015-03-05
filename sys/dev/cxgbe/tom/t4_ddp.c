@@ -2054,6 +2054,8 @@ deliver:
 
 out:
 	SOCKBUF_LOCK_ASSERT(sb);
+	SBLASTRECORDCHK(sb);
+	SBLASTMBUFCHK(sb);
 	SOCKBUF_UNLOCK(sb);
 	sbunlock(sb);
 	return (error);
