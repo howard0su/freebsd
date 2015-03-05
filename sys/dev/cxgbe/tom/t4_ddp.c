@@ -321,6 +321,11 @@ mk_update_tcb_for_ddp(struct adapter *sc, struct toepcb *toep, int db_idx,
 	len = sizeof(*wrh) + 3 * roundup2(LEN__SET_TCB_FIELD_ULP, 16) +
 	    roundup2(LEN__RX_DATA_ACK_ULP, 16);
 
+	/*
+	 * XXX: Should allow the caller to request non-blocking
+	 * allocations in some cases (e.g. post_static_ddp() and when
+	 * creating.
+	 */
 	wr = alloc_wrqe(len, toep->ctrlq);
 	if (wr == NULL)
 		return (NULL);
@@ -515,11 +520,11 @@ wakeup:
 	    ("%s: DDP buffer not active. toep %p, ddp_flags 0x%x, report 0x%x",
 	    __func__, toep, toep->ddp_flags, report));
 	toep->ddp_flags &= ~db_flag;
+	if (toep->ddp_flags & DDP_STATIC_BUF)
+		static_ddp_requeue(toep, sb);		
 	sorwakeup_locked(so);
 	SOCKBUF_UNLOCK_ASSERT(sb);
 
-	if (toep->ddp_flags & DDP_STATIC_BUF)
-		static_ddp_requeue(toep, sb);		
 	INP_WUNLOCK(inp);
 	return (0);
 }
@@ -1833,12 +1838,13 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 }
 
 static int
-post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
+post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 	struct mbuf *m)
 {
 	struct adapter *sc = td_adapter(toep->td);
 	struct static_ddp *sd = &toep->ddp_static;
 	struct static_ddp_buffer *buf;
+	struct sockbuf *sb;
 	struct wrqe *wr;
 	uint64_t ddp_flags, ddp_flags_mask;
 	int buf_flag, count;
@@ -1862,11 +1868,15 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
 		m_free(m);
 	buf->db->offset = 0;
 
+	sb = &so->so_rcv;
 	count = ddp_buffer_count(toep, sd, sb);
 	if (count == 0 ||
 	    (toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) ==
 	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
+		SOCKBUF_LOCK(sb);
 		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
+		sorwakeup_locked(so);
+		SOCKBUF_UNLOCK(sb);
 		return (0);
 	}
 
@@ -1897,7 +1907,10 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
 		 * other outstanding user buffers to be posted, then
 		 * we might hang forever.
 		 */
+		SOCKBUF_LOCK(sb);
 		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
+		sorwakeup_locked(so);
+		SOCKBUF_UNLOCK(sb);
 		return (ENOMEM);
 	}
 	t4_wrq_tx(sc, wr);
@@ -1934,15 +1947,6 @@ read_static_data(struct socket *so, struct toepcb *toep,
 	}
 
 restart:
-	/*
-	 * XXX: Need to handle the case that sb_mb is non-NULL and
-	 * sd->avail is empty because userland hasn't posted
-	 * previously delivered buffers.  One option is to block just
-	 * as if we were waiting for data.  Another option is to
-	 * explicitly fail with an error if we feel that this is
-	 * always a programming error.
-	 */
-
 	/* Abort if socket has reported problems. */
 	if (so->so_error != 0) {
 		if (sbavail(sb) > 0)
@@ -1999,8 +2003,26 @@ deliver:
 		 * Copy any non-DDP data in the socket buffer out to
 		 * the first available buffer.
 		 */
-		KASSERT(!TAILQ_EMPTY(&sd->avail),
-		    ("no avail buffer to copy non-DDP data into"));
+
+		/*
+		 * Userland might be holding onto previously-returned
+		 * buffers that it hasn't posted yet and as a result
+		 * there might not be an available buffer.  If this is
+		 * a non-blocking socket, fail with ENOBUFS.  If this
+		 * is a blocking socket, sleep waiting for userland to
+		 * post a buffer.
+		 */
+		if (TAILQ_EMPTY(&sd->avail)) {
+			if (so->so_state & SS_NBIO) {
+				error = ENOBUFS;
+				goto out;
+			}
+			error = sbwait(sb);
+			if (error)
+				goto out;
+			goto restart;
+		}
+
 		buf = TAILQ_FIRST(&sd->avail);
 		buf->state = USER;
 		TAILQ_REMOVE(&sd->avail, buf, link);
@@ -2288,8 +2310,7 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				m_free(m);
 				return (ENXIO);
 			}
-			error = post_static_ddp_buffer(toep, optval,
-			    &so->so_rcv, m);
+			error = post_static_ddp_buffer(toep, optval, so, m);
 			INP_WUNLOCK(inp);
 			break;
 		default:
