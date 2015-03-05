@@ -2017,6 +2017,7 @@ deliver:
 		KASSERT(!TAILQ_EMPTY(&sd->avail),
 		    ("no avail buffer to copy non-DDP data into"));
 		buf = TAILQ_FIRST(&sd->avail);
+		buf->state = USER;
 		TAILQ_REMOVE(&sd->avail, buf, link);
 		offset = buf->bufid * sd->size;
 		len = sd->size;
