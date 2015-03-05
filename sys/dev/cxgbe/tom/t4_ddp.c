@@ -416,6 +416,8 @@ dequeue_static_ddp_buf(struct static_ddp *sd, int db_idx, int len)
 	buf->state = READY;
 	sd->ready++;
 	m = buf->mbuf;
+	CTR2(KTR_CXGBE, "%s: cleared mbuf for buffer %d", __func__,
+	    buf->bufid);
 	buf->mbuf = NULL;
 	m->m_len = len;
 	return (m);
@@ -1421,6 +1423,8 @@ create_static_ddp_buffers(struct tom_data *td, struct ucred *cred,
 		sd->buffers[bucket].ref_cnt = 1;
 		sd->buffers[bucket].mbuf = m_get(M_WAITOK, MT_DATA);
 		setup_static_ddp_mbuf(sd, &sd->buffers[bucket]);
+		CTR2(KTR_CXGBE, "%s: added mbuf for buffer %d", __func__,
+		    bucket);
 	}		
 
 	/* Fault in pages. */
@@ -1861,6 +1865,8 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
 	if (buf->mbuf == NULL) {
 		buf->mbuf = m;
 		setup_static_ddp_mbuf(sd, buf);
+		CTR2(KTR_CXGBE, "%s: added mbuf for buffer %d", __func__,
+		    bufid);
 	} else {
 		printf("posted buffer has mbuf\n");
 		m_free(m);
