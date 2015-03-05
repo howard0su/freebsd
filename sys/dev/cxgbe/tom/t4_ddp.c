@@ -321,11 +321,6 @@ mk_update_tcb_for_ddp(struct adapter *sc, struct toepcb *toep, int db_idx,
 	len = sizeof(*wrh) + 3 * roundup2(LEN__SET_TCB_FIELD_ULP, 16) +
 	    roundup2(LEN__RX_DATA_ACK_ULP, 16);
 
-	/*
-	 * XXX: Should allow the caller to request non-blocking
-	 * allocations in some cases (e.g. post_static_ddp() and when
-	 * creating.
-	 */
 	wr = alloc_wrqe(len, toep->ctrlq);
 	if (wr == NULL)
 		return (NULL);
