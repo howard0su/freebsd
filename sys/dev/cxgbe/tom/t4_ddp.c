@@ -416,8 +416,8 @@ dequeue_static_ddp_buf(struct static_ddp *sd, int db_idx, int len)
 	buf->state = READY;
 	sd->ready++;
 	m = buf->mbuf;
-	CTR2(KTR_CXGBE, "%s: cleared mbuf for buffer %d", __func__,
-	    buf->bufid);
+	CTR3(KTR_CXGBE, "%s: dequeue buffer %d holding %d bytes", __func__,
+	    buf->bufid, len);
 	buf->mbuf = NULL;
 	m->m_len = len;
 	return (m);
@@ -1861,16 +1861,15 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct sockbuf *sb,
 		return (EINVAL);
 	}
 
+	CTR2(KTR_CXGBE, "%s: posting buffer %d", __func__, bufid);
 	buf->state = AVAILABLE;
 	if (buf->mbuf == NULL) {
 		buf->mbuf = m;
 		setup_static_ddp_mbuf(sd, buf);
 		CTR2(KTR_CXGBE, "%s: added mbuf for buffer %d", __func__,
 		    bufid);
-	} else {
-		printf("posted buffer has mbuf\n");
+	} else
 		m_free(m);
-	}
 	buf->db->offset = 0;
 
 	count = ddp_buffer_count(toep, sd, sb);
@@ -2039,6 +2038,8 @@ deliver:
 			len -= count;
 			tdr->length += count;
 		}
+		CTR3(KTR_CXGBE, "%s: returning %zu non-DDP bytes in buffer %d",
+		    __func__, tdr->length, tdr->bufid);
 		sbdrop_locked(sb, tdr->length);
 		goto out;
 	}
@@ -2050,6 +2051,8 @@ deliver:
 	tdr->length = m->m_len;
 	sd->ready--;
 	buf->state = USER;
+	CTR3(KTR_CXGBE, "%s: returning %zu DDP bytes in buffer %d",
+	    __func__, tdr->length, tdr->bufid);
 	sbdrop_locked(sb, tdr->length);
 
 out:
