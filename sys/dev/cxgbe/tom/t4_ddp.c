@@ -2001,17 +2001,13 @@ deliver:
 	SOCKBUF_LOCK_ASSERT(&so->so_rcv);
 	KASSERT(sbavail(sb) > 0, ("%s: sockbuf empty", __func__));
 
-	/*
-	 * Copy any non-DDP data in the socket buffer out to free space
-	 * in an available DDP buffer.
-	 */
 	m = sb->sb_mb;
 	if (!is_static_ddp_mbuf(m)) {
 		size_t count, len, offset;
 
 		/*
-		 * Grab the first available buffer and copy non-DDP
-		 * data into it.
+		 * Copy any non-DDP data in the socket buffer out to
+		 * the first available buffer.
 		 */
 		KASSERT(!TAILQ_EMPTY(&sd->avail),
 		    ("no avail buffer to copy non-DDP data into"));
@@ -2040,20 +2036,31 @@ deliver:
 		}
 		CTR3(KTR_CXGBE, "%s: returning %zu non-DDP bytes in buffer %d",
 		    __func__, tdr->length, tdr->bufid);
-		sbdrop_locked(sb, tdr->length);
-		goto out;
+	} else {
+		/*
+		 * Return the DDP buffer from the first mbuf in the
+		 * socket buffer.
+		 */
+		buf = m->m_ext.ext_arg1;
+		KASSERT(buf->mbuf == NULL, ("ready DDP buffer has mbuf"));
+		tdr->bufid = buf->bufid;
+		tdr->offset = buf->bufid * sd->size;
+		tdr->length = m->m_len;
+		sd->ready--;
+		buf->state = USER;
+		CTR3(KTR_CXGBE, "%s: returning %zu DDP bytes in buffer %d",
+		    __func__, tdr->length, tdr->bufid);
 	}
 
-	buf = m->m_ext.ext_arg1;
-	KASSERT(buf->mbuf == NULL, ("ready DDP buffer has mbuf"));
-	tdr->bufid = buf->bufid;
-	tdr->offset = buf->bufid * sd->size;
-	tdr->length = m->m_len;
-	sd->ready--;
-	buf->state = USER;
-	CTR3(KTR_CXGBE, "%s: returning %zu DDP bytes in buffer %d",
-	    __func__, tdr->length, tdr->bufid);
 	sbdrop_locked(sb, tdr->length);
+
+	/* Notify protocol that we drained some data. */
+	if (so->so_proto->pr_flags & PR_WANTRCVD) {
+		SOCKBUF_UNLOCK(sb);
+		VNET_SO_ASSERT(so);
+		(*so->so_proto->pr_usrreqs->pru_rcvd)(so, 0);
+		SOCKBUF_LOCK(sb);
+	}
 
 out:
 	SOCKBUF_LOCK_ASSERT(sb);
