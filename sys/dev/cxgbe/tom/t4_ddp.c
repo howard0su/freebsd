@@ -477,13 +477,6 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	KASSERT(tp->rcv_wnd >= len, ("%s: negative window size", __func__));
 	tp->rcv_wnd -= len;
 #endif
-	KASSERT(toep->sb_cc >= sbused(sb),
-	    ("%s: sb %p has more data (%d) than last time (%d).",
-	    __func__, sb, sbused(sb), toep->sb_cc));
-	toep->rx_credits += toep->sb_cc - sbused(sb);
-#ifdef USE_DDP_RX_FLOW_CONTROL
-	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
-#endif
 	if (toep->ddp_flags & DDP_STATIC_BUF) {
 		struct static_ddp *sd;
 		int db_idx;
@@ -510,6 +503,13 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 		else
 			discourage_ddp(toep);
 	}
+	KASSERT(toep->sb_cc >= sbused(sb),
+	    ("%s: sb %p has more data (%d) than last time (%d).",
+	    __func__, sb, sbused(sb), toep->sb_cc));
+	toep->rx_credits += toep->sb_cc - sbused(sb);
+#ifdef USE_DDP_RX_FLOW_CONTROL
+	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
+#endif
 	sbappendstream_locked(sb, m, 0);
 	toep->sb_cc = sbused(sb);
 wakeup:
