@@ -392,7 +392,7 @@ static int igb_num_queues = 0;
 SYSCTL_INT(_hw_igb, OID_AUTO, num_queues, CTLFLAG_RDTUN, &igb_num_queues, 0,
     "Number of queues to configure, 0 indicates autoconfigure");
 
-#if 0
+#ifndef USE_BUS_GET_CPUS
 /*
 ** Global variable to store last used CPU when binding queues
 ** to CPUs in igb_allocate_msix.  Starts at CPU_FIRST and increments when a
@@ -2460,7 +2460,7 @@ igb_allocate_msix(struct adapter *adapter)
 {
 	device_t		dev = adapter->dev;
 	struct igb_queue	*que = adapter->queues;
-#if 1
+#ifdef USE_BUS_GET_CPUS
 	cpuset_t		cpus;
 #endif
 	int			error, rid, vector = 0;
@@ -2495,7 +2495,7 @@ igb_allocate_msix(struct adapter *adapter)
 	}
 #endif
 
-#if 1
+#ifdef USE_BUS_GET_CPUS
 	cpus = adapter->cpus;
 #endif
 	for (int i = 0; i < adapter->num_queues; i++, vector++, que++) {
@@ -2532,13 +2532,13 @@ igb_allocate_msix(struct adapter *adapter)
 		 * that.
 		 */
 		cpu_id = rss_getcpu(i % rss_getnumbuckets());
-#if 1
+#ifdef USE_BUS_GET_CPUS
 		if (!CPU_ISSET(cpu_id, &cpus))
 			device_printf(dev, "Using non-ideal CPU %d for RSS",
 			    cpu_id);
 #endif
 #else
-#if 1
+#ifdef USE_BUS_GET_CPUS
 		/*
 		 * Bind the MSI-X vector, and thus the rings to the
 		 * corresponding CPU.
@@ -2602,7 +2602,7 @@ igb_allocate_msix(struct adapter *adapter)
 			    device_get_nameunit(adapter->dev),
 			    cpu_id);
 #else
-#if 1
+#ifdef USE_BUS_GET_CPUS
 			taskqueue_start_threads_cpuset(&que->tq, 1, PI_NET,
 			    &adapter->cpus, "%s que (qid %d)",
 			    device_get_nameunit(adapter->dev),
@@ -2898,7 +2898,7 @@ igb_setup_msix(struct adapter *adapter)
 	}
 
 	/* Figure out a reasonable auto config value */
-#if 1
+#ifdef USE_BUS_GET_CPUS
 	if (bus_get_cpus(dev, INTR_CPUS, &adapter->cpus) != 0) {
 		device_printf(dev, "Unable to fetch CPU list, using 1 queue\n");
 		queues = 1;
