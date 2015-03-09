@@ -1819,8 +1819,14 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 	}
 	if (buf_flag == 0)
 		return;
-	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
+	if (sd->active_id == -1) {
+		KASSERT((toep->ddp_flags &
+			(DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) == 0,
+		    ("active_id is -1 but buffers are active"));
+		KASSERT(buf0 != NULL,
+		    ("no active buffers, but buf0 is not being queued"));
 		ddp_flags_mask |= V_TF_DDP_ACTIVE_BUF(1);
+	}
 	wr = mk_update_tcb_for_static_ddp(sc, toep, buf0, buf1, ddp_flags,
 	    ddp_flags_mask);
 	if (wr == NULL) {
@@ -1836,7 +1842,7 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 		return;
 	}
 	t4_wrq_tx(sc, wr);
-	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
+	if (sd->active_id == -1) {
 		sd->active_id = 0;
 		CTR2(KTR_CXGBE, "%s: active_id set to %d", __func__,
 		    sd->active_id);
