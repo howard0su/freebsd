@@ -1753,9 +1753,9 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 		return (ENOMEM);
 	t4_wrq_tx(sc, wr);
 	if (buf0 != NULL)
-		sd->active_id = 0;
+		toep->ddp_static.active_id = 0;
 	else
-		sd->active_id = -1;
+		toep->ddp_static.active_id = -1;
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
 	TAILQ_INIT(&toep->ddp_static.avail);
 	toep->ddp_static.obj = sd->obj;
@@ -1829,6 +1829,7 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 	t4_wrq_tx(sc, wr);
 	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
 		sd->active_id = 0;
+	KASSERT(sd->active_id != -1, ("no active DDP buffer"));
 	toep->ddp_flags |= buf_flag;	
 }
 
@@ -1913,6 +1914,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 	if (buf_flag == DDP_BUF0_ACTIVE &&
 	    !(toep->ddp_flags & DDP_BUF1_ACTIVE))
 		sd->active_id = 0;
+	KASSERT(sd->active_id != -1, ("no active DDP buffer"));	
 	return (0);
 }
 
