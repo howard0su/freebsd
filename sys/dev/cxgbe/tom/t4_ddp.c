@@ -2205,6 +2205,9 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			for (i = 0; i < nitems(toep->db); i++) {
 				if (toep->db[i] != NULL) {
 					INP_WUNLOCK(inp);
+					CTR1(KTR_CXGBE,
+			    "%s (TCP_DDP_STATIC): other DDP buffers active",
+					    __func__);
 					free_static_ddp_buffers(toep->td, &sd);
 					return (EBUSY);
 				}
@@ -2215,6 +2218,9 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 			 */
 			if (toep->ddp_flags & DDP_SC_REQ) {
 				INP_WUNLOCK(inp);
+				CTR1(KTR_CXGBE,
+			    "%s (TCP_DDP_STATIC): other DDP being toggled",
+				    __func__);
 				free_static_ddp_buffers(toep->td, &sd);
 				return (EBUSY);
 			}
