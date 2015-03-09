@@ -489,6 +489,8 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 			sd->active_id = -1;
 		else
 			sd->active_id = db_idx ^ 1;
+		CTR2(KTR_CXGBE, "%s: active_id set to %d", __func__,
+		    sd->active_id);
 		toep->ddp_flags |= DDP_STATIC_ACT;
 
 		SOCKBUF_LOCK(sb);
@@ -1558,6 +1560,8 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 	 * boundary.  The ULPTX master commands that follow must all
 	 * end at 16B boundaries too so we round up the size to 16.
 	 */
+	CTR3(KTR_CXGBE, "%s: queueing DDP buffers 0: %s 1: %s", __func__,
+	    buf0 != NULL ? "YES" : "no", buf1 != NULL ? "YES" : "no");
 	len = sizeof(*wrh) + roundup2(LEN__SET_TCB_FIELD_ULP, 16) +
 	    roundup2(LEN__RX_DATA_ACK_ULP, 16);
 	if (buf0 != NULL) {
@@ -1759,6 +1763,8 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 		toep->ddp_static.active_id = 0;
 	else
 		toep->ddp_static.active_id = -1;
+	CTR2(KTR_CXGBE, "%s: active_id set to %d", __func__,
+	    toep->ddp_static.active_id);
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
 	TAILQ_INIT(&toep->ddp_static.avail);
 	toep->ddp_static.obj = sd->obj;
@@ -1830,8 +1836,11 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 		return;
 	}
 	t4_wrq_tx(sc, wr);
-	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE))
+	if (buf_flag == (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
 		sd->active_id = 0;
+		CTR2(KTR_CXGBE, "%s: active_id set to %d", __func__,
+		    sd->active_id);
+	}
 	KASSERT(sd->active_id != -1, ("no active DDP buffer"));
 	toep->ddp_flags |= buf_flag;	
 }
@@ -1915,8 +1924,11 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 	t4_wrq_tx(sc, wr);
 	toep->ddp_flags |= buf_flag;
 	if (buf_flag == DDP_BUF0_ACTIVE &&
-	    !(toep->ddp_flags & DDP_BUF1_ACTIVE))
+	    !(toep->ddp_flags & DDP_BUF1_ACTIVE)) {
 		sd->active_id = 0;
+		CTR2(KTR_CXGBE, "%s: active_id set to %d", __func__,
+		    sd->active_id);
+	}
 	KASSERT(sd->active_id != -1, ("no active DDP buffer"));	
 	return (0);
 }
