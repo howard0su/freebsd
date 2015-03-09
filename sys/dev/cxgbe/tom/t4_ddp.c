@@ -534,6 +534,9 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 	SOCKBUF_LOCK_ASSERT(sb);
 	INP_WLOCK_ASSERT(toep->inp);
 	len = be32toh(rcv_nxt) - tp->rcv_nxt;
+
+	/* Signal handle_ddp() to break out of its sleep loop. */
+	toep->ddp_flags &= ~(DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE);
 	if (len == 0)
 		return;
 
