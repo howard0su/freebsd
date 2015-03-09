@@ -1871,7 +1871,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 		SOCKBUF_LOCK(sb);
 		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
 		sorwakeup_locked(so);
-		SOCKBUF_UNLOCK(sb);
+		SOCKBUF_UNLOCK_ASSERT(sb);
 		return (0);
 	}
 
@@ -1905,7 +1905,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 		SOCKBUF_LOCK(sb);
 		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
 		sorwakeup_locked(so);
-		SOCKBUF_UNLOCK(sb);
+		SOCKBUF_UNLOCK_ASSERT(sb);
 		return (ENOMEM);
 	}
 	t4_wrq_tx(sc, wr);
