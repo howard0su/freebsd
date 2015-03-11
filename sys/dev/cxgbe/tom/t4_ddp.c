@@ -459,36 +459,7 @@ handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
 	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
 #endif
 
-	if (toep->ddp_flags & DDP_STATIC_BUF) {
-		struct static_ddp *sd;
-		int db_idx;
-
-		/*
-		 * We assume that the 'len' remaining bytes were placed
-		 * into the "active" DDP buffer spilling over into the
-		 * other DDP buffer.  The firmware doesn't tell us which
-		 * buffer was active, so we track that in 'active_id'.
-		 */
-		sd = &toep->ddp_static;
-		KASSERT(sd->active_id != -1,
-		    ("handle_ddp_close: data but no active buffer"));
-		db_idx = sd->active_id;
-		m = dequeue_static_ddp_buf(sd, db_idx, imin(len, sd->size));
- 		CTR3(KTR_CXGBE, "%s: queued first buf %d len %d", __func__,
-		    db_idx, m->m_len);
-		len -= m->m_len;
-		if (len != 0) {
-			sbappendstream_locked(sb, m, 0);
-
-			KASSERT(len <= sd->size,
-			    ("too much DDP data at close"));
-			db_idx ^= 1;
-			m = dequeue_static_ddp_buf(sd, db_idx, len);
-			CTR3(KTR_CXGBE, "%s: queued second buf %d len %d",
-			    __func__, db_idx, m->m_len);
-		}
-	} else
-		m = get_ddp_mbuf(len);
+	m = get_ddp_mbuf(len);
 
 	sbappendstream_locked(sb, m, 0);
 	toep->sb_cc = sbused(sb);
