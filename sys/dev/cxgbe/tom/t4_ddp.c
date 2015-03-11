@@ -65,6 +65,8 @@ __FBSDID("$FreeBSD$");
 #include "common/t4_tcb.h"
 #include "tom/t4_tom.h"
 
+static struct mbuf *get_ddp_mbuf(int len);
+
 #define PPOD_SZ(n)	((n) * sizeof(struct pagepod))
 #define PPOD_SIZE	(PPOD_SZ(1))
 
@@ -430,6 +432,66 @@ wakeup:
 
 	INP_WUNLOCK(inp);
 	return (0);
+}
+
+void
+handle_ddp_close(struct toepcb *toep, struct tcpcb *tp, struct sockbuf *sb,
+    __be32 rcv_nxt)
+{
+	struct mbuf *m;
+	int len;
+
+	SOCKBUF_LOCK_ASSERT(sb);
+	INP_WLOCK_ASSERT(toep->inp);
+	len = be32toh(rcv_nxt) - tp->rcv_nxt;
+
+	/* Signal handle_ddp() to break out of its sleep loop. */
+	toep->ddp_flags &= ~(DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE);
+	if (len == 0)
+		return;
+
+	tp->rcv_nxt += len;
+	KASSERT(toep->sb_cc >= sbused(sb),
+	    ("%s: sb %p has more data (%d) than last time (%d).",
+	    __func__, sb, sbused(sb), toep->sb_cc));
+	toep->rx_credits += toep->sb_cc - sbused(sb);
+#ifdef USE_DDP_RX_FLOW_CONTROL
+	toep->rx_credits -= len;	/* adjust for F_RX_FC_DDP */
+#endif
+
+	if (toep->ddp_flags & DDP_STATIC_BUF) {
+		struct static_ddp *sd;
+		int db_idx;
+
+		/*
+		 * We assume that the 'len' remaining bytes were placed
+		 * into the "active" DDP buffer spilling over into the
+		 * other DDP buffer.  The firmware doesn't tell us which
+		 * buffer was active, so we track that in 'active_id'.
+		 */
+		sd = &toep->ddp_static;
+		KASSERT(sd->active_id != -1,
+		    ("handle_ddp_close: data but no active buffer"));
+		db_idx = sd->active_id;
+		m = dequeue_static_ddp_buf(sd, db_idx, imin(len, sd->size));
+ 		CTR3(KTR_CXGBE, "%s: queued first buf %d len %d", __func__,
+		    db_idx, m->m_len);
+		len -= m->m_len;
+		if (len != 0) {
+			sbappendstream_locked(sb, m, 0);
+
+			KASSERT(len <= sd->size,
+			    ("too much DDP data at close"));
+			db_idx ^= 1;
+			m = dequeue_static_ddp_buf(sd, db_idx, len);
+			CTR3(KTR_CXGBE, "%s: queued second buf %d len %d",
+			    __func__, db_idx, m->m_len);
+		}
+	} else
+		m = get_ddp_mbuf(len);
+
+	sbappendstream_locked(sb, m, 0);
+	toep->sb_cc = sbused(sb);
 }
 
 #define DDP_ERR (F_DDP_PPOD_MISMATCH | F_DDP_LLIMIT_ERR | F_DDP_ULIMIT_ERR |\
@@ -970,7 +1032,7 @@ soreceive_rcvoob(struct socket *so, struct uio *uio, int flags)
 
 static char ddp_magic_str[] = "nothing to see here";
 
-struct mbuf *
+static struct mbuf *
 get_ddp_mbuf(int len)
 {
 	struct mbuf *m;
