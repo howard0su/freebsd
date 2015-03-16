@@ -1783,7 +1783,7 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 	else
 		toep->ddp_static.active_id = -1;
 	toep->ddp_flags |= buf_flag | DDP_STATIC_BUF;
-	TAILQ_INIT(&toep->ddp_static.avail);
+	STAILQ_INIT(&toep->ddp_static.avail);
 	toep->ddp_static.obj = sd->obj;
 	toep->ddp_static.kva = sd->kva;
 	toep->ddp_static.size = sd->size;
@@ -1797,7 +1797,7 @@ enable_static_ddp(struct toepcb *toep, struct static_ddp *sd,
 			    ("initial DDP buffers are not queued"));
 			continue;
 		}
-		TAILQ_INSERT_TAIL(&toep->ddp_static.avail, buf, link);
+		STAILQ_INSERT_TAIL(&toep->ddp_static.avail, buf, link);
 	}
 	return (0);
 }
@@ -1819,17 +1819,17 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 	ddp_flags_mask = 0;
 	buf_flag = 0;
 	count = ddp_buffer_count(toep, sd, sb);
-	if (count > 0 && sd->queued[0] == NULL && !TAILQ_EMPTY(&sd->avail)) {
-		buf0 = TAILQ_FIRST(&sd->avail);
-		TAILQ_REMOVE(&sd->avail, buf0, link);
+	if (count > 0 && sd->queued[0] == NULL && !STAILQ_EMPTY(&sd->avail)) {
+		buf0 = STAILQ_FIRST(&sd->avail);
+		STAILQ_REMOVE_HEAD(&sd->avail, link);
 		buf_flag |= DDP_BUF0_ACTIVE;
 		ddp_flags |= V_TF_DDP_BUF0_VALID(1);
 		ddp_flags_mask |= V_TF_DDP_BUF0_VALID(1);
 		count--;
 	}
-	if (count > 0 && sd->queued[1] == NULL && !TAILQ_EMPTY(&sd->avail)) {
-		buf1 = TAILQ_FIRST(&sd->avail);
-		TAILQ_REMOVE(&sd->avail, buf1, link);
+	if (count > 0 && sd->queued[1] == NULL && !STAILQ_EMPTY(&sd->avail)) {
+		buf1 = STAILQ_FIRST(&sd->avail);
+		STAILQ_REMOVE_HEAD(&sd->avail, link);
 		buf_flag |= DDP_BUF1_ACTIVE;
 		ddp_flags |= V_TF_DDP_BUF1_VALID(1);
 		ddp_flags_mask |= V_TF_DDP_BUF1_VALID(1);
@@ -1853,9 +1853,9 @@ static_ddp_requeue(struct toepcb *toep, struct sockbuf *sb)
 		 * we might hang forever.
 		 */
 		if (buf0 != NULL)
-			TAILQ_INSERT_TAIL(&sd->avail, buf0, link);
+			STAILQ_INSERT_TAIL(&sd->avail, buf0, link);
 		if (buf1 != NULL)
-			TAILQ_INSERT_TAIL(&sd->avail, buf1, link);
+			STAILQ_INSERT_TAIL(&sd->avail, buf1, link);
 		return;
 	}
 	t4_wrq_tx(sc, wr);
@@ -1901,7 +1901,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 	    (toep->ddp_flags & (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) ==
 	    (DDP_BUF0_ACTIVE | DDP_BUF1_ACTIVE)) {
 		SOCKBUF_LOCK(sb);
-		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
+		STAILQ_INSERT_TAIL(&sd->avail, buf, link);
 		sorwakeup_locked(so);
 		SOCKBUF_UNLOCK_ASSERT(sb);
 		return (0);
@@ -1935,7 +1935,7 @@ post_static_ddp_buffer(struct toepcb *toep, int bufid, struct socket *so,
 		 * we might hang forever.
 		 */
 		SOCKBUF_LOCK(sb);
-		TAILQ_INSERT_TAIL(&sd->avail, buf, link);
+		STAILQ_INSERT_TAIL(&sd->avail, buf, link);
 		sorwakeup_locked(so);
 		SOCKBUF_UNLOCK_ASSERT(sb);
 		return (ENOMEM);
@@ -2040,7 +2040,7 @@ deliver:
 		 * is a blocking socket, sleep waiting for userland to
 		 * post a buffer.
 		 */
-		if (TAILQ_EMPTY(&sd->avail)) {
+		if (STAILQ_EMPTY(&sd->avail)) {
 			if (so->so_state & SS_NBIO) {
 				error = ENOBUFS;
 				goto out;
@@ -2051,9 +2051,9 @@ deliver:
 			goto restart;
 		}
 
-		buf = TAILQ_FIRST(&sd->avail);
+		buf = STAILQ_FIRST(&sd->avail);
 		buf->state = USER;
-		TAILQ_REMOVE(&sd->avail, buf, link);
+		STAILQ_REMOVE_HEAD(&sd->avail, link);
 		offset = buf->bufid * sd->size;
 		len = sd->size;
 

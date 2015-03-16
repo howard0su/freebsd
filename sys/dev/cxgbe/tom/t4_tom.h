@@ -121,7 +121,7 @@ enum static_ddp_buffer_state {
 };
 
 struct static_ddp_buffer {
-	TAILQ_ENTRY(static_ddp_buffer) link;
+	STAILQ_ENTRY(static_ddp_buffer) link;
 	struct ddp_buffer *db;
 	enum static_ddp_buffer_state state;
 	int db_idx;
@@ -131,11 +131,7 @@ struct static_ddp_buffer {
 };
 
 struct static_ddp {
-	/*
-	 * XXX: Eventually make this an mbuf queue so we can reliably
-	 * allocate mbufs when doing a posted buffer.
-	 */
-	TAILQ_HEAD(, static_ddp_buffer) avail;
+	STAILQ_HEAD(, static_ddp_buffer) avail;
 	struct vm_object *obj;	/* split into 'count' equal-sized buffers */
 	vm_offset_t kva;	/* kernel mapping used for copying */
 	int size;		/* size of each static buffer */
