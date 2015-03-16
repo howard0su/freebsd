@@ -727,7 +727,7 @@ vnode_pager_local_getpages0(struct vnode *vp, vm_page_t *m, int bytecount,
 	/*
 	 * The requested page has valid blocks.  Invalid part can only
 	 * exist at the end of file, and the page is made fully valid
-	 * by zeroing in vm_pager_getpages().  Free non-requested
+	 * by zeroing in vm_pager_get_pages().  Free non-requested
 	 * pages, since no i/o is done to read its content.
 	 */
 	if (mreq->valid != 0) {
@@ -772,6 +772,14 @@ vnode_pager_generic_getpages(struct vnode *vp, vm_page_t *m, int bytecount,
 	bsize = vp->v_mount->mnt_stat.f_iosize;
 	foff = IDX_TO_OFF(m[reqpage]->pindex);
 
+	/*
+	 * Synchronous and asynchronous paging operations use different
+	 * free pbuf counters.  This is done to avoid asynchronous requests
+	 * to consume all pbufs.
+	 * Allocate the pbuf at the very beginning of the function, so that
+	 * if we are low on certain kind of pbufs don't even proceed to BMAP,
+	 * but sleep.
+	 */
 	freecnt = iodone != NULL ?
 	    &vnode_async_pbuf_freecnt : &vnode_pbuf_freecnt;
 	bp = getpbuf(freecnt);
