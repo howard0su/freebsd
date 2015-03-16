@@ -70,6 +70,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	libmd \
 	${_libmilter} \
 	${_libmp} \
+	libmt \
 	${_libnandfs} \
 	libnetbsd \
 	${_libnetgraph} \
@@ -282,6 +283,12 @@ _libsmb=	libsmb
 
 .if ${MACHINE_CPUARCH} == "sparc64"
 _libsmb=	libsmb
+.endif
+
+.if ${MACHINE_CPUARCH} == "arm"
+_libsmb=	libsmb
+_libproc=	libproc
+_librtld_db=	librtld_db
 .endif
 
 .if ${MK_OPENSSL} != "no"

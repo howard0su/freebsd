@@ -353,6 +353,7 @@ SUBDIR=	\
 	${_virtio} \
 	vge \
 	${_viawd} \
+	videomode \
 	vkbd \
 	${_vmm} \
 	${_vmware} \
@@ -750,5 +751,9 @@ afterinstall:
 		kldxref ${DESTDIR}${KMODDIR}; \
 	fi
 .endif
+
+.include "${SYSDIR}/conf/config.mk"
+
+SUBDIR:= ${SUBDIR:u:O}
 
 .include <bsd.subdir.mk>

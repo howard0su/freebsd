@@ -1175,6 +1175,13 @@ static struct da_quirk_entry da_quirk_table[] =
 		{ T_DIRECT, SIP_MEDIA_FIXED, "ATA", "SG9XCS2D*", "*" },
 		/*quirks*/DA_Q_4K
 	},
+	{
+		/*
+		 * Hama Innostor USB-Stick 
+		 */
+		{ T_DIRECT, SIP_MEDIA_REMOVABLE, "Innostor", "Innostor*", "*" }, 
+		/*quirks*/DA_Q_NO_RC16
+	},
 };
 
 static	disk_strategy_t	dastrategy;
@@ -3787,7 +3794,7 @@ dasetgeom(struct cam_periph *periph, uint32_t block_len, uint64_t maxsector,
 		xpt_setup_ccb(&cdai.ccb_h, periph->path, CAM_PRIORITY_NORMAL);
 		cdai.ccb_h.func_code = XPT_DEV_ADVINFO;
 		cdai.buftype = CDAI_TYPE_RCAPLONG;
-		cdai.flags |= CDAI_FLAG_STORE;
+		cdai.flags = CDAI_FLAG_STORE;
 		cdai.bufsiz = rcap_len;
 		cdai.buf = (uint8_t *)rcaplong;
 		xpt_action((union ccb *)&cdai);

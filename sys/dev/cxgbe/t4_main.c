@@ -2895,9 +2895,6 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 
 	switch(pi->port_type) {
 	case FW_PORT_TYPE_BT_XFI:
-		ifmedia_add(media, m | IFM_10G_T, data, NULL);
-		break;
-
 	case FW_PORT_TYPE_BT_XAUI:
 		ifmedia_add(media, m | IFM_10G_T, data, NULL);
 		/* fall through */
@@ -5086,12 +5083,11 @@ sysctl_int_array(SYSCTL_HANDLER_ARGS)
 	int rc, *i;
 	struct sbuf sb;
 
-	sbuf_new(&sb, NULL, 32, SBUF_AUTOEXTEND);
+	sbuf_new_for_sysctl(&sb, NULL, 64, req);
 	for (i = arg1; arg2; arg2 -= sizeof(int), i++)
 		sbuf_printf(&sb, "%d ", *i);
 	sbuf_trim(&sb);
-	sbuf_finish(&sb);
-	rc = sysctl_handle_string(oidp, sbuf_data(&sb), sbuf_len(&sb), req);
+	rc = sbuf_finish(&sb);
 	sbuf_delete(&sb);
 	return (rc);
 }
@@ -7116,10 +7112,9 @@ get_filter_mode(struct adapter *sc, uint32_t *mode)
 		log(LOG_WARNING, "%s: cached filter mode out of sync %x %x.\n",
 		    device_get_nameunit(sc->dev), sc->params.tp.vlan_pri_map,
 		    fconf);
-		sc->params.tp.vlan_pri_map = fconf;
 	}
 
-	*mode = fconf_to_mode(sc->params.tp.vlan_pri_map);
+	*mode = fconf_to_mode(fconf);
 
 	end_synchronized_op(sc, LOCK_HELD);
 	return (0);
@@ -7150,14 +7145,7 @@ set_filter_mode(struct adapter *sc, uint32_t mode)
 	}
 #endif
 
-#ifdef notyet
 	rc = -t4_set_filter_mode(sc, fconf);
-	if (rc == 0)
-		sc->filter_mode = fconf;
-#else
-	rc = ENOTSUP;
-#endif
-
 done:
 	end_synchronized_op(sc, LOCK_HELD);
 	return (rc);
