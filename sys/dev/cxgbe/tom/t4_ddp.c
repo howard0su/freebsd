@@ -2185,13 +2185,21 @@ t4_tcp_ctloutput_ddp(struct socket *so, struct sockopt *sopt)
 				sd.count = nitems(sd.queued);
 
 			/*
-			 * If an explicit size is not specified, use
-			 * the current size of the receive socket
-			 * buffer.
+			 * If an explicit size is not specified,
+			 * derive a default size from the receive
+			 * socket buffer.  If the buffer's size has
+			 * been set explicitly, then use the receive
+			 * buffer's size.  If the buffer is using
+			 * autosize, then use the maximum possible
+			 * size to which the buffer might grow.
 			 */
 			if (sd.size == 0) {
 				SOCKBUF_LOCK(&so->so_rcv);
-				sd.size = so->so_rcv.sb_hiwat;
+				if (so->so_rcv.sb_flags & SB_AUTOSIZE &&
+				    V_tcp_do_autorcvbuf)
+					sd.size = V_tcp_autorcvbuf_max;
+				else
+					sd.size = so->so_rcv.sb_hiwat;
 				SOCKBUF_UNLOCK(&so->so_rcv);
 				sd.size = round_page(sd.size);
 				if (sd.size < PAGE_SIZE)
