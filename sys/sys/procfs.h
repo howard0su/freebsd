@@ -89,4 +89,29 @@ typedef struct thrmisc {
 
 typedef uint64_t psaddr_t;	/* An address in the target process. */
 
+#ifdef __HAVE_REG32
+struct prstatus32 {
+        int     pr_version;
+        u_int   pr_statussz;
+        u_int   pr_gregsetsz;
+        u_int   pr_fpregsetsz;
+        int     pr_osreldate;
+        int     pr_cursig;
+        pid_t   pr_pid;
+        struct reg32 pr_reg;
+};
+
+struct prpsinfo32 {
+        int     pr_version;
+        u_int   pr_psinfosz;
+        char    pr_fname[PRFNAMESZ+1];
+        char    pr_psargs[PRARGSZ+1];
+};
+
+struct thrmisc32 {
+        char    pr_tname[MAXCOMLEN+1];
+        u_int   _pad;
+};
+#endif /* __HAVE_REG32 */
+
 #endif /* _SYS_PROCFS_H_ */

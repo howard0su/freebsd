@@ -98,6 +98,8 @@ struct dbreg {
 	int dummy;
 };
 
+#define	__HAVE_REG32
+
 #ifdef _KERNEL
 /*
  * XXX these interfaces are MI, so they should be declared in a MI place.
