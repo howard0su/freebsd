@@ -39,7 +39,6 @@ struct dbreg {
 	unsigned int	junk;
 };
 
-/* XXX: Better test? */
 #ifdef __LP64__
 /* Must match struct trapframe */
 struct reg32 {
