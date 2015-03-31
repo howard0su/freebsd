@@ -98,6 +98,10 @@ struct dbreg {
 	int dummy;
 };
 
+/*
+ * NB: sparcv8 binaries are not supported even though this header
+ * defines the relevant structures.
+ */
 #define	__HAVE_REG32
 
 #ifdef _KERNEL
