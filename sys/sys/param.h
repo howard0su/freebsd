@@ -117,6 +117,10 @@
 #include <sys/priority.h>
 #endif
 
+#define	NOCPU		-1		/* For when we aren't on a CPU. */
+#define	NOCPU_OLD	255
+#define	MAXCPU_OLD	254
+
 #ifndef FALSE
 #define	FALSE	0
 #endif

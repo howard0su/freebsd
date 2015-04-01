@@ -219,6 +219,12 @@ void fill_kinfo_proc(struct proc *, struct kinfo_proc *);
 #define	ki_childstime	ki_rusage_ch.ru_stime
 #define	ki_childutime	ki_rusage_ch.ru_utime
 
+#ifndef _KERNEL
+#define	NOCPU		-1		/* For when we aren't on a CPU. */
+#define	NOCPU_OLD	255
+#define	MAXCPU_OLD	254
+#endif
+
 /*
  *  Legacy PS_ flag.  This moved to p_flag but is maintained for
  *  compatibility.
