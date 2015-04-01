@@ -541,6 +541,165 @@ build_volume(char *volumep, int narrays, struct array_info *arrays,
 	}
 }
 
+struct volume_info {
+	int raid_type;
+	long stripe_size;
+#ifdef DEBUG
+	int dump;
+#endif
+	int verbose;
+	int narrays;
+	struct array_info *arrays;
+};
+
+/* Returns a valid raid type or -1. */
+static int
+lookup_raid_type(const char *type)
+{
+	int i;
+
+	for (i = 0; raid_type_table[i].name != NULL; i++)
+		if (strcasecmp(raid_type_table[i].name, type) == 0)
+			return (raid_type_table[i].raid_type);
+	return (-1);
+}
+
+static int
+parse_volume(int fd, int *acp, char ***avp, struct volume_info *info)
+{
+	const char *type_name;
+	char **av;
+	int ac, ch, error;
+
+	ac = *acp;
+	av = *avp;
+	memset(info, 0, sizeof(*info));
+
+	if (ac < 2) {
+		warnx("create: volume type required");
+		return (EINVAL);
+	}
+	
+	/* Lookup the RAID type first. */
+	type_name = av[1];
+	info->raid_type = lookup_raid_type(type_name);
+	if (info->raid_type == -1) {
+		warnx("Unknown or unsupported volume type %s", type_name);
+		return (EINVAL);
+	}
+
+	/* Parse any options. */
+	optreset = 1;
+	optind = 2;
+#ifdef DEBUG
+	info->dump = 0;
+#endif
+	info->verbose = 0;
+	info->stripe_size = 64 * 1024;
+
+	while ((ch = getopt(ac, av, "ds:v")) != -1) {
+		switch (ch) {
+#ifdef DEBUG
+		case 'd':
+			info->dump = 1;
+			break;
+#endif
+		case 's':
+			info->stripe_size = dehumanize(optarg);
+			if ((info->stripe_size < 512) ||
+			    (!powerof2(info->stripe_size)))
+				info->stripe_size = 64 * 1024;
+			break;
+		case 'v':
+			info->verbose = 1;
+			break;
+		case '?':
+		default:
+			return (EINVAL);
+		}
+	}
+	ac -= optind;
+	av += optind;
+
+	/* Parse all the arrays. */
+	while (info->narrays < ac) {
+		/* Stop if we see another RAID type. */
+		if (lookup_raid_type(av[info->narrays]) != -1)
+			break;
+
+		info->narrays++;
+	}
+	if (info->narrays == 0) {
+		warnx("At least one drive list is required");
+		return (EINVAL);
+	}
+
+	switch (raid_type) {
+	case RT_RAID0:
+	case RT_RAID1:
+	case RT_RAID5:
+	case RT_RAID6:
+	case RT_CONCAT:
+		if (info->narrays != 1) {
+			warnx("Only one drive list can be specified for %s",
+			    type_name);
+			return (EINVAL);
+		}
+		break;
+	case RT_RAID10:
+	case RT_RAID50:
+	case RT_RAID60:
+		if (narrays < 1) {
+			warnx("RAID10, RAID50, and RAID60 require at least "
+			    "two drive lists");
+			return (EINVAL);
+		}
+		if (narrays > MFI_MAX_SPAN_DEPTH) {
+			warnx("Volume spans more than %d arrays",
+			    MFI_MAX_SPAN_DEPTH);
+			return (EINVAL);
+		}
+		break;
+	}
+	info->arrays = calloc(info->narrays, sizeof(*arrays));
+	if (arrays == NULL) {
+		warnx("malloc failed");
+		return (ENOMEM);
+	}
+	for (i = 0; i < info->narrays; i++) {
+		error = parse_array(fd, info->raid_type, av[i],
+		    &info->arrays[i]);
+		if (error)
+			goto error;
+	}
+
+	switch (raid_type) {
+	case RT_RAID10:
+	case RT_RAID50:
+	case RT_RAID60:
+		for (i = 1; i < info->narrays; i++) {
+			if (info->arrays[i].drive_count !=
+			    info->arrays[0].drive_count) {
+				warnx("All arrays must contain the same "
+				    "number of drives for %s", type_name);
+				error = EINVAL;
+				goto error;
+			}
+		}
+		break;
+	}
+
+	ac -= info->narrays;
+	av += info->narrays;
+	*acp = ac;
+	*avp = av;
+	return (0);
+
+error:
+	free(info->arrays);
+	return (error);
+}
+
 static int
 create_volume(int ac, char **av)
 {
@@ -574,15 +733,8 @@ create_volume(int ac, char **av)
 		}
 	}
 
-	if (ac < 2) {
-		warnx("create volume: volume type required");
-		return (EINVAL);
-	}
-
 	bzero(&state, sizeof(state));
 	config = NULL;
-	arrays = NULL;
-	narrays = 0;
 	error = 0;
 
 	fd = mfi_open(mfi_unit, O_RDWR);
@@ -599,115 +751,10 @@ create_volume(int ac, char **av)
 		goto error;
 	}
 
-	/* Lookup the RAID type first. */
-	raid_type = -1;
-	for (i = 0; raid_type_table[i].name != NULL; i++)
-		if (strcasecmp(raid_type_table[i].name, av[1]) == 0) {
-			raid_type = raid_type_table[i].raid_type;
-			break;
-		}
-
-	if (raid_type == -1) {
-		warnx("Unknown or unsupported volume type %s", av[1]);
-		error = EINVAL;
-		goto error;
+	while (ac != 0) {
+		parse_volume(fd, &ac, &av, );
 	}
-
-	/* Parse any options. */
-	optind = 2;
-#ifdef DEBUG
-	dump = 0;
-#endif
-	verbose = 0;
-	stripe_size = 64 * 1024;
-
-	while ((ch = getopt(ac, av, "ds:v")) != -1) {
-		switch (ch) {
-#ifdef DEBUG
-		case 'd':
-			dump = 1;
-			break;
-#endif
-		case 's':
-			stripe_size = dehumanize(optarg);
-			if ((stripe_size < 512) || (!powerof2(stripe_size)))
-				stripe_size = 64 * 1024;
-			break;
-		case 'v':
-			verbose = 1;
-			break;
-		case '?':
-		default:
-			error = EINVAL;
-			goto error;
-		}
-	}
-	ac -= optind;
-	av += optind;
-
-	/* Parse all the arrays. */
-	narrays = ac;
-	if (narrays == 0) {
-		warnx("At least one drive list is required");
-		error = EINVAL;
-		goto error;
-	}
-	switch (raid_type) {
-	case RT_RAID0:
-	case RT_RAID1:
-	case RT_RAID5:
-	case RT_RAID6:
-	case RT_CONCAT:
-		if (narrays != 1) {
-			warnx("Only one drive list can be specified");
-			error = EINVAL;
-			goto error;
-		}
-		break;
-	case RT_RAID10:
-	case RT_RAID50:
-	case RT_RAID60:
-		if (narrays < 1) {
-			warnx("RAID10, RAID50, and RAID60 require at least "
-			    "two drive lists");
-			error = EINVAL;
-			goto error;
-		}
-		if (narrays > MFI_MAX_SPAN_DEPTH) {
-			warnx("Volume spans more than %d arrays",
-			    MFI_MAX_SPAN_DEPTH);
-			error = EINVAL;
-			goto error;
-		}
-		break;
-	}
-	arrays = calloc(narrays, sizeof(*arrays));
-	if (arrays == NULL) {
-		warnx("malloc failed");
-		error = ENOMEM;
-		goto error;
-	}
-	for (i = 0; i < narrays; i++) {
-		error = parse_array(fd, raid_type, av[i], &arrays[i]);
-		if (error)
-			goto error;
-	}
-
-	switch (raid_type) {
-	case RT_RAID10:
-	case RT_RAID50:
-	case RT_RAID60:
-		for (i = 1; i < narrays; i++) {
-			if (arrays[i].drive_count != arrays[0].drive_count) {
-				warnx("All arrays must contain the same "
-				    "number of drives");
-				error = EINVAL;
-				goto error;
-			}
-		}
-		break;
-	}
-
+	
 	/*
 	 * Fetch the current config and build sorted lists of existing
 	 * array and volume identifiers.
