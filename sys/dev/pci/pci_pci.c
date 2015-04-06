@@ -850,19 +850,22 @@ static void
 pcib_cfg_save(struct pcib_softc *sc)
 {
 	device_t	dev;
+#ifndef NEW_PCIB
+	uint16_t command;
+#endif
 
 	dev = sc->dev;
 
-	sc->command = pci_read_config(dev, PCIR_COMMAND, 2);
 	sc->pribus = pci_read_config(dev, PCIR_PRIBUS_1, 1);
 	sc->bus.sec = pci_read_config(dev, PCIR_SECBUS_1, 1);
 	sc->bus.sub = pci_read_config(dev, PCIR_SUBBUS_1, 1);
 	sc->bridgectl = pci_read_config(dev, PCIR_BRIDGECTL_1, 2);
 	sc->seclat = pci_read_config(dev, PCIR_SECLAT_1, 1);
 #ifndef NEW_PCIB
-	if (sc->command & PCIM_CMD_PORTEN)
+	command = pci_read_config(dev, PCIR_COMMAND, 2);
+	if (command & PCIM_CMD_PORTEN)
 		pcib_get_io_decode(sc);
-	if (sc->command & PCIM_CMD_MEMEN)
+	if (command & PCIM_CMD_MEMEN)
 		pcib_get_mem_decode(sc);
 #endif
 }
@@ -874,10 +877,11 @@ static void
 pcib_cfg_restore(struct pcib_softc *sc)
 {
 	device_t	dev;
-
+#ifndef NEW_PCIB
+	uint16_t command;
+#endif
 	dev = sc->dev;
 
-	pci_write_config(dev, PCIR_COMMAND, sc->command, 2);
 	pci_write_config(dev, PCIR_PRIBUS_1, sc->pribus, 1);
 	pci_write_config(dev, PCIR_SECBUS_1, sc->bus.sec, 1);
 	pci_write_config(dev, PCIR_SUBBUS_1, sc->bus.sub, 1);
@@ -886,9 +890,10 @@ pcib_cfg_restore(struct pcib_softc *sc)
 #ifdef NEW_PCIB
 	pcib_write_windows(sc, WIN_IO | WIN_MEM | WIN_PMEM);
 #else
-	if (sc->command & PCIM_CMD_PORTEN)
+	command = pci_read_config(dev, PCIR_COMMAND, 2);
+	if (command & PCIM_CMD_PORTEN)
 		pcib_set_io_decode(sc);
-	if (sc->command & PCIM_CMD_MEMEN)
+	if (command & PCIM_CMD_MEMEN)
 		pcib_set_mem_decode(sc);
 #endif
 }
@@ -1102,31 +1107,16 @@ int
 pcib_suspend(device_t dev)
 {
 	device_t	pcib;
-	int		dstate, error;
 
 	pcib_cfg_save(device_get_softc(dev));
-	error = bus_generic_suspend(dev);
-	if (error == 0 && pci_do_power_suspend) {
-		dstate = PCI_POWERSTATE_D3;
-		pcib = device_get_parent(device_get_parent(dev));
-		if (PCIB_POWER_FOR_SLEEP(pcib, dev, &dstate) == 0)
-			pci_set_powerstate(dev, dstate);
-	}
-	return (error);
+	return (bus_generic_suspend(dev));
 }
 
 int
 pcib_resume(device_t dev)
 {
 	device_t	pcib;
-	int dstate;
 
-	if (pci_do_power_resume) {
-		pcib = device_get_parent(device_get_parent(dev));
-		dstate = PCI_POWERSTATE_D0;
-		if (PCIB_POWER_FOR_SLEEP(pcib, dev, &dstate) == 0)
-			pci_set_powerstate(dev, dstate);
-	}
 	pcib_cfg_restore(device_get_softc(dev));
 	return (bus_generic_resume(dev));
 }
