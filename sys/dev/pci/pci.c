@@ -5125,16 +5125,6 @@ pci_cfg_restore(device_t dev, struct pci_devinfo *dinfo)
 {
 
 	/*
-	 * Only do header type 0 devices.  Type 1 devices are bridges,
-	 * which we know need special treatment.  Type 2 devices are
-	 * cardbus bridges which also require special treatment.
-	 * Other types are unknown, and we err on the side of safety
-	 * by ignoring them.
-	 */
-	if ((dinfo->cfg.hdrtype & PCIM_HDRTYPE) != PCIM_HDRTYPE_NORMAL)
-		return;
-
-	/*
 	 * Restore the device to full power mode.  We must do this
 	 * before we restore the registers because moving from D3 to
 	 * D0 will cause the chip's BARs and some other registers to
@@ -5222,27 +5212,24 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 	int ps;
 
 	/*
-	 * Only do header type 0 devices.  Type 1 devices are bridges, which
-	 * we know need special treatment.  Type 2 devices are cardbus bridges
-	 * which also require special treatment.  Other types are unknown, and
-	 * we err on the side of safety by ignoring them.  Powering down
-	 * bridges should not be undertaken lightly.
-	 */
-	if ((dinfo->cfg.hdrtype & PCIM_HDRTYPE) != PCIM_HDRTYPE_NORMAL)
-		return;
-
-	/*
 	 * Some drivers apparently write to these registers w/o updating our
 	 * cached copy.  No harm happens if we update the copy, so do so here
 	 * so we can restore them.  The COMMAND register is modified by the
 	 * bus w/o updating the cache.  This should represent the normally
-	 * writable portion of the 'defined' part of type 0 headers.  In
-	 * theory we also need to save/restore the PCI capability structures
-	 * we know about, but apart from power we don't know any that are
-	 * writable.
+	 * writable portion of the 'defined' part of type 0/1/2 headers.
 	 */
-	dinfo->cfg.subvendor = pci_read_config(dev, PCIR_SUBVEND_0, 2);
-	dinfo->cfg.subdevice = pci_read_config(dev, PCIR_SUBDEV_0, 2);
+	switch (dinfo->cfg.hdrtype & PCIM_HDRTYPE) {
+	case PCIM_HDRTYPE_NORMAL:
+		dinfo->cfg.subvendor = pci_read_config(dev, PCIR_SUBVEND_0, 2);
+		dinfo->cfg.subdevice = pci_read_config(dev, PCIR_SUBDEV_0, 2);
+		break;
+	case PCIM_HDRTYPE_BRIDGE:
+		break;
+	case PCIM_HDRTYPE_CARDBUS:
+		dinfo->cfg.subvendor = pci_read_config(dev, PCIR_SUBVEND_2, 2);
+		dinfo->cfg.subdevice = pci_read_config(dev, PCIR_SUBDEV_2, 2);
+		break;
+	}
 	dinfo->cfg.vendor = pci_read_config(dev, PCIR_VENDOR, 2);
 	dinfo->cfg.device = pci_read_config(dev, PCIR_DEVICE, 2);
 	dinfo->cfg.cmdreg = pci_read_config(dev, PCIR_COMMAND, 2);
