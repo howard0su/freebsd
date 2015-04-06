@@ -1106,7 +1106,6 @@ pcib_attach(device_t dev)
 int
 pcib_suspend(device_t dev)
 {
-	device_t	pcib;
 
 	pcib_cfg_save(device_get_softc(dev));
 	return (bus_generic_suspend(dev));
@@ -1115,7 +1114,6 @@ pcib_suspend(device_t dev)
 int
 pcib_resume(device_t dev)
 {
-	device_t	pcib;
 
 	pcib_cfg_restore(device_get_softc(dev));
 	return (bus_generic_resume(dev));
