@@ -86,7 +86,7 @@ acpi_battinfo(int num)
 {
 	union acpi_battery_ioctl_arg battio;
 	const char *pwr_units;
-	int hours, min, amp;
+	int critical, hours, min, amp;
 	uint32_t volt;
 
 	if (num < 0 || num > 64)
@@ -137,14 +137,25 @@ acpi_battinfo(int num)
 		err(EX_IOERR, "get battery user info (%d) failed", num);
 	if (battio.battinfo.state != ACPI_BATT_STAT_NOT_PRESENT) {
 		printf("State:\t\t\t");
-		if (battio.battinfo.state == 0)
-			printf("high ");
-		if (battio.battinfo.state & ACPI_BATT_STAT_CRITICAL)
-			printf("critical ");
-		if (battio.battinfo.state & ACPI_BATT_STAT_DISCHARG)
-			printf("discharging ");
-		if (battio.battinfo.state & ACPI_BATT_STAT_CHARGING)
-			printf("charging ");
+		critical = battio.battinfo.state & ACPI_BATT_STAT_CRITICAL;
+		switch (battio.battinfo.state & ~ACPI_BATT_STAT_CRITICAL) {
+		case 0:
+			if (critical)
+				printf("critical");
+			else
+				printf("high");
+			break;
+		case ACPI_BATT_STAT_DISCHARG:
+			printf("%sdischarging", critical ? "critical " : "");
+			break;
+		case ACPI_BATT_STAT_CHARGING:
+			printf("%scharging", critical ? "critical " : "");
+			break;
+		default:
+			printf("%sunknown (%#x)", critical ? "critical " : "",
+			    battio.battinfo.state);
+			break;
+		}
 		printf("\n");
 		if (battio.battinfo.cap == -1)
 			printf("Remaining capacity:\tunknown\n");
