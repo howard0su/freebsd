@@ -5135,11 +5135,15 @@ pci_cfg_restore(device_t dev, struct pci_devinfo *dinfo)
 	if (pci_get_powerstate(dev) != PCI_POWERSTATE_D0)
 		pci_set_powerstate(dev, PCI_POWERSTATE_D0);
 	pci_restore_bars(dev);
+	switch (dinfo->cfg.hdrtype & PCIM_HDRTYPE) {
+	case PCIM_HDRTYPE_NORMAL:
+		pci_write_config(dev, PCIR_MINGNT, dinfo->cfg.mingnt, 1);
+		pci_write_config(dev, PCIR_MAXLAT, dinfo->cfg.maxlat, 1);
+		break;
+	}
 	pci_write_config(dev, PCIR_COMMAND, dinfo->cfg.cmdreg, 2);
 	pci_write_config(dev, PCIR_INTLINE, dinfo->cfg.intline, 1);
 	pci_write_config(dev, PCIR_INTPIN, dinfo->cfg.intpin, 1);
-	pci_write_config(dev, PCIR_MINGNT, dinfo->cfg.mingnt, 1);
-	pci_write_config(dev, PCIR_MAXLAT, dinfo->cfg.maxlat, 1);
 	pci_write_config(dev, PCIR_CACHELNSZ, dinfo->cfg.cachelnsz, 1);
 	pci_write_config(dev, PCIR_LATTIMER, dinfo->cfg.lattimer, 1);
 	pci_write_config(dev, PCIR_PROGIF, dinfo->cfg.progif, 1);
@@ -5217,11 +5221,22 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 	 * so we can restore them.  The COMMAND register is modified by the
 	 * bus w/o updating the cache.  This should represent the normally
 	 * writable portion of the 'defined' part of type 0/1/2 headers.
+	 *
+	 * TODO:
+	 * - sec lat
+	 * - sub bus
+	 * - sec bus
+	 * - pri bus
+	 * - bridge control?
+	 * - look at type 2
+	 * - make maxlat/mingnt type 0 only in pcireg?
 	 */
 	switch (dinfo->cfg.hdrtype & PCIM_HDRTYPE) {
 	case PCIM_HDRTYPE_NORMAL:
 		dinfo->cfg.subvendor = pci_read_config(dev, PCIR_SUBVEND_0, 2);
 		dinfo->cfg.subdevice = pci_read_config(dev, PCIR_SUBDEV_0, 2);
+		dinfo->cfg.mingnt = pci_read_config(dev, PCIR_MINGNT, 1);
+		dinfo->cfg.maxlat = pci_read_config(dev, PCIR_MAXLAT, 1);
 		break;
 	case PCIM_HDRTYPE_BRIDGE:
 		break;
@@ -5235,8 +5250,6 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 	dinfo->cfg.cmdreg = pci_read_config(dev, PCIR_COMMAND, 2);
 	dinfo->cfg.intline = pci_read_config(dev, PCIR_INTLINE, 1);
 	dinfo->cfg.intpin = pci_read_config(dev, PCIR_INTPIN, 1);
-	dinfo->cfg.mingnt = pci_read_config(dev, PCIR_MINGNT, 1);
-	dinfo->cfg.maxlat = pci_read_config(dev, PCIR_MAXLAT, 1);
 	dinfo->cfg.cachelnsz = pci_read_config(dev, PCIR_CACHELNSZ, 1);
 	dinfo->cfg.lattimer = pci_read_config(dev, PCIR_LATTIMER, 1);
 	dinfo->cfg.baseclass = pci_read_config(dev, PCIR_CLASS, 1);
