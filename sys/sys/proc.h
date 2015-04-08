@@ -614,11 +614,11 @@ struct proc {
 #define	p_session	p_pgrp->pg_session
 #define	p_pgid		p_pgrp->pg_id
 
-#ifndef _KERNEL
+#ifndef KERNEL
 #define	NOCPU		-1		/* For when we aren't on a CPU. */
+#endif
 #define	NOCPU_OLD	255
 #define	MAXCPU_OLD	254
-#endif
 
 #define	PROC_SLOCK(p)	mtx_lock_spin(&(p)->p_slock)
 #define	PROC_SUNLOCK(p)	mtx_unlock_spin(&(p)->p_slock)
