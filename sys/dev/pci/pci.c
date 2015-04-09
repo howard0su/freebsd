@@ -5151,7 +5151,13 @@ pci_cfg_restore(device_t dev, struct pci_devinfo *dinfo)
 	 */
 	if (pci_get_powerstate(dev) != PCI_POWERSTATE_D0)
 		pci_set_powerstate(dev, PCI_POWERSTATE_D0);
-	pci_restore_bars(dev);
+	pci_write_config(dev, PCIR_COMMAND, dinfo->cfg.cmdreg, 2);
+	pci_write_config(dev, PCIR_INTLINE, dinfo->cfg.intline, 1);
+	pci_write_config(dev, PCIR_INTPIN, dinfo->cfg.intpin, 1);
+	pci_write_config(dev, PCIR_CACHELNSZ, dinfo->cfg.cachelnsz, 1);
+	pci_write_config(dev, PCIR_LATTIMER, dinfo->cfg.lattimer, 1);
+	pci_write_config(dev, PCIR_PROGIF, dinfo->cfg.progif, 1);
+	pci_write_config(dev, PCIR_REVID, dinfo->cfg.revid, 1);
 	switch (dinfo->cfg.hdrtype & PCIM_HDRTYPE) {
 	case PCIM_HDRTYPE_NORMAL:
 		pci_write_config(dev, PCIR_MINGNT, dinfo->cfg.mingnt, 1);
@@ -5182,13 +5188,7 @@ pci_cfg_restore(device_t dev, struct pci_devinfo *dinfo)
 		    dinfo->cfg.bridge.control, 2);
 		break;
 	}
-	pci_write_config(dev, PCIR_COMMAND, dinfo->cfg.cmdreg, 2);
-	pci_write_config(dev, PCIR_INTLINE, dinfo->cfg.intline, 1);
-	pci_write_config(dev, PCIR_INTPIN, dinfo->cfg.intpin, 1);
-	pci_write_config(dev, PCIR_CACHELNSZ, dinfo->cfg.cachelnsz, 1);
-	pci_write_config(dev, PCIR_LATTIMER, dinfo->cfg.lattimer, 1);
-	pci_write_config(dev, PCIR_PROGIF, dinfo->cfg.progif, 1);
-	pci_write_config(dev, PCIR_REVID, dinfo->cfg.revid, 1);
+	pci_restore_bars(dev);
 
 	/*
 	 * Restore extended capabilities for PCI-Express and PCI-X
@@ -5263,6 +5263,17 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 	 * bus w/o updating the cache.  This should represent the normally
 	 * writable portion of the 'defined' part of type 0/1/2 headers.
 	 */
+	dinfo->cfg.vendor = pci_read_config(dev, PCIR_VENDOR, 2);
+	dinfo->cfg.device = pci_read_config(dev, PCIR_DEVICE, 2);
+	dinfo->cfg.cmdreg = pci_read_config(dev, PCIR_COMMAND, 2);
+	dinfo->cfg.intline = pci_read_config(dev, PCIR_INTLINE, 1);
+	dinfo->cfg.intpin = pci_read_config(dev, PCIR_INTPIN, 1);
+	dinfo->cfg.cachelnsz = pci_read_config(dev, PCIR_CACHELNSZ, 1);
+	dinfo->cfg.lattimer = pci_read_config(dev, PCIR_LATTIMER, 1);
+	dinfo->cfg.baseclass = pci_read_config(dev, PCIR_CLASS, 1);
+	dinfo->cfg.subclass = pci_read_config(dev, PCIR_SUBCLASS, 1);
+	dinfo->cfg.progif = pci_read_config(dev, PCIR_PROGIF, 1);
+	dinfo->cfg.revid = pci_read_config(dev, PCIR_REVID, 1);
 	switch (dinfo->cfg.hdrtype & PCIM_HDRTYPE) {
 	case PCIM_HDRTYPE_NORMAL:
 		dinfo->cfg.subvendor = pci_read_config(dev, PCIR_SUBVEND_0, 2);
@@ -5297,17 +5308,6 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 		dinfo->cfg.subdevice = pci_read_config(dev, PCIR_SUBDEV_2, 2);
 		break;
 	}
-	dinfo->cfg.vendor = pci_read_config(dev, PCIR_VENDOR, 2);
-	dinfo->cfg.device = pci_read_config(dev, PCIR_DEVICE, 2);
-	dinfo->cfg.cmdreg = pci_read_config(dev, PCIR_COMMAND, 2);
-	dinfo->cfg.intline = pci_read_config(dev, PCIR_INTLINE, 1);
-	dinfo->cfg.intpin = pci_read_config(dev, PCIR_INTPIN, 1);
-	dinfo->cfg.cachelnsz = pci_read_config(dev, PCIR_CACHELNSZ, 1);
-	dinfo->cfg.lattimer = pci_read_config(dev, PCIR_LATTIMER, 1);
-	dinfo->cfg.baseclass = pci_read_config(dev, PCIR_CLASS, 1);
-	dinfo->cfg.subclass = pci_read_config(dev, PCIR_SUBCLASS, 1);
-	dinfo->cfg.progif = pci_read_config(dev, PCIR_PROGIF, 1);
-	dinfo->cfg.revid = pci_read_config(dev, PCIR_REVID, 1);
 
 	if (dinfo->cfg.pcie.pcie_location != 0)
 		pci_cfg_save_pcie(dev, dinfo);
