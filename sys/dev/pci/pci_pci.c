@@ -553,18 +553,22 @@ void
 pcib_setup_secbus(device_t dev, struct pcib_secbus *bus, int min_count)
 {
 	char buf[64];
-	int error, rid;
+	int error, rid, sec_reg;
 
-	switch (pci_read_config(dev, PCIR_HDRTYPE, 1) & PCIM_HDRTYPE) {
+	switch (pci_get_hdrtype(dev) & PCIM_HDRTYPE) {
 	case PCIM_HDRTYPE_BRIDGE:
+		sec_reg = PCIR_SECBUS_1;
 		bus->sub_reg = PCIR_SUBBUS_1;
 		break;
 	case PCIM_HDRTYPE_CARDBUS:
+		sec_reg = PCIR_SECBUS_2;
 		bus->sub_reg = PCIR_SUBBUS_2;
 		break;
 	default:
 		panic("not a PCI bridge");
 	}
+	bus->sec = pci_read_config(dev, sec_reg, 1);
+	bus->sub = pci_read_config(dev, bus->sub_reg, 1);
 	bus->dev = dev;
 	bus->rman.rm_start = 0;
 	bus->rman.rm_end = PCI_BUSMAX;
@@ -915,8 +919,10 @@ pcib_attach_common(device_t dev)
      * Get current bridge configuration.
      */
     sc->domain = pci_get_domain(dev);
+#if !(defined(NEW_PCIB) && defined(PCI_RES_BUS))
     sc->bus.sec = pci_read_config(dev, PCIR_SECBUS_1, 1);
     sc->bus.sub = pci_read_config(dev, PCIR_SUBBUS_1, 1);
+#endif
     sc->bridgectl = pci_read_config(dev, PCIR_BRIDGECTL_1, 2);
     pcib_cfg_save(sc);
 
@@ -945,7 +951,7 @@ pcib_attach_common(device_t dev)
      * Quirk handling.
      */
     switch (pci_get_devid(dev)) {
-#if !defined(NEW_PCIB) && !defined(PCI_RES_BUS)
+#if !(defined(NEW_PCIB) && defined(PCI_RES_BUS))
     case 0x12258086:		/* Intel 82454KX/GX (Orion) */
 	{
 	    uint8_t	supbus;
@@ -971,7 +977,7 @@ pcib_attach_common(device_t dev)
 	sc->flags |= PCIB_SUBTRACTIVE;
 	break;
 
-#if !defined(NEW_PCIB) && !defined(PCI_RES_BUS)
+#if !(defined(NEW_PCIB) && defined(PCI_RES_BUS))
     /* Compaq R3000 BIOS sets wrong subordinate bus number. */
     case 0x00dd10de:
 	{

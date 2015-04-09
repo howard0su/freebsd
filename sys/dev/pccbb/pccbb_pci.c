@@ -295,12 +295,13 @@ cbb_pci_attach(device_t brdev)
 	sc->cbdev = NULL;
 	sc->exca[0].pccarddev = NULL;
 	sc->domain = pci_get_domain(brdev);
-	sc->bus.sec = pci_read_config(brdev, PCIR_SECBUS_2, 1);
-	sc->bus.sub = pci_read_config(brdev, PCIR_SUBBUS_2, 1);
 	sc->pribus = pcib_get_bus(parent);
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 	pci_write_config(brdev, PCIR_PRIBUS_2, sc->pribus, 1);
 	pcib_setup_secbus(brdev, &sc->bus, 1);
+#else
+	sc->bus.sec = pci_read_config(brdev, PCIR_SECBUS_2, 1);
+	sc->bus.sub = pci_read_config(brdev, PCIR_SUBBUS_2, 1);
 #endif
 	SLIST_INIT(&sc->rl);
 
