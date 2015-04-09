@@ -555,7 +555,7 @@ pcib_setup_secbus(device_t dev, struct pcib_secbus *bus, int min_count)
 	char buf[64];
 	int error, rid, sec_reg;
 
-	switch (pci_get_hdrtype(dev) & PCIM_HDRTYPE) {
+	switch (pci_read_config(dev, PCIR_HDRTYPE, 1) & PCIM_HDRTYPE) {
 	case PCIM_HDRTYPE_BRIDGE:
 		sec_reg = PCIR_SECBUS_1;
 		bus->sub_reg = PCIR_SUBBUS_1;

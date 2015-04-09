@@ -4434,14 +4434,14 @@ pci_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 		*result = cfg->cachelnsz;
 		break;
 	case PCI_IVAR_MINGNT:
-		if (cfg->hdrtype & PCIM_HDRTYPE != PCIM_HDRTYPE_NORMAL) {
+		if (cfg->hdrtype != PCIM_HDRTYPE_NORMAL) {
 			*result = -1;
 			return (EINVAL);
 		}
 		*result = cfg->mingnt;
 		break;
 	case PCI_IVAR_MAXLAT:
-		if (cfg->hdrtype & PCIM_HDRTYPE != PCIM_HDRTYPE_NORMAL) {
+		if (cfg->hdrtype != PCIM_HDRTYPE_NORMAL) {
 			*result = -1;
 			return (EINVAL);
 		}
