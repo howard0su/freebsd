@@ -588,19 +588,19 @@ pci_hdrtypedata(device_t pcib, int b, int s, int f, pcicfgregs *cfg)
 		cfg->nummaps	    = PCI_MAXMAPS_0;
 		break;
 	case PCIM_HDRTYPE_BRIDGE:
-		cfg->bridge.seclat  = REG(PCIR_SECLAT_1, 1);
-		cfg->bridge.subbus  = REG(PCIR_SUBBUS_1, 1);
-		cfg->bridge.secbus  = REG(PCIR_SECBUS_1, 1);
-		cfg->bridge.pribus  = REG(PCIR_PRIBUS_1, 1);
-		cfg->bridge.control = REG(PCIR_BRIDGECTL_1, 2);
+		cfg->bridge.br_seclat = REG(PCIR_SECLAT_1, 1);
+		cfg->bridge.br_subbus = REG(PCIR_SUBBUS_1, 1);
+		cfg->bridge.br_secbus = REG(PCIR_SECBUS_1, 1);
+		cfg->bridge.br_pribus = REG(PCIR_PRIBUS_1, 1);
+		cfg->bridge.br_control = REG(PCIR_BRIDGECTL_1, 2);
 		cfg->nummaps	    = PCI_MAXMAPS_1;
 		break;
 	case PCIM_HDRTYPE_CARDBUS:
-		cfg->bridge.seclat  = REG(PCIR_SECLAT_2, 1);
-		cfg->bridge.subbus  = REG(PCIR_SUBBUS_2, 1);
-		cfg->bridge.secbus  = REG(PCIR_SECBUS_2, 1);
-		cfg->bridge.pribus  = REG(PCIR_PRIBUS_2, 1);
-		cfg->bridge.control = REG(PCIR_BRIDGECTL_2, 2);
+		cfg->bridge.br_seclat = REG(PCIR_SECLAT_2, 1);
+		cfg->bridge.br_subbus = REG(PCIR_SUBBUS_2, 1);
+		cfg->bridge.br_secbus = REG(PCIR_SECBUS_2, 1);
+		cfg->bridge.br_pribus = REG(PCIR_PRIBUS_2, 1);
+		cfg->bridge.br_control = REG(PCIR_BRIDGECTL_2, 2);
 		cfg->subvendor      = REG(PCIR_SUBVEND_2, 2);
 		cfg->subdevice      = REG(PCIR_SUBDEV_2, 2);
 		cfg->nummaps	    = PCI_MAXMAPS_2;
@@ -5164,28 +5164,28 @@ pci_cfg_restore(device_t dev, struct pci_devinfo *dinfo)
 		pci_write_config(dev, PCIR_MAXLAT, dinfo->cfg.maxlat, 1);
 		break;
 	case PCIM_HDRTYPE_BRIDGE:
-		pci_write_config(dev, PCIR_SECLAT_1, dinfo->cfg.bridge.seclat,
-		    1);
-		pci_write_config(dev, PCIR_SUBBUS_1, dinfo->cfg.bridge.subbus,
-		    1);
-		pci_write_config(dev, PCIR_SECBUS_1, dinfo->cfg.bridge.secbus,
-		    1);
-		pci_write_config(dev, PCIR_PRIBUS_1, dinfo->cfg.bridge.pribus,
-		    1);
+		pci_write_config(dev, PCIR_SECLAT_1,
+		    dinfo->cfg.bridge.br_seclat, 1);
+		pci_write_config(dev, PCIR_SUBBUS_1,
+		    dinfo->cfg.bridge.br_subbus, 1);
+		pci_write_config(dev, PCIR_SECBUS_1,
+		    dinfo->cfg.bridge.br_secbus, 1);
+		pci_write_config(dev, PCIR_PRIBUS_1,
+		    dinfo->cfg.bridge.br_pribus, 1);
 		pci_write_config(dev, PCIR_BRIDGECTL_1,
-		    dinfo->cfg.bridge.control, 2);
+		    dinfo->cfg.bridge.br_control, 2);
 		break;
 	case PCIM_HDRTYPE_CARDBUS:
-		pci_write_config(dev, PCIR_SECLAT_2, dinfo->cfg.bridge.seclat,
-		    1);
-		pci_write_config(dev, PCIR_SUBBUS_2, dinfo->cfg.bridge.subbus,
-		    1);
-		pci_write_config(dev, PCIR_SECBUS_2, dinfo->cfg.bridge.secbus,
-		    1);
-		pci_write_config(dev, PCIR_PRIBUS_2, dinfo->cfg.bridge.pribus,
-		    1);
+		pci_write_config(dev, PCIR_SECLAT_2,
+		    dinfo->cfg.bridge.br_seclat, 1);
+		pci_write_config(dev, PCIR_SUBBUS_2,
+		    dinfo->cfg.bridge.br_subbus, 1);
+		pci_write_config(dev, PCIR_SECBUS_2,
+		    dinfo->cfg.bridge.br_secbus, 1);
+		pci_write_config(dev, PCIR_PRIBUS_2,
+		    dinfo->cfg.bridge.br_pribus, 1);
 		pci_write_config(dev, PCIR_BRIDGECTL_2,
-		    dinfo->cfg.bridge.control, 2);
+		    dinfo->cfg.bridge.br_control, 2);
 		break;
 	}
 	pci_restore_bars(dev);
@@ -5282,27 +5282,27 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 		dinfo->cfg.maxlat = pci_read_config(dev, PCIR_MAXLAT, 1);
 		break;
 	case PCIM_HDRTYPE_BRIDGE:
-		dinfo->cfg.bridge.seclat = pci_read_config(dev, PCIR_SECLAT_1,
-		    1);
-		dinfo->cfg.bridge.subbus = pci_read_config(dev, PCIR_SUBBUS_1,
-		    1);
-		dinfo->cfg.bridge.secbus = pci_read_config(dev, PCIR_SECBUS_1,
-		    1);
-		dinfo->cfg.bridge.pribus = pci_read_config(dev, PCIR_PRIBUS_1,
-		    1);
-		dinfo->cfg.bridge.control = pci_read_config(dev,
+		dinfo->cfg.bridge.br_seclat = pci_read_config(dev,
+		    PCIR_SECLAT_1, 1);
+		dinfo->cfg.bridge.br_subbus = pci_read_config(dev,
+		    PCIR_SUBBUS_1, 1);
+		dinfo->cfg.bridge.br_secbus = pci_read_config(dev,
+		    PCIR_SECBUS_1, 1);
+		dinfo->cfg.bridge.br_pribus = pci_read_config(dev,
+		    PCIR_PRIBUS_1, 1);
+		dinfo->cfg.bridge.br_control = pci_read_config(dev,
 		    PCIR_BRIDGECTL_1, 2);
 		break;
 	case PCIM_HDRTYPE_CARDBUS:
-		dinfo->cfg.bridge.seclat = pci_read_config(dev, PCIR_SECLAT_2,
-		    1);
-		dinfo->cfg.bridge.subbus = pci_read_config(dev, PCIR_SUBBUS_2,
-		    1);
-		dinfo->cfg.bridge.secbus = pci_read_config(dev, PCIR_SECBUS_2,
-		    1);
-		dinfo->cfg.bridge.pribus = pci_read_config(dev, PCIR_PRIBUS_2,
-		    1);
-		dinfo->cfg.bridge.control = pci_read_config(dev,
+		dinfo->cfg.bridge.br_seclat = pci_read_config(dev,
+		    PCIR_SECLAT_2, 1);
+		dinfo->cfg.bridge.br_subbus = pci_read_config(dev,
+		    PCIR_SUBBUS_2, 1);
+		dinfo->cfg.bridge.br_secbus = pci_read_config(dev,
+		    PCIR_SECBUS_2, 1);
+		dinfo->cfg.bridge.br_pribus = pci_read_config(dev,
+		    PCIR_PRIBUS_2, 1);
+		dinfo->cfg.bridge.br_control = pci_read_config(dev,
 		    PCIR_BRIDGECTL_2, 2);
 		dinfo->cfg.subvendor = pci_read_config(dev, PCIR_SUBVEND_2, 2);
 		dinfo->cfg.subdevice = pci_read_config(dev, PCIR_SUBDEV_2, 2);
