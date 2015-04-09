@@ -5262,10 +5262,6 @@ pci_cfg_save(device_t dev, struct pci_devinfo *dinfo, int setstate)
 	 * so we can restore them.  The COMMAND register is modified by the
 	 * bus w/o updating the cache.  This should represent the normally
 	 * writable portion of the 'defined' part of type 0/1/2 headers.
-	 *
-	 * TODO:
-	 * - use bridge regs for PCI_RES_BUS?
-	 * - ivars?
 	 */
 	switch (dinfo->cfg.hdrtype & PCIM_HDRTYPE) {
 	case PCIM_HDRTYPE_NORMAL:
