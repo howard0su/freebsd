@@ -440,17 +440,12 @@ cbb_chipinit(struct cbb_softc *sc)
 	uint32_t mux, sysctrl, reg;
 
 	/* Set CardBus latency timer */
-	if (pci_read_config(sc->dev, PCIR_SECLAT_1, 1) < 0x20)
-		pci_write_config(sc->dev, PCIR_SECLAT_1, 0x20, 1);
+	if (pci_read_config(sc->dev, PCIR_SECLAT_2, 1) < 0x20)
+		pci_write_config(sc->dev, PCIR_SECLAT_2, 0x20, 1);
 
 	/* Set PCI latency timer */
 	if (pci_read_config(sc->dev, PCIR_LATTIMER, 1) < 0x20)
 		pci_write_config(sc->dev, PCIR_LATTIMER, 0x20, 1);
-
-	/* Restore bus configuration */
-	pci_write_config(sc->dev, PCIR_PRIBUS_2, sc->pribus, 1);
-	pci_write_config(sc->dev, PCIR_SECBUS_2, sc->bus.sec, 1);
-	pci_write_config(sc->dev, PCIR_SUBBUS_2, sc->bus.sub, 1);
 
 	/* Enable DMA, memory access for this card and I/O acces for children */
 	pci_enable_busmaster(sc->dev);

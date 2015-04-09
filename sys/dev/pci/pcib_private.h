@@ -121,9 +121,7 @@ struct pcib_softc
     uint32_t	iobase;		/* base address of port window */
     uint32_t	iolimit;	/* topmost address of port window */
 #endif
-    uint16_t	secstat;	/* secondary bus status register */
     uint16_t	bridgectl;	/* bridge control register */
-    uint8_t	seclat;		/* secondary bus latency timer */
 };
 
 #define	PCIB_SUPPORTED_ARI_VER	1

@@ -849,19 +849,12 @@ pcib_set_mem_decode(struct pcib_softc *sc)
 static void
 pcib_cfg_save(struct pcib_softc *sc)
 {
-	device_t	dev;
 #ifndef NEW_PCIB
+	device_t	dev;
 	uint16_t command;
-#endif
 
 	dev = sc->dev;
 
-	sc->pribus = pci_read_config(dev, PCIR_PRIBUS_1, 1);
-	sc->bus.sec = pci_read_config(dev, PCIR_SECBUS_1, 1);
-	sc->bus.sub = pci_read_config(dev, PCIR_SUBBUS_1, 1);
-	sc->bridgectl = pci_read_config(dev, PCIR_BRIDGECTL_1, 2);
-	sc->seclat = pci_read_config(dev, PCIR_SECLAT_1, 1);
-#ifndef NEW_PCIB
 	command = pci_read_config(dev, PCIR_COMMAND, 2);
 	if (command & PCIM_CMD_PORTEN)
 		pcib_get_io_decode(sc);
@@ -882,11 +875,6 @@ pcib_cfg_restore(struct pcib_softc *sc)
 #endif
 	dev = sc->dev;
 
-	pci_write_config(dev, PCIR_PRIBUS_1, sc->pribus, 1);
-	pci_write_config(dev, PCIR_SECBUS_1, sc->bus.sec, 1);
-	pci_write_config(dev, PCIR_SUBBUS_1, sc->bus.sub, 1);
-	pci_write_config(dev, PCIR_BRIDGECTL_1, sc->bridgectl, 2);
-	pci_write_config(dev, PCIR_SECLAT_1, sc->seclat, 1);
 #ifdef NEW_PCIB
 	pcib_write_windows(sc, WIN_IO | WIN_MEM | WIN_PMEM);
 #else
@@ -927,7 +915,9 @@ pcib_attach_common(device_t dev)
      * Get current bridge configuration.
      */
     sc->domain = pci_get_domain(dev);
-    sc->secstat = pci_read_config(dev, PCIR_SECSTAT_1, 2);
+    sc->bus.sec = pci_read_config(dev, PCIR_SECBUS_1, 1);
+    sc->bus.sub = pci_read_config(dev, PCIR_SUBBUS_1, 1);
+    sc->bridgectl = pci_read_config(dev, PCIR_BRIDGECTL_1, 2);
     pcib_cfg_save(sc);
 
     /*
