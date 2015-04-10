@@ -1152,6 +1152,7 @@ pf_refragment6(struct ifnet *ifp, struct mbuf **m0, struct m_tag *mtag)
 	for (t = m; m; m = t) {
 		t = m->m_nextpkt;
 		m->m_nextpkt = NULL;
+		m->m_flags |= M_SKIP_FIREWALL;
 		memset(&pd, 0, sizeof(pd));
 		pd.pf_mtag = pf_find_mtag(m);
 		if (error == 0)
@@ -2271,9 +2272,9 @@ pf_scrub_ip(struct mbuf **m0, u_int32_t flags, u_int8_t min_ttl, u_int8_t tos)
 
 	/* random-id, but not for fragments */
 	if (flags & PFRULE_RANDOMID && !(h->ip_off & ~htons(IP_DF))) {
-		u_int16_t ip_id = h->ip_id;
+		uint16_t ip_id = h->ip_id;
 
-		h->ip_id = ip_randomid();
+		ip_fillid(h);
 		h->ip_sum = pf_cksum_fixup(h->ip_sum, ip_id, h->ip_id, 0);
 	}
 }

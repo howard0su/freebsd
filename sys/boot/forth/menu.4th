@@ -206,6 +206,8 @@ also menu-infrastructure definitions
 \ 
 : printmenuitem ( menu_item_str -- ascii_keycode )
 
+	loader_color? if [char] ^ escc! then
+
 	menurow dup @ 1+ swap ! ( increment menurow )
 	menuidx dup @ 1+ swap ! ( increment menuidx )
 
@@ -216,13 +218,10 @@ also menu-infrastructure definitions
 	dup menuX @ swap at-xy
 
 	\ Print the value of menuidx
-	loader_color? if
-		." [1m" ( [22m )
-	then
+	loader_color? dup ( -- bool bool )
+	if b then
 	menuidx @ .
-	loader_color? if
-		." [37m" ( [39m )
-	then
+	if me then
 
 	\ Move the cursor forward 1 column
 	dup menuX @ 1+ swap at-xy
@@ -398,14 +397,15 @@ also menu-infrastructure definitions
 		setenv
 
 		\ Assign third to ansi_caption[x][y]
-		kerncapbuf 0 s" [1mK[37mernel: " strcat
+		kerncapbuf 0 s" @[1mK@[37mernel: " [char] @ escc! strcat
 		kernmenuidx @ [char] 0 = if
-			s" default/[32m"
+			s" default/@[32m"
 		else
-			s" [34;1m"
-		then strcat
+			s" @[34;1m"
+		then
+		[char] @ escc! strcat
 		2over strcat
-		s" [37m" strcat
+		s" @[37m" [char] @ escc! strcat
 		kernidx @ kernmenuidx @ ansi_caption[x][y]
 		setenv
 
