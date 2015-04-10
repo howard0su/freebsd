@@ -2333,13 +2333,19 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 		kvo.kvo_active = 0;
 		kvo.kvo_inactive = 0;
 		TAILQ_FOREACH(m, &obj->memq, listq) {
+			/*
+			 * A page may belong to the object but be
+			 * dequeued and set to PQ_NONE while the
+			 * object lock is not held.  This makes the
+			 * reads of m->queue below racy, and we do not
+			 * count pages set to PQ_NONE.  However, this
+			 * sysctl is only meant to give an
+			 * approximation of the system anyway.
+			 */
 			if (m->queue == PQ_ACTIVE)
 				kvo.kvo_active++;
-			else {
-				KASSERT(m->queue == PQ_INACTIVE,
-				    ("resident page on unknown queue"));
+			else if (m->queue == PQ_INACTIVE)
 				kvo.kvo_inactive++;
-			}
 		}
 
 		kvo.kvo_vn_fileid = 0;
