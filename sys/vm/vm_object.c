@@ -2321,7 +2321,7 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 	 */
 	prev = NULL;
 	mtx_lock(&vm_object_list_mtx);
-	for (obj = TAILQ_FIRST(&vm_object_list); obj != NULL; ) {
+	TAILQ_FOREACH(obj, &vm_object_list, object_list) {
 		VM_OBJECT_WLOCK(obj);
 		mtx_unlock(&vm_object_list_mtx);
 		kvo.kvo_size = ptoa(obj->size);
@@ -2403,15 +2403,15 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 		mtx_lock(&vm_object_list_mtx);
 		if (error)
 			break;
-		obj = TAILQ_NEXT(obj, object_list);
 	}
 	mtx_unlock(&vm_object_list_mtx);
 	if (prev != NULL)
 		vm_object_deallocate(prev);
 	return (error);
 }
-SYSCTL_PROC(_vm, OID_AUTO, objects, CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP,
-    NULL, 0, sysctl_vm_object_list, "S,kinfo_vmobject", "List of VM objects");
+SYSCTL_PROC(_vm, OID_AUTO, objects, CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP |
+    CTLFLAG_MPSAFE, NULL, 0, sysctl_vm_object_list, "S,kinfo_vmobject",
+    "List of VM objects");
 
 #include "opt_ddb.h"
 #ifdef DDB
