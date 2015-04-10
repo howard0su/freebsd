@@ -1484,7 +1484,7 @@ doobjstat(void)
 	struct kinfo_vmobject *kvo;
 	int cnt, i;
 
-	kvo = kinfo_getvmobjects(&cnt);
+	kvo = kinfo_getvmobject(&cnt);
 	if (kvo == NULL) {
 		warn("Failed to fetch VM object list");
 		return;

@@ -37,7 +37,7 @@ __FBSDID("$FreeBSD$");
 #include "libutil.h"
 
 struct kinfo_vmobject *
-kinfo_getvmobjects(int *cntp)
+kinfo_getvmobject(int *cntp)
 {
 	char *buf, *bp, *ep;
 	struct kinfo_vmobject *kvo, *list, *kp;
