@@ -79,6 +79,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/socket.h>
 #include <sys/resourcevar.h>
 #include <sys/rwlock.h>
+#include <sys/user.h>
 #include <sys/vnode.h>
 #include <sys/vmmeter.h>
 #include <sys/sx.h>
@@ -2285,6 +2286,132 @@ next_page:
 		object = tobject;
 	}
 }
+
+static int
+sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
+{
+	struct kinfo_vmobject kvo;
+	char *fullpath, *freepath;
+	struct vnode *vp;
+	struct vattr va;
+	vm_object_t obj, prev;
+	vm_page_t m;
+	int count, error;
+
+	if (req->oldptr == NULL) {
+		mtx_lock(&vm_object_list_mtx);
+		count = 0;
+		TAILQ_FOREACH(obj, &vm_object_list, object_list) {
+			count++;
+		}
+		mtx_unlock(&vm_object_list_mtx);
+		return (SYSCTL_OUT(req, NULL, sizeof(struct kinfo_vmobject) *
+		    count * 11 / 10));
+	}
+
+	error = 0;
+
+	/*
+	 * 'prev' points to the previous object in the list.  As each
+	 * object is examined, it's reference count is bumped.  This
+	 * reference is used to keep TAILQ_NEXT() stable.  To make
+	 * that work, we don't drop the reference on each object until
+	 * after we have finished parsing the subsequent object and
+	 * bumped it's reference count.
+	 */
+	prev = NULL;
+	mtx_lock(&vm_object_list_mtx);
+	for (obj = TAILQ_FIRST(&vm_object_list); obj != NULL; ) {
+		VM_OBJECT_WLOCK(obj);
+		mtx_unlock(&vm_object_list_mtx);
+		kvo.kvo_size = ptoa(obj->size);
+		kvo.kvo_resident = obj->resident_page_count;
+		kvo.kvo_ref_count = obj->ref_count;
+		kvo.kvo_shadow_count = obj->shadow_count;
+		kvo.kvo_memattr = obj->memattr;
+
+		kvo.kvo_active = 0;
+		kvo.kvo_inactive = 0;
+		TAILQ_FOREACH(m, &obj->memq, listq) {
+			if (m->queue == PQ_ACTIVE)
+				kvo.kvo_active++;
+			else {
+				KASSERT(m->queue == PQ_INACTIVE,
+				    ("resident page on unknown queue"));
+				kvo.kvo_inactive++;
+			}
+		}
+
+		kvo.kvo_vn_fileid = 0;
+		kvo.kvo_vn_fsid = 0;
+		freepath = NULL;
+		fullpath = "";
+		vp = NULL;
+		switch (obj->type) {
+		case OBJT_DEFAULT:
+			kvo.kvo_type = KVME_TYPE_DEFAULT;
+			break;
+		case OBJT_VNODE:
+			kvo.kvo_type = KVME_TYPE_VNODE;
+			vp = obj->handle;
+			vref(vp);
+			break;
+		case OBJT_SWAP:
+			kvo.kvo_type = KVME_TYPE_SWAP;
+			break;
+		case OBJT_DEVICE:
+			kvo.kvo_type = KVME_TYPE_DEVICE;
+			break;
+		case OBJT_PHYS:
+			kvo.kvo_type = KVME_TYPE_PHYS;
+			break;
+		case OBJT_DEAD:
+			kvo.kvo_type = KVME_TYPE_DEAD;
+			break;
+		case OBJT_SG:
+			kvo.kvo_type = KVME_TYPE_SG;
+			break;
+		default:
+			kvo.kvo_type = KVME_TYPE_UNKNOWN;
+			break;
+		}
+		vm_object_reference_locked(obj);
+		VM_OBJECT_WUNLOCK(obj);
+		if (vp != NULL) {
+			vn_fullpath(curthread, vp, &fullpath, &freepath);
+			vn_lock(vp, LK_SHARED | LK_RETRY);
+			if (VOP_GETATTR(vp, &va, curthread->td_ucred) == 0) {
+				kvo.kvo_vn_fileid = va.va_fileid;
+				kvo.kvo_vn_fsid = va.va_fsid;
+			}
+			vput(vp);
+		}
+
+		strlcpy(kvo.kvo_path, fullpath, sizeof(kvo.kvo_path));
+		if (freepath != NULL)
+			free(freepath, M_TEMP);
+
+		/* Pack record size down */
+		kvo.kvo_structsize = offsetof(struct kinfo_vmobject, kvo_path) +
+		    strlen(kvo.kvo_path) + 1;
+		kvo.kvo_structsize = roundup(kvo.kvo_structsize,
+		    sizeof(uint64_t));
+		error = SYSCTL_OUT(req, &kvo, kvo.kvo_structsize);
+		if (prev != NULL)
+			vm_object_deallocate(prev);
+		prev = obj;
+		mtx_lock(&vm_object_list_mtx);
+		if (error)
+			break;
+		obj = TAILQ_NEXT(obj, object_list);
+	}
+	mtx_unlock(&vm_object_list_mtx);
+	if (prev != NULL)
+		vm_object_deallocate(prev);
+	return (error);
+}
+SYSCTL_PROC(_vm, OID_AUTO, objects, CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP,
+    NULL, 0, sysctl_vm_object_list, "S,kinfo_vmobject", "List of VM objects");
 
 #include "opt_ddb.h"
 #ifdef DDB
