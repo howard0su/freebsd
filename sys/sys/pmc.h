@@ -996,6 +996,7 @@ extern struct pmc_cpu **pmc_pcpu;
 extern struct pmc_op_getdriverstats pmc_stats;
 
 #if	defined(HWPMC_DEBUG)
+#include <sys/ktr.h>
 
 /* debug flags, major flag groups */
 struct pmc_debugflags {
