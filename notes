@@ -1,0 +1,55 @@
+We would like to have a general purpose framework for doing efficient
+zero-copy I/O.  Something like IO-Lite might work.  A brief summary of
+my understanding of how IO-Lite worked:
+
+- I/O data are stored in immutable buffers.  These buffers can be shared
+  among multiple consumers and are free'd when their associated reference
+  count drops to zero.
+- An I/O request can stitch together multiple subsets of data from
+  different buffers (basically an iovec of data buffers).  IO-Lite
+  called these "buffer aggregates".
+- User applications have to use a different API than read and write.
+  These different entry points allow buffers to be specified as I/O
+  requests.  In particular, the application doesn't allocate user
+  buffers for read(2) but gets told where read(2) data is.
+
+Additional things that IO-Lite might have also done but that I think you
+need regardless:
+
+- An I/O buffer has to be wired while it has a kernel reference.
+
+In general I think this all sounds hunky-dory, but one of the sticky
+widgets for me is mapping these buffers into userspace.  The kernel can
+get by with sfbufs for when it needs virtual addresses and not just DMA
+(I think).
+
+One possible (but naive) design is to use a new VM object for each I/O
+buffer.  For files you would want some sort of reverse-shadow object that
+gives you a snapshot of the file's data.  That is, you would move the
+existing pages from the file into a swap-backed object that would be
+"behind" the vnode object so that writes would COW and allocate a page
+in the vnode object, but reads would fall through to the page in the
+I/O buffer for unchanged data.  For non-files you would use swap-backed
+VM objects for data.  Internally, read operations would have to map
+buffers into the process' address space.  Ideally you would unmap the
+objects when the process was finished with them so that the objects
+(and associated pages) could be harvested once they were no longer used.
+(This would mean needing some way to say "done with this return from
+read".)
+
+My worry here is that this approach could add a lot of overhead.
+You don't want a new object for every page-sized read that you
+do (though to preserve the "snapshot" semantics of read from
+files you may actually need that).  From non-files it might be nice to
+amortize the cost if possible.  It would also be nice to "cache"
+mappings to avoid mapping operations on read if the same buffer is
+reused.
+
+IO-Lite's paper makes mention of a special pager.  My
+initial reading of this is that this means they provided a single
+address window in each process that all I/O buffers had to live in,
+but I'm not sure if that's really accurate to what they did.
+Hmm, 2.2 does imply that each I/O stream (socket, etc.) kept a
+pool of recently-free'd pages that could be reused.  I think this
+implies that most larger-than-a-page I/O's would not be virtually
+contiguous.
