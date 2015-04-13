@@ -2329,7 +2329,6 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 		kvo.kvo_ref_count = obj->ref_count;
 		kvo.kvo_shadow_count = obj->shadow_count;
 		kvo.kvo_memattr = obj->memattr;
-
 		kvo.kvo_active = 0;
 		kvo.kvo_inactive = 0;
 		TAILQ_FOREACH(m, &obj->memq, listq) {
@@ -2376,6 +2375,9 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 			break;
 		case OBJT_SG:
 			kvo.kvo_type = KVME_TYPE_SG;
+			break;
+		case OBJT_MGTDEVICE:
+			kvo.kvo_type = KVME_TYPE_MGTDEVICE;
 			break;
 		default:
 			kvo.kvo_type = KVME_TYPE_UNKNOWN;
