@@ -2908,7 +2908,7 @@ static SYSCTL_NODE(_kern_proc, KERN_PROC_SIGTRAMP, sigtramp, CTLFLAG_RD |
 	"Process signal trampoline location");
 
 #ifdef INSPECTION
-SYSCTL_NODE(, OID_AUTO, inspect, CTLFLAG_RD, NULL,
+SYSCTL_ROOT_NODE(OID_AUTO, inspect, CTLFLAG_RD, NULL,
     "Process and thread inspection");
 
 SYSCTL_NODE(_inspect, OID_AUTO, minwait, CTLFLAG_RD, NULL,
