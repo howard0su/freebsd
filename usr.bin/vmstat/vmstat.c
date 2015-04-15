@@ -1409,9 +1409,9 @@ display_object(struct kinfo_vmobject *kvo)
 {
 	const char *str;
 
-	printf("%5d ", kvo->kvo_resident);
-	printf("%5d ", kvo->kvo_active);
-	printf("%5d ", kvo->kvo_inactive);
+	printf("%5jd ", (uintmax_t)kvo->kvo_resident);
+	printf("%5jd ", (uintmax_t)kvo->kvo_active);
+	printf("%5jd ", (uintmax_t)kvo->kvo_inactive);
 	printf("%3d ", kvo->kvo_ref_count);
 	printf("%3d ", kvo->kvo_shadow_count);
 	switch (kvo->kvo_memattr) {
