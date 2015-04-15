@@ -2299,9 +2299,15 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 	int count, error;
 
 	if (req->oldptr == NULL) {
+		/*
+		 * If an old buffer has not been provided, generate an
+		 * estimate of the space needed for a subsequent call.
+		 */
 		mtx_lock(&vm_object_list_mtx);
 		count = 0;
 		TAILQ_FOREACH(obj, &vm_object_list, object_list) {
+			if (obj->type == OBJ_DEAD)
+				continue;
 			count++;
 		}
 		mtx_unlock(&vm_object_list_mtx);
@@ -2313,17 +2319,22 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 
 	/*
 	 * 'prev' points to the previous object in the list.  As each
-	 * object is examined, it's reference count is bumped.  This
-	 * reference is used to keep TAILQ_NEXT() stable.  To make
-	 * that work, we don't drop the reference on each object until
-	 * after we have finished parsing the subsequent object and
-	 * bumped it's reference count.
+	 * object is examined, its reference count is bumped.  This
+	 * reference is used to keep TAILQ_NEXT() stable while the
+	 * list is unlocked.  To make that work, we don't drop the
+	 * reference on each object until after we have finished
+	 * parsing the subsequent object and bumped its reference
+	 * count.
 	 */
 	prev = NULL;
 	mtx_lock(&vm_object_list_mtx);
 	TAILQ_FOREACH(obj, &vm_object_list, object_list) {
+		if (obj->type == OBJ_DEAD)
+			continue;
 		VM_OBJECT_WLOCK(obj);
 		mtx_unlock(&vm_object_list_mtx);
+		vm_object_reference_locked(obj);
+		VM_OBJECT_LOCK_DOWNGRADE(obj);
 		kvo.kvo_size = ptoa(obj->size);
 		kvo.kvo_resident = obj->resident_page_count;
 		kvo.kvo_ref_count = obj->ref_count;
@@ -2383,8 +2394,7 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 			kvo.kvo_type = KVME_TYPE_UNKNOWN;
 			break;
 		}
-		vm_object_reference_locked(obj);
-		VM_OBJECT_WUNLOCK(obj);
+		VM_OBJECT_RUNLOCK(obj);
 		if (vp != NULL) {
 			vn_fullpath(curthread, vp, &fullpath, &freepath);
 			vn_lock(vp, LK_SHARED | LK_RETRY);
