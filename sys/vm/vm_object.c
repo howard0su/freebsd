@@ -157,7 +157,6 @@ static uma_zone_t obj_zone;
 
 static int vm_object_zinit(void *mem, int size, int flags);
 
-#ifdef INVARIANTS
 static void vm_object_zdtor(void *mem, int size, void *arg);
 
 static void
@@ -166,6 +165,8 @@ vm_object_zdtor(void *mem, int size, void *arg)
 	vm_object_t object;
 
 	object = (vm_object_t)mem;
+	KASSERT(object->ref_count == 0,
+	    ("object %p ref_count = %d", object, object->ref_count));
 	KASSERT(TAILQ_EMPTY(&object->memq),
 	    ("object %p has resident pages in its memq", object));
 	KASSERT(vm_radix_is_empty(&object->rtree),
@@ -187,8 +188,8 @@ vm_object_zdtor(void *mem, int size, void *arg)
 	KASSERT(object->shadow_count == 0,
 	    ("object %p shadow_count = %d",
 	    object, object->shadow_count));
+	object->type = OBJT_DEAD;
 }
-#endif
 
 static int
 vm_object_zinit(void *mem, int size, int flags)
@@ -199,6 +200,8 @@ vm_object_zinit(void *mem, int size, int flags)
 	rw_init_flags(&object->lock, "vm object", RW_DUPOK | RW_NEW);
 
 	/* These are true for any object that has been freed */
+	object->type = OBJT_DEAD;
+	object->ref_count = 0;
 	object->rtree.rt_root = 0;
 	object->rtree.rt_flags = 0;
 	object->paging_in_progress = 0;
@@ -206,6 +209,10 @@ vm_object_zinit(void *mem, int size, int flags)
 	object->shadow_count = 0;
 	object->cache.rt_root = 0;
 	object->cache.rt_flags = 0;
+
+	mtx_lock(&vm_object_list_mtx);
+	TAILQ_INSERT_TAIL(&vm_object_list, object, object_list);
+	mtx_unlock(&vm_object_list_mtx);
 	return (0);
 }
 
@@ -252,10 +259,6 @@ _vm_object_allocate(objtype_t type, vm_pindex_t size, vm_object_t object)
 #if VM_NRESERVLEVEL > 0
 	LIST_INIT(&object->rvq);
 #endif
-
-	mtx_lock(&vm_object_list_mtx);
-	TAILQ_INSERT_TAIL(&vm_object_list, object, object_list);
-	mtx_unlock(&vm_object_list_mtx);
 }
 
 /*
@@ -669,13 +672,6 @@ doterm:
 void
 vm_object_destroy(vm_object_t object)
 {
-
-	/*
-	 * Remove the object from the global object list.
-	 */
-	mtx_lock(&vm_object_list_mtx);
-	TAILQ_REMOVE(&vm_object_list, object, object_list);
-	mtx_unlock(&vm_object_list_mtx);
 
 	/*
 	 * Release the allocation charge.
