@@ -53,3 +53,59 @@ Hmm, 2.2 does imply that each I/O stream (socket, etc.) kept a
 pool of recently-free'd pages that could be reused.  I think this
 implies that most larger-than-a-page I/O's would not be virtually
 contiguous.
+
+--------------------------------------------------------------------
+
+Files make this complicated, so I'm going to punt and think about
+just using this for streaming files (sockets to start, though ttys
+should be "adoptable" as well).
+
+The IO-Lite model seems to not be creating an object for each buffer.
+In fact, it may be that what you end up with is one single object that
+can grow over time.  The equivalent of aggregates would be (offset,
+length) tuples relative to the single object.  In userland a library
+would keep a cache of mappings.  In-kernel consumers would need to
+wire pages while using them, but could unwire them when done.
+The kernel would need to keep an in-kernel version of the buffers it
+has given to each process (possibly to each vmspace instead?) so
+that it can drop the reference counts on buffers if a process exits
+without having done so (crash, etc.).  We would need a way to determine
+which pages in the object were free and could be reused once they were
+no longer referenced by any buffers (perhaps a per-page refcount),
+and one optimization is that when the kernel requests a buffer we
+should prefer page offsets that have a resident page to those that
+do not.  I'm not sure if there's anything we can do to be smarter and
+try to use superpages here when possible.  Note that the userland
+mappings would generally be read-only except when requesting a new
+buffer to use for a write.
+
+Eventually if you wanted this to be "transparent" for regular NICs
+you would want receive mbufs to be allocated as this type of I/O
+buffer from the start rather than being mbuf clusters I think.
+Otherwise you will need to copy the data out of any "normal" mbuf
+clusters into a new I/O buffer before sending it to userland.
+
+I'm not sure if this lends itself to having the same kind of per-fd
+affinity that IO-Lite mentions so that you try to reuse buffers that
+already exist.  Perhaps you could do that by placing "free" buffers on
+a per-fd list as well as a global list (global lock would not be ideal
+though).  If an fd's "free" list is empty it would start picking
+things from the global list.  Maybe it would be better instead to only
+have free buffers on the per-fd list but to instead have a list of
+file descriptors and look for a file with the most free buffers and
+grab those from the per-fd list of the other file.  You would still
+have a global lock for the list of file descriptors, but it would only
+change when a file descriptor started using I/O buffers or was closed.
+The "find a free buffer" case would only have to read-lock the list.
+
+I'm not sure how to detect when the user library should release
+address space.  It would have to keep any addresses in active
+aggregates mapped, but the idea of the cache is to avoid remapping
+a buffer if it gets reused quickly, so you don't want to unmap
+just because a given page is no longer used.  OTOH, you don't want
+to starve out malloc() or dlopen() (especially on 32-bit platforms).
+Assuming the bits live in libc, you could hook malloc() at least so
+that if malloc fails to get a new chunk of address space it could
+try a drain of the I/O buffer object before retrying it's mmap().
+However, that isn't friendly to out-of-tree mallocs (e.g. debugging
+mallocs), and it's harder to do this for dlopen().
