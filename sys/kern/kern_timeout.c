@@ -515,8 +515,8 @@ softclock_call_cc(struct callout *c, struct callout_cpu *cc, int *mpcalls,
 		CTR3(KTR_CALLOUT, "callout mpsafe %p func %p arg %p",
 		    c, c_func, c_arg);
 	}
-	KTR_STATE3(KTR_SCHED, "callout", cc->cc_ktr_event_name, "running",
-	    "func:%p", c_func, "arg:%p", c_arg, "direct:%d", direct);
+	KTR_STATE2(KTR_SCHED, "callout", cc->cc_ktr_event_name, "running",
+	    "func:%p", c_func, "arg:%p", c_arg);
 #ifdef DIAGNOSTIC
 	binuptime(&bt1);
 #endif
