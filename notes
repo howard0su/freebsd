@@ -109,3 +109,126 @@ that if malloc fails to get a new chunk of address space it could
 try a drain of the I/O buffer object before retrying it's mmap().
 However, that isn't friendly to out-of-tree mallocs (e.g. debugging
 mallocs), and it's harder to do this for dlopen().
+
+--------------------------------------------------------------------
+
+I had another thought in the shower this morning.  Some of the
+concerns I have could be addressed at the expense of making this a bit
+less automagical, but instead requiring userland to be more explicit.
+
+Suppose you provided an API to allow userland to create a "pool" of
+zerocopy I/O buffers.  Initially the API might use a single fixed-size
+pool (e.g. N buffers of size M), though I think it would not be hard
+to grow (and possibly shrink) the number of buffers in the pool
+(having multiple sizes would also be doable, but that becomes more
+complicated).
+
+Implementation-wise, each pool would be backed by a single VM object
+that is mapped into the address space of the process when the pool is
+created.  In general the idea is that the mapping operations are now
+explicitly done by userland so their cost can be amortized and so that
+address space can be reserved in a way that error handling is
+feasible.
+
+Each pool would then keep an internal list of "free" buffers.
+(Initially all buffers would be "free").  There would still be a
+different API for zero-copy (at least for receive).  However, the way
+it would work is that an application would "bind" a zero-copy pool to
+a file descriptor to use for receiving data.  (Once this is done, all
+data would go this route and not via read/recv.)  Multiple descriptors
+can share the same pool.  Drivers/protocols would have access to this
+pool if they want to grab free buffers to arrange for DMAs to write
+directly into buffers that are then handed up the stack.  The
+replacement for read/recv would instead return either a buffer ID for
+each buffer that is returned.  At that point userland "owns" the
+buffer.  It can return it to the free pool or use it for some other
+purpose.
+
+For zero-copy send, the application would need to allocate a free
+buffer (or use one it just got via a read) and pass that to write.  We
+might be able to get away with letting regular write use these buffers
+via the user's mapping and just recognizing it as an I/O buffer
+internally and knowing we can wire it and use the pages directly.
+This would work on the honor system that userland won't scribble on it
+while it is pending.  Once the write completes the kernel would return
+the buffer to the pool's free list.
+
+Note that this is a bit different from IO-Lite, but perhaps not super
+different.  One thing that this API doesn't quite do is the immutable
+buffer thing.  We could bring that back.  One way that is a slightly
+stronger honor system would be to map the object as PROT_READ (but
+with maxprot of PROT_READ | PROT_WRITE) and use mprotect to alter
+buffers requested for a zero-copy send to PROT_READ | PROT_WRITE and
+then switch them back to PROT_READ when the buffer was sent.  This
+would likely be easiest if using an alternate API entry point for
+write.
+
+Another implementation choice is that the VM object could be
+OBJT_DEFAULT but that individual buffers would be wired while in use
+by the kernel (e.g. when a driver requests a free buffer to use for
+receive, or when a zero-copy write is requested).  The wiring would be
+released when the buffer is no longer needed for DMA (so when a driver
+fills it in the Chelsio DDP case, or when a transmit is complete).
+This would limit the amount of wired memory in use by allowing any
+not-currently-being-DMA'd-to memory to be paged out at the expense of
+extra overhead.
+
+Another alternate approach for this API would be to just treat the VM
+object as a pool of memory instead of a list of fixed-size buffers.
+You would still need to honor page boundaries, but instead of passing
+buffer ID's back and forth you would pass (offset, length) tuples that
+are relative to the backing object.  We would need something akin to
+vmem perhaps to manage which parts of the object are "free" vs used.
+This would probably be a bit closer to how IO-Lite worked.
+
+One thing this does not have that IO-Lite had is shared ownership
+which would allow you to keep a handle on a buffer sent for zero-copy
+send and reuse it to send the same data in the future.  I'm not
+certain that you couldn't retrofit this into the API by providing a
+reference count on buffers.  Bumping the reference count on a buffer
+above 1 would mark it as read-only.  Finishing a zero-copy send would
+drop the reference count and only put it back in the free pool if the
+count dropped to zero.  For that use case, userland would allocate a
+free buffer, scribble data into it, bump its reference count to "seal"
+it, and then use it for multiple sends.  When it was finished with the
+buffer it would drop its local reference count.
+
+You could permit IPC to use this via explicit sharing (perhaps via a
+new API).  One way we could allow this would be to use a file
+descriptor as the handle for an I/O buffer object (you could almost
+use shm_open(SHM_ANON) to get a good chunk of this) and pass it across
+fork() or a Unix domain socket.  You could also add a dedicated API
+to pass an I/O buffer object to another process, but then you also
+need a way to allow a process to receive it, etc.  A new fd type might
+make several of these things a lot easier to deal with (it's an easy
+way to pass in a reference for a socket option or ioctl to bind receive
+operations to a pool for example).
+
+Aside from Chelsio DDP, there might be some other options for using this
+for zero-copy receive.  I think the biggest caveat is that most drivers
+split a single 4k page into two mbuf clusters, so if you were to do some
+page swapping magic where you stuffed a page into a free "slot" of the
+I/O object as a kind of remapping operation (ala the old zero copy sockets
+stuff) you would leak data from some other random packet to userland.  It
+would only be safe to do that sort of remapping trick if you have buffers
+whose backing pages don't contain any other data.
+
+File data would seem like it would be somewhat ideal if you let the
+I/O buffer object shadow the file's VM object?  I think that doesn't
+really work though as what you really want is the ability to shadow
+multiple objects and at different offsets, etc.  (At least it wouldn't
+work out of the box.)
+
+I think things like pipes might work fine, but those are already
+optimized to do this today I think via remapping.  They would just
+do the same here.
+
+Of course, one downside to the remapping thing is it means you start
+stuffing arbitrary pages into the I/O object.  It might be nice if the
+I/O object used a nice set of pages (superpages, NUMA, etc.).  That
+would certainly be true for the Chelsio DDP case.
+
+You can always implement the fallback for the zero-copy receive API by
+doing copies from regular buffers (such as mbufs) to the zero-copy
+object.  It would not be worse than what is there now (same number of
+copies).
