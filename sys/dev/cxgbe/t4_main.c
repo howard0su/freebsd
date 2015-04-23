@@ -102,6 +102,22 @@ static driver_t cxgbe_driver = {
 	sizeof(struct port_info)
 };
 
+/* T4 VI (vcxgbe) interface */
+static int vcxgbe_probe(device_t);
+static int vcxgbe_attach(device_t);
+static int vcxgbe_detach(device_t);
+static device_method_t vcxgbe_methods[] = {
+	DEVMETHOD(device_probe,		vcxgbe_probe),
+	DEVMETHOD(device_attach,	vcxgbe_attach),
+	DEVMETHOD(device_detach,	vcxgbe_detach),
+	{ 0, 0 }
+};
+static driver_t vcxgbe_driver = {
+	"vcxgbe",
+	vcxgbe_methods,
+	sizeof(struct extra_vi)
+};
+
 static d_ioctl_t t4_ioctl;
 static d_open_t t4_open;
 static d_close_t t4_close;
@@ -136,6 +152,13 @@ static driver_t cxl_driver = {
 	"cxl",
 	cxgbe_methods,
 	sizeof(struct port_info)
+};
+
+/* T5 VI (vcxl) interface */
+static driver_t vcxl_driver = {
+	"vcxl",
+	vcxgbe_methods,
+	sizeof(struct vi_info)
 };
 
 static struct cdevsw t5_cdevsw = {
@@ -323,6 +346,9 @@ TUNABLE_INT("hw.cxgbe.fcoecaps_allowed", &t4_fcoecaps_allowed);
 static int t5_write_combine = 0;
 TUNABLE_INT("hw.cxl.write_combine", &t5_write_combine);
 
+static int t4_num_vis = 1;
+TUNABLE_INT("hw.cxgbe.num_vis", &t4_num_vis);
+
 struct intrs_and_queues {
 	uint16_t intr_type;	/* INTx, MSI, or MSI-X */
 	uint16_t nirq;		/* Total # of vectors */
@@ -376,8 +402,8 @@ static int get_params__post_init(struct adapter *);
 static int set_params__post_init(struct adapter *);
 static void t4_set_desc(struct adapter *);
 static void build_medialist(struct port_info *, struct ifmedia *);
-static int cxgbe_init_synchronized(struct port_info *);
-static int cxgbe_uninit_synchronized(struct port_info *);
+static int cxgbe_init_synchronized(struct vi_info *);
+static int cxgbe_uninit_synchronized(struct vi_info *);
 static int setup_intr_handlers(struct adapter *);
 static void quiesce_txq(struct adapter *, struct sge_txq *);
 static void quiesce_wrq(struct adapter *, struct sge_wrq *);
@@ -613,7 +639,7 @@ t4_attach(device_t dev)
 
 	mtx_init(&sc->sfl_lock, "starving freelists", 0, MTX_DEF);
 	TAILQ_INIT(&sc->sfl);
-	callout_init(&sc->sfl_callout, CALLOUT_MPSAFE);
+	callout_init_mtx(&sc->sfl_callout, &sc->sfl_lock, 0);
 
 	mtx_init(&sc->regwin_lock, "register and memory window", 0, MTX_DEF);
 
@@ -752,7 +778,6 @@ t4_attach(device_t dev)
 			pi->pktc_idx = t4_pktc_idx_1g;
 		}
 
-		pi->xact_addr_filt = -1;
 		pi->linkdnrc = -1;
 
 		pi->qsize_rxq = t4_qsize_rxq;
@@ -978,7 +1003,7 @@ t4_detach(device_t dev)
 	for (i = 0; i < MAX_NPORTS; i++) {
 		pi = sc->port[i];
 		if (pi) {
-			t4_free_vi(sc, sc->mbox, sc->pf, 0, pi->viid);
+			t4_free_vi(sc, sc->mbox, sc->pf, 0, pi->vi.viid);
 			if (pi->dev)
 				device_delete_child(dev, pi->dev);
 
@@ -1034,6 +1059,7 @@ t4_detach(device_t dev)
 		mtx_destroy(&sc->sc_lock);
 	}
 
+	callout_drain(&sc->sfl_callout);
 	if (mtx_initialized(&sc->tids.ftid_lock))
 		mtx_destroy(&sc->tids.ftid_lock);
 	if (mtx_initialized(&sc->sfl_lock))
@@ -1066,12 +1092,11 @@ cxgbe_probe(device_t dev)
 #define T4_CAP_ENABLE (T4_CAP)
 
 static int
-cxgbe_attach(device_t dev)
+cxgbe_viattach(device_t dev, struct vi_info *vi)
 {
-	struct port_info *pi = device_get_softc(dev);
 	struct ifnet *ifp;
-	char *s;
-	int n, o;
+
+	vi->xact_addr_filt = -1;
 
 	/* Allocate an ifnet and set it up */
 	ifp = if_alloc(IFT_ETHER);
@@ -1079,10 +1104,8 @@ cxgbe_attach(device_t dev)
 		device_printf(dev, "Cannot allocate ifnet\n");
 		return (ENOMEM);
 	}
-	pi->ifp = ifp;
-	ifp->if_softc = pi;
-
-	callout_init(&pi->tick, CALLOUT_MPSAFE);
+	vi->ifp = ifp;
+	ifp->if_softc = vi;
 
 	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
@@ -1095,7 +1118,8 @@ cxgbe_attach(device_t dev)
 
 	ifp->if_capabilities = T4_CAP;
 #ifdef TCP_OFFLOAD
-	if (is_offload(pi->adapter))
+	/* XXX: Hack to only enable TOE on first VI. */
+	if (is_offload(vi->pi->adapter) && vi == &vi->pi->vi)
 		ifp->if_capabilities |= IFCAP_TOE;
 #endif
 	ifp->if_capenable = T4_CAP_ENABLE;
@@ -1107,34 +1131,49 @@ cxgbe_attach(device_t dev)
 	ifp->if_hw_tsomaxsegsize = 65536;
 
 	/* Initialize ifmedia for this port */
-	ifmedia_init(&pi->media, IFM_IMASK, cxgbe_media_change,
+	ifmedia_init(&vi->media, IFM_IMASK, cxgbe_media_change,
 	    cxgbe_media_status);
-	build_medialist(pi, &pi->media);
+	build_medialist(vi->pi, &vi->media);
 
-	pi->vlan_c = EVENTHANDLER_REGISTER(vlan_config, cxgbe_vlan_config, ifp,
+	vi->vlan_c = EVENTHANDLER_REGISTER(vlan_config, cxgbe_vlan_config, ifp,
 	    EVENTHANDLER_PRI_ANY);
 
-	ether_ifattach(ifp, pi->hw_addr);
+	ether_ifattach(ifp, vi->hw_addr);
 
-	n = 128;
-	s = malloc(n, M_CXGBE, M_WAITOK);
-	o = snprintf(s, n, "%d txq, %d rxq (NIC)", pi->ntxq, pi->nrxq);
-	MPASS(n > o);
+	return (0);
+}
+
+static int
+cxgbe_attach(device_t dev)
+{
+	struct port_info *pi = device_get_softc(dev);
+	struct ifnet *ifp;
+	struct sbuf *sb;
+	int error;
+
+	callout_init_mtx(&pi->tick, &pi->pi_lock, 0);
+
+	pi->vi.pi = pi;
+	error = cxgbe_viattach(dev, &pi->vi);
+	if (error)
+		return (error);
+
+	sb = sbuf_new_auto();
+	sbuf_printf(sb, "%d txq, %d rxq (NIC)", pi->ntxq, pi->nrxq);
 #ifdef TCP_OFFLOAD
-	if (is_offload(pi->adapter)) {
-		o += snprintf(s + o, n - o, "; %d txq, %d rxq (TOE)",
+	if (is_offload(pi->adapter))
+		sbuf_printf(sb, "; %d txq, %d rxq (TOE)",
 		    pi->nofldtxq, pi->nofldrxq);
-		MPASS(n > o);
-	}
 #endif
 #ifdef DEV_NETMAP
-	o += snprintf(s + o, n - o, "; %d txq, %d rxq (netmap)", pi->nnmtxq,
-	    pi->nnmrxq);
-	MPASS(n > o);
+	sbuf_printf(sb, "; %d txq, %d rxq (netmap)", pi->nnmtxq, pi->nnmrxq);
 #endif
-	device_printf(dev, "%s\n", s);
-	free(s, M_CXGBE);
+	sbuf_finish(sb);
+	device_printf(dev, "%s\n", sbuf_data(sb));
+	sbuf_delete(sb);
 
+	/* XXX: Create extra VIs */
+	
 #ifdef DEV_NETMAP
 	/* nm_media handled here to keep implementation private to this file */
 	ifmedia_init(&pi->nm_media, IFM_IMASK, cxgbe_media_change,
@@ -1148,11 +1187,25 @@ cxgbe_attach(device_t dev)
 }
 
 static int
+cxgbe_videtach(struct vi_info *vi)
+{
+	struct ifnet *ifp = vi->ifp;
+
+	ether_ifdetach(ifp);
+
+	if (vi->vlan_c)
+		EVENTHANDLER_DEREGISTER(vlan_config, vi->vlan_c);
+
+	cxgbe_uninit_synchronized(vi);
+	ifmedia_removeall(&vi->media);
+	if_free(vi->ifp);
+}
+
+static int
 cxgbe_detach(device_t dev)
 {
 	struct port_info *pi = device_get_softc(dev);
 	struct adapter *sc = pi->adapter;
-	struct ifnet *ifp = pi->ifp;
 
 	/* Tell if_ioctl and if_init that the port is going away */
 	ADAPTER_LOCK(sc);
@@ -1172,22 +1225,14 @@ cxgbe_detach(device_t dev)
 		t4_tracer_port_detach(sc);
 	}
 
-	if (pi->vlan_c)
-		EVENTHANDLER_DEREGISTER(vlan_config, pi->vlan_c);
-
 	PORT_LOCK(pi);
-	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
 	callout_stop(&pi->tick);
 	PORT_UNLOCK(pi);
 	callout_drain(&pi->tick);
 
 	/* Let detach proceed even if these fail. */
-	cxgbe_uninit_synchronized(pi);
+	cxgbe_videtach(&pi->vi);
 	port_full_uninit(pi);
-
-	ifmedia_removeall(&pi->media);
-	ether_ifdetach(pi->ifp);
-	if_free(pi->ifp);
 
 #ifdef DEV_NETMAP
 	/* XXXNM: equivalent of cxgbe_uninit_synchronized to ifdown nm_ifp */
@@ -1205,12 +1250,13 @@ cxgbe_detach(device_t dev)
 static void
 cxgbe_init(void *arg)
 {
-	struct port_info *pi = arg;
+	struct vi_info *vi = arg;
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 
 	if (begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4init") != 0)
 		return;
-	cxgbe_init_synchronized(pi);
+	cxgbe_init_synchronized(vi);
 	end_synchronized_op(sc, 0);
 }
 
@@ -1218,7 +1264,8 @@ static int
 cxgbe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 {
 	int rc = 0, mtu, flags, can_sleep;
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 	struct ifreq *ifr = (struct ifreq *)data;
 	uint32_t mask;
@@ -1251,7 +1298,7 @@ redo_sifflags:
 
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-				flags = pi->if_flags;
+				flags = vi->if_flags;
 				if ((ifp->if_flags ^ flags) &
 				    (IFF_PROMISC | IFF_ALLMULTI)) {
 					if (can_sleep == 1) {
@@ -1268,16 +1315,16 @@ redo_sifflags:
 					can_sleep = 1;
 					goto redo_sifflags;
 				}
-				rc = cxgbe_init_synchronized(pi);
+				rc = cxgbe_init_synchronized(vi);
 			}
-			pi->if_flags = ifp->if_flags;
+			vi->if_flags = ifp->if_flags;
 		} else if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
 			if (can_sleep == 0) {
 				end_synchronized_op(sc, LOCK_HELD);
 				can_sleep = 1;
 				goto redo_sifflags;
 			}
-			rc = cxgbe_uninit_synchronized(pi);
+			rc = cxgbe_uninit_synchronized(vi);
 		}
 		end_synchronized_op(sc, can_sleep ? 0 : LOCK_HELD);
 		break;
@@ -1355,7 +1402,7 @@ redo_sifflags:
 			struct sge_rxq *rxq;
 
 			ifp->if_capenable ^= IFCAP_LRO;
-			for_each_rxq(pi, i, rxq) {
+			for_each_rxq(vi, i, rxq) {
 				if (ifp->if_capenable & IFCAP_LRO)
 					rxq->iq.flags |= IQ_LRO_ENABLED;
 				else
@@ -1398,7 +1445,7 @@ fail:
 
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
-		ifmedia_ioctl(ifp, ifr, &pi->media, cmd);
+		ifmedia_ioctl(ifp, ifr, &vi->media, cmd);
 		break;
 
 	case SIOCGI2C: {
@@ -1436,7 +1483,8 @@ fail:
 static int
 cxgbe_transmit(struct ifnet *ifp, struct mbuf *m)
 {
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 	struct sge_txq *txq;
 	void *items[1];
@@ -1458,10 +1506,10 @@ cxgbe_transmit(struct ifnet *ifp, struct mbuf *m)
 	}
 
 	/* Select a txq. */
-	txq = &sc->sge.txq[pi->first_txq];
+	txq = &sc->sge.txq[vi->first_txq];
 	if (M_HASHTYPE_GET(m) != M_HASHTYPE_NONE)
-		txq += ((m->m_pkthdr.flowid % (pi->ntxq - pi->rsrv_noflowq)) +
-		    pi->rsrv_noflowq);
+		txq += ((m->m_pkthdr.flowid % (vi->ntxq - vi->rsrv_noflowq)) +
+		    vi->rsrv_noflowq);
 
 	items[0] = m;
 	rc = mp_ring_enqueue(txq->r, items, 1, 4096);
@@ -1474,13 +1522,13 @@ cxgbe_transmit(struct ifnet *ifp, struct mbuf *m)
 static void
 cxgbe_qflush(struct ifnet *ifp)
 {
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
 	struct sge_txq *txq;
 	int i;
 
 	/* queues do not exist if !PORT_INIT_DONE. */
-	if (pi->flags & PORT_INIT_DONE) {
-		for_each_txq(pi, i, txq) {
+	if (vi->pi->flags & PORT_INIT_DONE) {
+		for_each_txq(vi, i, txq) {
 			TXQ_LOCK(txq);
 			txq->eq.flags &= ~EQ_ENABLED;
 			TXQ_UNLOCK(txq);
@@ -1496,9 +1544,14 @@ cxgbe_qflush(struct ifnet *ifp)
 static uint64_t
 cxgbe_get_counter(struct ifnet *ifp, ift_counter c)
 {
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 	struct port_stats *s = &pi->stats;
+
+	/* XXX: No stats for extra VIs */
+	if (vi != &pi->vi)
+		return (if_get_counter_default(ifp, c));
 
 	cxgbe_refresh_stats(sc, pi);
 
@@ -1557,9 +1610,9 @@ cxgbe_get_counter(struct ifnet *ifp, ift_counter c)
 static int
 cxgbe_media_change(struct ifnet *ifp)
 {
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
 
-	device_printf(pi->dev, "%s unimplemented.\n", __func__);
+	device_printf(vi->pi->dev, "%s unimplemented.\n", __func__);
 
 	return (EOPNOTSUPP);
 }
@@ -1567,7 +1620,8 @@ cxgbe_media_change(struct ifnet *ifp)
 static void
 cxgbe_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = vi->pi;
 	struct ifmedia *media = NULL;
 	struct ifmedia_entry *cur;
 	int speed = pi->link_cfg.speed;
@@ -1575,8 +1629,8 @@ cxgbe_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 	int data = (pi->port_type << 8) | pi->mod_type;
 #endif
 
-	if (ifp == pi->ifp)
-		media = &pi->media;
+	if (ifp == vi->ifp)
+		media = &vi->media;
 #ifdef DEV_NETMAP
 	else if (ifp == pi->nm_ifp)
 		media = &pi->nm_media;
@@ -1608,6 +1662,31 @@ cxgbe_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 	else
 		KASSERT(0, ("%s: link up but speed unknown (%u)", __func__,
 			    speed));
+}
+
+static int
+vcxgbe_probe(device_t dev)
+{
+	char buf[128];
+	struct extra_vi *evi = device_get_softc(dev);
+
+	snprintf(buf, sizeof(buf), "port %d vi %d", evi->vi.pi->port_id,
+	    evi->index);
+	device_set_desc_copy(dev, buf);
+
+	return (BUS_PROBE_DEFAULT);
+}
+
+static int
+vcxgbe_attach(device_t dev)
+{
+	return (ENXIO);
+}
+
+static int
+vcxgbe_detach(device_t dev)
+{
+	return (ENXIO);
 }
 
 void
@@ -3013,7 +3092,8 @@ int
 update_mac_settings(struct ifnet *ifp, int flags)
 {
 	int rc = 0;
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = pi->vi;
 	struct adapter *sc = pi->adapter;
 	int mtu = -1, promisc = -1, allmulti = -1, vlanex = -1;
 	uint16_t viid = 0xffff;
@@ -3022,9 +3102,9 @@ update_mac_settings(struct ifnet *ifp, int flags)
 	ASSERT_SYNCHRONIZED_OP(sc);
 	KASSERT(flags, ("%s: not told what to update.", __func__));
 
-	if (ifp == pi->ifp) {
-		viid = pi->viid;
-		xact_addr_filt = &pi->xact_addr_filt;
+	if (ifp == vi->ifp) {
+		viid = vi->viid;
+		xact_addr_filt = &vi->xact_addr_filt;
 	}
 #ifdef DEV_NETMAP
 	else if (ifp == pi->nm_ifp) {
@@ -3148,7 +3228,8 @@ begin_synchronized_op(struct adapter *sc, struct port_info *pi, int flags,
 #ifdef WITNESS
 	/* the caller thinks it's ok to sleep, but is it really? */
 	if (flags & SLEEP_OK)
-		pause("t4slptst", 1);
+		WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
+		    "begin_synchronized_op");
 #endif
 
 	if (INTR_OK)
@@ -3286,10 +3367,11 @@ done:
  * Idempotent.
  */
 static int
-cxgbe_uninit_synchronized(struct port_info *pi)
+cxgbe_uninit_synchronized(struct vi_info *vi)
 {
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
-	struct ifnet *ifp = pi->ifp;
+	struct ifnet *ifp = vi->ifp;
 	int rc, i;
 	struct sge_txq *txq;
 
@@ -3308,22 +3390,27 @@ cxgbe_uninit_synchronized(struct port_info *pi)
 	 * holding in its RAM (for an offloaded connection) even after the VI is
 	 * disabled.
 	 */
-	rc = -t4_enable_vi(sc, sc->mbox, pi->viid, false, false);
+	rc = -t4_enable_vi(sc, sc->mbox, vi->viid, false, false);
 	if (rc) {
 		if_printf(ifp, "disable_vi failed: %d\n", rc);
 		return (rc);
 	}
 
-	for_each_txq(pi, i, txq) {
+	for_each_txq(vi, i, txq) {
 		TXQ_LOCK(txq);
 		txq->eq.flags &= ~EQ_ENABLED;
 		TXQ_UNLOCK(txq);
 	}
 
-	clrbit(&sc->open_device_map, pi->port_id);
 	PORT_LOCK(pi);
+	if (
 	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
 	PORT_UNLOCK(pi);
+	pi->up_vis--;
+	if (pi->up_vis > 0)
+		return (0);
+
+	clrbit(&sc->open_device_map, pi->port_id);
 
 	pi->link_cfg.link_ok = 0;
 	pi->link_cfg.speed = 0;
@@ -3637,9 +3724,9 @@ quiesce_fl(struct adapter *sc, struct sge_fl *fl)
 	FL_LOCK(fl);
 	fl->flags |= FL_DOOMED;
 	FL_UNLOCK(fl);
+	callout_stop(&sc->sfl_callout);
 	mtx_unlock(&sc->sfl_lock);
 
-	callout_drain(&sc->sfl_callout);
 	KASSERT((fl->flags & FL_STARVING) == 0,
 	    ("%s: still starving", __func__));
 }
@@ -4407,16 +4494,10 @@ cxgbe_tick(void *arg)
 	struct adapter *sc = pi->adapter;
 	struct ifnet *ifp = pi->ifp;
 
-	PORT_LOCK(pi);
-	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
-		PORT_UNLOCK(pi);
-		return;	/* without scheduling another callout */
-	}
-
+	PORT_LOCK_ASSERT_OWNED(pi);
 	cxgbe_refresh_stats(sc, pi);
 
 	callout_schedule(&pi->tick, hz);
-	PORT_UNLOCK(pi);
 }
 
 static void
@@ -8192,8 +8273,8 @@ void
 t4_iscsi_init(struct ifnet *ifp, unsigned int tag_mask,
     const unsigned int *pgsz_order)
 {
-	struct port_info *pi = ifp->if_softc;
-	struct adapter *sc = pi->adapter;
+	struct vi_info *vi = ifp->if_softc;
+	struct adapter *sc = vi->pi->adapter;
 
 	t4_write_reg(sc, A_ULP_RX_ISCSI_TAGMASK, tag_mask);
 	t4_write_reg(sc, A_ULP_RX_ISCSI_PSZ, V_HPZ0(pgsz_order[0]) |
@@ -8544,6 +8625,7 @@ done_unload:
 
 static devclass_t t4_devclass, t5_devclass;
 static devclass_t cxgbe_devclass, cxl_devclass;
+static devclass_t vcxgbe_devclass, vcxl_devclass;
 
 DRIVER_MODULE(t4nex, pci, t4_driver, t4_devclass, mod_event, 0);
 MODULE_VERSION(t4nex, 1);
@@ -8558,3 +8640,9 @@ MODULE_VERSION(cxgbe, 1);
 
 DRIVER_MODULE(cxl, t5nex, cxl_driver, cxl_devclass, 0, 0);
 MODULE_VERSION(cxl, 1);
+
+DRIVER_MODULE(vcxgbe, cxgbe, vcxgbe_driver, vcxgbe_devclass, 0, 0);
+MODULE_VERSION(vcxgbe, 1);
+
+DRIVER_MODULE(vcxl, cxl, vcxl_driver, vcxl_devclass, 0, 0);
+MODULE_VERSION(vcxl, 1);

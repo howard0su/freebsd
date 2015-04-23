@@ -1908,8 +1908,8 @@ t4_wrq_tx_locked(struct adapter *sc, struct sge_wrq *wrq, struct wrqe *wr)
 void
 t4_update_fl_bufsize(struct ifnet *ifp)
 {
-	struct port_info *pi = ifp->if_softc;
-	struct adapter *sc = pi->adapter;
+	struct vi_info *vi = ifp->if_softc;
+	struct adapter *sc = vi->pi->adapter;
 	struct sge_rxq *rxq;
 #ifdef TCP_OFFLOAD
 	struct sge_ofld_rxq *ofld_rxq;
@@ -1918,7 +1918,7 @@ t4_update_fl_bufsize(struct ifnet *ifp)
 	int i, maxp, mtu = ifp->if_mtu;
 
 	maxp = mtu_to_max_payload(sc, mtu, 0);
-	for_each_rxq(pi, i, rxq) {
+	for_each_rxq(vi, i, rxq) {
 		fl = &rxq->fl;
 
 		FL_LOCK(fl);
@@ -1927,7 +1927,7 @@ t4_update_fl_bufsize(struct ifnet *ifp)
 	}
 #ifdef TCP_OFFLOAD
 	maxp = mtu_to_max_payload(sc, mtu, 1);
-	for_each_ofld_rxq(pi, i, ofld_rxq) {
+	for_each_ofld_rxq(vi, i, ofld_rxq) {
 		fl = &ofld_rxq->fl;
 
 		FL_LOCK(fl);
@@ -2349,7 +2349,8 @@ eth_tx(struct mp_ring *r, u_int cidx, u_int pidx)
 	struct sge_txq *txq = r->cookie;
 	struct sge_eq *eq = &txq->eq;
 	struct ifnet *ifp = txq->ifp;
-	struct port_info *pi = (void *)ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 	u_int total, remaining;		/* # of packets */
 	u_int available, dbdiff;	/* # of hardware descriptors */
@@ -2613,7 +2614,7 @@ alloc_iq_fl(struct port_info *pi, struct sge_iq *iq, struct sge_fl *fl,
 
 	c.type_to_iqandstindex = htobe32(v |
 	    V_FW_IQ_CMD_TYPE(FW_IQ_TYPE_FL_INT_CAP) |
-	    V_FW_IQ_CMD_VIID(pi->viid) |
+	    V_FW_IQ_CMD_VIID(vi->viid) |
 	    V_FW_IQ_CMD_IQANUD(X_UPDATEDELIVERY_INTERRUPT));
 	c.iqdroprss_to_iqesize = htobe16(V_FW_IQ_CMD_IQPCIECH(pi->tx_chan) |
 	    F_FW_IQ_CMD_IQGTSMODE |
@@ -3770,7 +3771,7 @@ refill_sfl(void *arg)
 	struct adapter *sc = arg;
 	struct sge_fl *fl, *fl_temp;
 
-	mtx_lock(&sc->sfl_lock);
+	mtx_assert(&sc->sfl_lock, MA_OWNED);
 	TAILQ_FOREACH_SAFE(fl, &sc->sfl, link, fl_temp) {
 		FL_LOCK(fl);
 		refill_fl(sc, fl, 64);
@@ -3783,7 +3784,6 @@ refill_sfl(void *arg)
 
 	if (!TAILQ_EMPTY(&sc->sfl))
 		callout_schedule(&sc->sfl_callout, hz / 5);
-	mtx_unlock(&sc->sfl_lock);
 }
 
 static int

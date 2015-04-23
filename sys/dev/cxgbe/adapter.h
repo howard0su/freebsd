@@ -214,22 +214,41 @@ enum {
 #define SET_BUSY(sc)	do {(sc)->flags |= CXGBE_BUSY;} while (0)
 #define CLR_BUSY(sc)	do {(sc)->flags &= ~CXGBE_BUSY;} while (0)
 
-struct port_info {
-	device_t dev;
-	struct adapter *adapter;
+struct vi_info {
+	struct port_info *pi;
 
 	struct ifnet *ifp;
 	struct ifmedia media;
 
-	struct mtx pi_lock;
-	char lockname[16];
-	unsigned long flags;
 	int if_flags;
 
 	uint16_t *rss;
 	uint16_t viid;
 	int16_t  xact_addr_filt;/* index of exact MAC address filter */
 	uint16_t rss_size;	/* size of VI's RSS table slice */
+
+	eventhandler_tag vlan_c;
+
+	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
+};
+
+struct extra_vi {
+	device_t dev;
+	int index;
+
+	struct vi_info vi;
+};
+
+struct port_info {
+	device_t dev;
+	struct adapter *adapter;
+
+	struct vi_info vi;
+
+	struct mtx pi_lock;
+	char lockname[16];
+	unsigned long flags;
+
 	uint8_t  lport;		/* associated offload logical port */
 	int8_t   mdio_addr;
 	uint8_t  port_type;
@@ -251,6 +270,7 @@ struct port_info {
 	int first_ofld_rxq;	/* index of first offload rx queue */
 #endif
 #ifdef DEV_NETMAP
+	/* XXX: This should become an extra vi_info */
 	int nnmtxq;		/* # of netmap tx queues */
 	int first_nm_txq;	/* index of first netmap tx queue */
 	int nnmrxq;		/* # of netmap rx queues */
@@ -276,12 +296,10 @@ struct port_info {
 	u_int tnl_cong_drops;
 	u_int tx_parse_error;
 
-	eventhandler_tag vlan_c;
-
 	struct callout tick;
 	struct sysctl_ctx_list ctx;	/* from ifconfig up to driver detach */
 
-	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
+	int up_vis;
 };
 
 /* Where the cluster came from, how it has been carved up. */
@@ -955,7 +973,7 @@ static inline void
 t4_os_set_hw_addr(struct adapter *sc, int idx, uint8_t hw_addr[])
 {
 
-	bcopy(hw_addr, sc->port[idx]->hw_addr, ETHER_ADDR_LEN);
+	bcopy(hw_addr, sc->port[idx]->vi.hw_addr, ETHER_ADDR_LEN);
 }
 
 static inline bool
