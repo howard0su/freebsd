@@ -199,13 +199,20 @@ enum {
 
 	/* port flags */
 	DOOMED		= (1 << 0),
+#if 0
 	PORT_INIT_DONE	= (1 << 1),
 	PORT_SYSCTL_CTX	= (1 << 2),
+#endif
 	HAS_TRACEQ	= (1 << 3),
 	INTR_RXQ	= (1 << 4),	/* All NIC rxq's take interrupts */
 	INTR_OFLD_RXQ	= (1 << 5),	/* All TOE rxq's take interrupts */
 	INTR_NM_RXQ	= (1 << 6),	/* All netmap rxq's take interrupts */
 	INTR_ALL	= (INTR_RXQ | INTR_OFLD_RXQ | INTR_NM_RXQ),
+
+	/* VI flags */
+	VI_INIT_DONE	= (1 << 1),
+	VI_SYSCTL_CTX	= (1 << 2),
+	/* XXX: I think the RXQ and OFLD_RXQ flags should be per-VI as well */
 };
 
 #define IS_DOOMED(pi)	((pi)->flags & DOOMED)
@@ -220,6 +227,7 @@ struct vi_info {
 	struct ifnet *ifp;
 	struct ifmedia media;
 
+	unsigned long flags;
 	int if_flags;
 
 	uint16_t *rss;
@@ -228,6 +236,26 @@ struct vi_info {
 	uint16_t rss_size;	/* size of VI's RSS table slice */
 
 	eventhandler_tag vlan_c;
+
+	/* These need to be int as they are used in sysctl */
+	int ntxq;	/* # of tx queues */
+	int first_txq;	/* index of first tx queue */
+	int rsrv_noflowq; /* Reserve queue 0 for non-flowid packets */
+	int nrxq;	/* # of rx queues */
+	int first_rxq;	/* index of first rx queue */
+#ifdef TCP_OFFLOAD
+	int nofldtxq;		/* # of offload tx queues */
+	int first_ofld_txq;	/* index of first offload tx queue */
+	int nofldrxq;		/* # of offload rx queues */
+	int first_ofld_rxq;	/* index of first offload rx queue */
+#endif
+
+	int tmr_idx;
+	int pktc_idx;
+	int qsize_rxq;
+	int qsize_txq;
+
+	struct sysctl_ctx_list ctx;	/* from ifconfig up to driver detach */
 
 	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
 };
@@ -243,6 +271,7 @@ struct port_info {
 	device_t dev;
 	struct adapter *adapter;
 
+	/* XXX: Eventually move this. */
 	struct vi_info vi;
 
 	struct mtx pi_lock;
@@ -257,18 +286,6 @@ struct port_info {
 	uint8_t  tx_chan;
 	uint8_t  rx_chan_map;	/* rx MPS channel bitmap */
 
-	/* These need to be int as they are used in sysctl */
-	int ntxq;	/* # of tx queues */
-	int first_txq;	/* index of first tx queue */
-	int rsrv_noflowq; /* Reserve queue 0 for non-flowid packets */
-	int nrxq;	/* # of rx queues */
-	int first_rxq;	/* index of first rx queue */
-#ifdef TCP_OFFLOAD
-	int nofldtxq;		/* # of offload tx queues */
-	int first_ofld_txq;	/* index of first offload tx queue */
-	int nofldrxq;		/* # of offload rx queues */
-	int first_ofld_rxq;	/* index of first offload rx queue */
-#endif
 #ifdef DEV_NETMAP
 	/* XXX: This should become an extra vi_info */
 	int nnmtxq;		/* # of netmap tx queues */
@@ -283,11 +300,6 @@ struct port_info {
 	int16_t nm_xact_addr_filt;
 	uint16_t nm_rss_size;	/* size of netmap VI's RSS table slice */
 #endif
-	int tmr_idx;
-	int pktc_idx;
-	int qsize_rxq;
-	int qsize_txq;
-
 	int linkdnrc;
 	struct link_config link_cfg;
 
@@ -297,7 +309,6 @@ struct port_info {
 	u_int tx_parse_error;
 
 	struct callout tick;
-	struct sysctl_ctx_list ctx;	/* from ifconfig up to driver detach */
 
 	int up_vis;
 };
@@ -774,7 +785,9 @@ struct adapter {
 	struct tid_info tids;
 
 	uint16_t doorbells;
+#if 0
 	int open_device_map;
+#endif
 #ifdef TCP_OFFLOAD
 	int offload_map;	/* ports with IFCAP_TOE enabled */
 	int active_ulds;	/* ULDs activated on this adapter */
@@ -864,18 +877,18 @@ struct adapter {
 #define TXQ_LOCK_ASSERT_OWNED(txq)	EQ_LOCK_ASSERT_OWNED(&(txq)->eq)
 #define TXQ_LOCK_ASSERT_NOTOWNED(txq)	EQ_LOCK_ASSERT_NOTOWNED(&(txq)->eq)
 
-#define for_each_txq(pi, iter, q) \
-	for (q = &pi->adapter->sge.txq[pi->first_txq], iter = 0; \
-	    iter < pi->ntxq; ++iter, ++q)
-#define for_each_rxq(pi, iter, q) \
-	for (q = &pi->adapter->sge.rxq[pi->first_rxq], iter = 0; \
-	    iter < pi->nrxq; ++iter, ++q)
-#define for_each_ofld_txq(pi, iter, q) \
-	for (q = &pi->adapter->sge.ofld_txq[pi->first_ofld_txq], iter = 0; \
-	    iter < pi->nofldtxq; ++iter, ++q)
-#define for_each_ofld_rxq(pi, iter, q) \
-	for (q = &pi->adapter->sge.ofld_rxq[pi->first_ofld_rxq], iter = 0; \
-	    iter < pi->nofldrxq; ++iter, ++q)
+#define for_each_txq(vi, iter, q) \
+	for (q = &vi->pi->adapter->sge.txq[vi->first_txq], iter = 0; \
+	    iter < vi->ntxq; ++iter, ++q)
+#define for_each_rxq(vi, iter, q) \
+	for (q = &vi->pi->adapter->sge.rxq[vi->first_rxq], iter = 0; \
+	    iter < vi->nrxq; ++iter, ++q)
+#define for_each_ofld_txq(vi, iter, q) \
+	for (q = &vi->pi->adapter->sge.ofld_txq[vi->first_ofld_txq], iter = 0; \
+	    iter < vi->nofldtxq; ++iter, ++q)
+#define for_each_ofld_rxq(vi, iter, q) \
+	for (q = &vi->pi->adapter->sge.ofld_rxq[vi->first_ofld_rxq], iter = 0; \
+	    iter < vi->nofldrxq; ++iter, ++q)
 #define for_each_nm_txq(pi, iter, q) \
 	for (q = &pi->adapter->sge.nm_txq[pi->first_nm_txq], iter = 0; \
 	    iter < pi->nnmtxq; ++iter, ++q)
@@ -1014,8 +1027,8 @@ void end_synchronized_op(struct adapter *, int);
 int update_mac_settings(struct ifnet *, int);
 int adapter_full_init(struct adapter *);
 int adapter_full_uninit(struct adapter *);
-int port_full_init(struct port_info *);
-int port_full_uninit(struct port_info *);
+int vi_full_init(struct vi_info *);
+int vi_full_uninit(struct vi_info *);
 
 #ifdef DEV_NETMAP
 /* t4_netmap.c */
@@ -1037,8 +1050,8 @@ void t4_sge_sysctls(struct adapter *, struct sysctl_ctx_list *,
 int t4_destroy_dma_tag(struct adapter *);
 int t4_setup_adapter_queues(struct adapter *);
 int t4_teardown_adapter_queues(struct adapter *);
-int t4_setup_port_queues(struct port_info *);
-int t4_teardown_port_queues(struct port_info *);
+int t4_setup_vi_queues(struct vi_info *);
+int t4_teardown_vi_queues(struct vi_info *);
 void t4_intr_all(void *);
 void t4_intr(void *);
 void t4_intr_err(void *);
