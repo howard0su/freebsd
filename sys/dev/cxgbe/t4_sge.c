@@ -987,7 +987,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 	struct ifnet *ifp = vi->ifp;
-	struct sysctl_oid *oid = device_get_sysctl_tree(pi->dev);
+	struct sysctl_oid *oid = device_get_sysctl_tree(vi->dev);
 	struct sysctl_oid_list *children = SYSCTL_CHILDREN(oid);
 	int maxp, mtu = ifp->if_mtu;
 
@@ -1009,7 +1009,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 		init_iq(&rxq->iq, sc, vi->tmr_idx, vi->pktc_idx, vi->qsize_rxq);
 
 		snprintf(name, sizeof(name), "%s rxq%d-fl",
-		    device_get_nameunit(pi->dev), i);
+		    device_get_nameunit(vi->dev), i);
 		init_fl(sc, &rxq->fl, vi->qsize_rxq / 8, maxp, name);
 
 		if (pi->flags & INTR_RXQ) {
@@ -1033,7 +1033,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 		    vi->qsize_rxq);
 
 		snprintf(name, sizeof(name), "%s ofld_rxq%d-fl",
-		    device_get_nameunit(pi->dev), i);
+		    device_get_nameunit(vi->dev), i);
 		init_fl(sc, &ofld_rxq->fl, vi->qsize_rxq / 8, maxp, name);
 
 		if (pi->flags & INTR_OFLD_RXQ) {
@@ -1113,7 +1113,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 	for_each_txq(vi, i, txq) {
 		iqid = vi_intr_iq(vi, j)->cntxt_id;
 		snprintf(name, sizeof(name), "%s txq%d",
-		    device_get_nameunit(pi->dev), i);
+		    device_get_nameunit(vi->dev), i);
 		init_eq(&txq->eq, EQ_ETH, vi->qsize_txq, pi->tx_chan, iqid,
 		    name);
 
@@ -1130,7 +1130,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 
 		iqid = vi_intr_iq(vi, j)->cntxt_id;
 		snprintf(name, sizeof(name), "%s ofld_txq%d",
-		    device_get_nameunit(pi->dev), i);
+		    device_get_nameunit(vi->dev), i);
 		init_eq(&ofld_txq->eq, EQ_OFLD, vi->qsize_txq, pi->tx_chan,
 		    iqid, name);
 
@@ -1168,7 +1168,7 @@ skip:
 	    NULL, "ctrl queue");
 	ctrlq = &sc->sge.ctrlq[pi->port_id];
 	iqid = vi_intr_iq(vi, 0)->cntxt_id;
-	snprintf(name, sizeof(name), "%s ctrlq", device_get_nameunit(pi->dev));
+	snprintf(name, sizeof(name), "%s ctrlq", device_get_nameunit(vi->dev));
 	init_eq(&ctrlq->eq, EQ_CTRL, CTRL_EQ_QSIZE, pi->tx_chan, iqid, name);
 	rc = alloc_wrq(sc, vi, ctrlq, oid);
 
@@ -2787,7 +2787,7 @@ free_iq_fl(struct vi_info *vi, struct sge_iq *iq, struct sge_fl *fl)
 	if (sc == NULL)
 		return (0);	/* nothing to do */
 
-	dev = vi ? vi->pi->dev : sc->dev;
+	dev = vi ? vi->dev : sc->dev;
 
 	if (iq->flags & IQ_ALLOCATED) {
 		rc = -t4_iq_free(sc, sc->mbox, sc->pf, 0,
@@ -3285,7 +3285,7 @@ eth_eq_alloc(struct adapter *sc, struct vi_info *vi, struct sge_eq *eq)
 
 	rc = -t4_wr_mbox(sc, sc->mbox, &c, sizeof(c), &c);
 	if (rc != 0) {
-		device_printf(vi->pi->dev,
+		device_printf(vi->dev,
 		    "failed to create Ethernet egress queue: %d\n", rc);
 		return (rc);
 	}
@@ -3328,7 +3328,7 @@ ofld_eq_alloc(struct adapter *sc, struct vi_info *vi, struct sge_eq *eq)
 
 	rc = -t4_wr_mbox(sc, sc->mbox, &c, sizeof(c), &c);
 	if (rc != 0) {
-		device_printf(vi->pi->dev,
+		device_printf(vi->dev,
 		    "failed to create egress queue for TCP offload: %d\n", rc);
 		return (rc);
 	}

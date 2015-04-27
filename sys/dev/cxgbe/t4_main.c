@@ -1172,6 +1172,7 @@ cxgbe_attach(device_t dev)
 
 	callout_init_mtx(&pi->tick, &pi->pi_lock, 0);
 
+	pi->vi.dev = dev;
 	pi->vi.pi = pi;
 	error = cxgbe_viattach(dev, &pi->vi);
 	if (error)
@@ -1618,7 +1619,7 @@ cxgbe_media_change(struct ifnet *ifp)
 {
 	struct vi_info *vi = ifp->if_softc;
 
-	device_printf(vi->pi->dev, "%s unimplemented.\n", __func__);
+	device_printf(vi->dev, "%s unimplemented.\n", __func__);
 
 	return (EOPNOTSUPP);
 }

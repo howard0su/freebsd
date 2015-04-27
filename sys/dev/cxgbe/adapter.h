@@ -222,9 +222,7 @@ enum {
 #define CLR_BUSY(sc)	do {(sc)->flags &= ~CXGBE_BUSY;} while (0)
 
 struct vi_info {
-#ifdef notyet
 	device_t dev;
-#endif
 	struct port_info *pi;
 
 	struct ifnet *ifp;
@@ -264,10 +262,9 @@ struct vi_info {
 };
 
 struct extra_vi {
-	device_t dev;
-	int index;
-
 	struct vi_info vi;
+
+	int index;
 };
 
 struct port_info {
