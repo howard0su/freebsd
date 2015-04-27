@@ -782,6 +782,7 @@ t4_attach(device_t dev)
 
 		pi->vi.qsize_rxq = t4_qsize_rxq;
 		pi->vi.qsize_txq = t4_qsize_txq;
+		pi->vi.pi = pi;
 
 		pi->dev = device_add_child(dev, is_t4(sc) ? "cxgbe" : "cxl", -1);
 		if (pi->dev == NULL) {
@@ -790,6 +791,7 @@ t4_attach(device_t dev)
 			rc = ENXIO;
 			goto done;
 		}
+		pi->vi.dev = dev;
 		device_set_softc(pi->dev, pi);
 	}
 
@@ -1172,8 +1174,6 @@ cxgbe_attach(device_t dev)
 
 	callout_init_mtx(&pi->tick, &pi->pi_lock, 0);
 
-	pi->vi.dev = dev;
-	pi->vi.pi = pi;
 	error = cxgbe_viattach(dev, &pi->vi);
 	if (error)
 		return (error);
