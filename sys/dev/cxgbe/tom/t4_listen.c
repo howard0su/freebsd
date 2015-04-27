@@ -72,7 +72,7 @@ static void free_stid(struct adapter *, struct listen_ctx *);
 
 /* lctx services */
 static struct listen_ctx *alloc_lctx(struct adapter *, struct inpcb *,
-    struct port_info *);
+    struct vi_info *);
 static int free_lctx(struct adapter *, struct listen_ctx *);
 static void hold_lctx(struct listen_ctx *);
 static void listen_hash_add(struct adapter *, struct listen_ctx *);
@@ -80,7 +80,7 @@ static struct listen_ctx *listen_hash_find(struct adapter *, struct inpcb *);
 static struct listen_ctx *listen_hash_del(struct adapter *, struct inpcb *);
 static struct inpcb *release_lctx(struct adapter *, struct listen_ctx *);
 
-static inline void save_qids_in_mbuf(struct mbuf *, struct port_info *);
+static inline void save_qids_in_mbuf(struct mbuf *, struct vi_info *);
 static inline void get_qids_from_mbuf(struct mbuf *m, int *, int *);
 static void send_reset_synqe(struct toedev *, struct synq_entry *);
 
@@ -187,7 +187,7 @@ free_stid(struct adapter *sc, struct listen_ctx *lctx)
 }
 
 static struct listen_ctx *
-alloc_lctx(struct adapter *sc, struct inpcb *inp, struct port_info *pi)
+alloc_lctx(struct adapter *sc, struct inpcb *inp, struct vi_info *vi)
 {
 	struct listen_ctx *lctx;
 
@@ -214,8 +214,8 @@ alloc_lctx(struct adapter *sc, struct inpcb *inp, struct port_info *pi)
 		}
 	}
 
-	lctx->ctrlq = &sc->sge.ctrlq[pi->port_id];
-	lctx->ofld_rxq = &sc->sge.ofld_rxq[pi->first_ofld_rxq];
+	lctx->ctrlq = &sc->sge.ctrlq[vi->pi->port_id];
+	lctx->ofld_rxq = &sc->sge.ofld_rxq[vi->first_ofld_rxq];
 	refcount_init(&lctx->refcount, 1);
 	TAILQ_INIT(&lctx->synq);
 
@@ -346,7 +346,8 @@ send_reset_synqe(struct toedev *tod, struct synq_entry *synqe)
 	struct adapter *sc = tod->tod_softc;
 	struct mbuf *m = synqe->syn;
 	struct ifnet *ifp = m->m_pkthdr.rcvif;
-	struct port_info *pi = ifp->if_softc;
+	struct vi_info *vi = ifp->if_softc;
+	struct port_info *pi = vi->pi;
 	struct l2t_entry *e = &sc->l2t->l2tab[synqe->l2e_idx];
 	struct wrqe *wr;
 	struct fw_flowc_wr *flowc;
@@ -355,7 +356,7 @@ send_reset_synqe(struct toedev *tod, struct synq_entry *synqe)
 	struct sge_wrq *ofld_txq;
 	struct sge_ofld_rxq *ofld_rxq;
 	const int nparams = 6;
-	unsigned int pfvf = G_FW_VIID_PFN(pi->viid) << S_FW_VIID_PFN;
+	unsigned int pfvf = G_FW_VIID_PFN(vi->viid) << S_FW_VIID_PFN;
 
 	INP_WLOCK_ASSERT(synqe->lctx->inp);
 
@@ -502,6 +503,7 @@ int
 t4_listen_start(struct toedev *tod, struct tcpcb *tp)
 {
 	struct adapter *sc = tod->tod_softc;
+	struct vi_info *vi;
 	struct port_info *pi;
 	struct inpcb *inp = tp->t_inpcb;
 	struct listen_ctx *lctx;
@@ -527,9 +529,6 @@ t4_listen_start(struct toedev *tod, struct tcpcb *tp)
 	    ("%s: TOM not initialized", __func__));
 #endif
 
-	if ((sc->open_device_map & sc->offload_map) == 0)
-		goto done;	/* no port that's UP with IFCAP_TOE enabled */
-
 	/*
 	 * Find a running port with IFCAP_TOE (4 or 6).  We'll use the first
 	 * such port's queues to send the passive open and receive the reply to
@@ -538,20 +537,23 @@ t4_listen_start(struct toedev *tod, struct tcpcb *tp)
 	 * XXX: need a way to mark a port in use by offload.  if_cxgbe should
 	 * then reject any attempt to bring down such a port (and maybe reject
 	 * attempts to disable IFCAP_TOE on that port too?).
+	 *
+	 * XXX: I think this should be for_each_vi().
 	 */
 	for_each_port(sc, i) {
-		if (isset(&sc->open_device_map, i) &&
-		    sc->port[i]->ifp->if_capenable & IFCAP_TOE)
+		if (sc->port[i]->vi.ifp->if_drv_flags & IFF_DRV_RUNNING &&
+		    sc->port[i]->vi.ifp->if_capenable & IFCAP_TOE)
 				break;
 	}
-	KASSERT(i < sc->params.nports,
-	    ("%s: no running port with TOE capability enabled.", __func__));
+	if (i == sc->params.nports)
+		goto done;	/* no port that's UP with IFCAP_TOE enabled */
 	pi = sc->port[i];
+	vi = &pi->vi;
 
 	if (listen_hash_find(sc, inp) != NULL)
 		goto done;	/* already setup */
 
-	lctx = alloc_lctx(sc, inp, pi);
+	lctx = alloc_lctx(sc, inp, vi);
 	if (lctx == NULL) {
 		log(LOG_ERR,
 		    "%s: listen request ignored, %s couldn't allocate lctx\n",
@@ -822,7 +824,7 @@ done_with_synqe(struct adapter *sc, struct synq_entry *synqe)
 {
 	struct listen_ctx *lctx = synqe->lctx;
 	struct inpcb *inp = lctx->inp;
-	struct port_info *pi = synqe->syn->m_pkthdr.rcvif->if_softc;
+	struct vi_info *vi = synqe->syn->m_pkthdr.rcvif->if_softc;
 	struct l2t_entry *e = &sc->l2t->l2tab[synqe->l2e_idx];
 
 	INP_WLOCK_ASSERT(inp);
@@ -832,7 +834,7 @@ done_with_synqe(struct adapter *sc, struct synq_entry *synqe)
 	if (inp)
 		INP_WUNLOCK(inp);
 	remove_tid(sc, synqe->tid);
-	release_tid(sc, synqe->tid, &sc->sge.ctrlq[pi->port_id]);
+	release_tid(sc, synqe->tid, &sc->sge.ctrlq[vi->pi->port_id]);
 	t4_l2t_release(e);
 	release_synqe(synqe);	/* removed from synq list */
 }
@@ -943,12 +945,12 @@ t4_offload_socket(struct toedev *tod, void *arg, struct socket *so)
 }
 
 static inline void
-save_qids_in_mbuf(struct mbuf *m, struct port_info *pi)
+save_qids_in_mbuf(struct mbuf *m, struct vi_info *vi)
 {
 	uint32_t txqid, rxqid;
 
-	txqid = (arc4random() % pi->nofldtxq) + pi->first_ofld_txq;
-	rxqid = (arc4random() % pi->nofldrxq) + pi->first_ofld_rxq;
+	txqid = (arc4random() % vi->nofldtxq) + vi->first_ofld_txq;
+	rxqid = (arc4random() % vi->nofldrxq) + vi->first_ofld_rxq;
 
 	m->m_pkthdr.flowid = (txqid << 16) | (rxqid & 0xffff);
 }
@@ -1224,6 +1226,7 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 	struct tcphdr th;
 	struct tcpopt to;
 	struct port_info *pi;
+	struct vi_info *vi;
 	struct ifnet *hw_ifp, *ifp;
 	struct l2t_entry *e = NULL;
 	int rscale, mtu_idx, rx_credits, rxqid, ulp_mode;
@@ -1245,7 +1248,10 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 	t4opt_to_tcpopt(&cpl->tcpopt, &to);
 
 	pi = sc->port[G_SYN_INTF(be16toh(cpl->l2info))];
-	hw_ifp = pi->ifp;	/* the cxgbeX ifnet */
+
+	/* XXX: I'm sure this isn't right. */
+	vi = &pi->vi;
+	hw_ifp = vi->ifp;	/* the cxgbeX ifnet */
 	m->m_pkthdr.rcvif = hw_ifp;
 	tod = TOEDEV(hw_ifp);
 
@@ -1344,7 +1350,7 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 	rx_credits = min(select_rcv_wnd(so) >> 10, M_RCV_BUFSIZ);
 	SOCKBUF_UNLOCK(&so->so_rcv);
 
-	save_qids_in_mbuf(m, pi);
+	save_qids_in_mbuf(m, vi);
 	get_qids_from_mbuf(m, NULL, &rxqid);
 
 	if (is_t4(sc))
@@ -1359,7 +1365,7 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 		synqe->flags |= TPF_SYNQE_TCPDDP;
 	} else
 		ulp_mode = ULP_MODE_NONE;
-	rpl->opt0 = calc_opt0(so, pi, e, mtu_idx, rscale, rx_credits, ulp_mode);
+	rpl->opt0 = calc_opt0(so, vi, e, mtu_idx, rscale, rx_credits, ulp_mode);
 	rpl->opt2 = calc_opt2p(sc, pi, rxqid, &cpl->tcpopt, &th, ulp_mode);
 
 	synqe->tid = tid;
@@ -1484,7 +1490,7 @@ do_pass_establish(struct sge_iq *iq, const struct rss_header *rss,
     struct mbuf *m)
 {
 	struct adapter *sc = iq->adapter;
-	struct port_info *pi;
+	struct vi_info *vi;
 	struct ifnet *ifp;
 	const struct cpl_pass_establish *cpl = (const void *)(rss + 1);
 #if defined(KTR) || defined(INVARIANTS)
@@ -1532,7 +1538,7 @@ do_pass_establish(struct sge_iq *iq, const struct rss_header *rss,
 	}
 
 	ifp = synqe->syn->m_pkthdr.rcvif;
-	pi = ifp->if_softc;
+	vi = ifp->if_softc;
 	KASSERT(pi->adapter == sc,
 	    ("%s: pi %p, sc %p mismatch", __func__, pi, sc));
 
@@ -1541,7 +1547,7 @@ do_pass_establish(struct sge_iq *iq, const struct rss_header *rss,
 	    ("%s: CPL arrived on unexpected rxq.  %d %d", __func__, rxqid,
 	    (int)(iq_to_ofld_rxq(iq) - &sc->sge.ofld_rxq[0])));
 
-	toep = alloc_toepcb(pi, txqid, rxqid, M_NOWAIT);
+	toep = alloc_toepcb(vi, txqid, rxqid, M_NOWAIT);
 	if (toep == NULL) {
 reset:
 		/*
