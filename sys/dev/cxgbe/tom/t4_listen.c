@@ -1539,8 +1539,8 @@ do_pass_establish(struct sge_iq *iq, const struct rss_header *rss,
 
 	ifp = synqe->syn->m_pkthdr.rcvif;
 	vi = ifp->if_softc;
-	KASSERT(pi->adapter == sc,
-	    ("%s: pi %p, sc %p mismatch", __func__, pi, sc));
+	KASSERT(vi->pi->adapter == sc,
+	    ("%s: vi %p, sc %p mismatch", __func__, vi, sc));
 
 	get_qids_from_mbuf(synqe->syn, &txqid, &rxqid);
 	KASSERT(rxqid == iq_to_ofld_rxq(iq) - &sc->sge.ofld_rxq[0],
