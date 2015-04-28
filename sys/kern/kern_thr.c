@@ -253,6 +253,8 @@ thread_create(struct thread *td, struct rtprio *rtp,
 	thread_unlock(td);
 	if (P_SHOULDSTOP(p))
 		newtd->td_flags |= TDF_ASTPENDING | TDF_NEEDSUSPCHK;
+	if (p->p_flag2 & P2_LWP_EVENTS)
+		newtd->td_dbgflags |= TDB_BORN;
 
 	/*
 	 * Copy the existing thread VM policy into the new thread.
@@ -324,6 +326,9 @@ kern_thr_exit(struct thread *td)
 
 	rw_wlock(&tidhash_lock);
 	PROC_LOCK(p);
+	td->td_dbgflags |= TDB_EXIT;
+	if (p->p_flag & P_TRACED && p->p_flag2 & P2_LWP_EVENTS)
+		ptracestop(td, SIGTRAP);
 
 	if (p->p_numthreads != 1) {
 		racct_sub(p, RACCT_NTHR, 1);

@@ -207,7 +207,8 @@ syscallret(struct thread *td, int error, struct syscall_args *sa)
 	 * is not the case, this code will need to be revisited.
 	 */
 	STOPEVENT(p, S_SCX, sa->code);
-	if (traced || (td->td_dbgflags & (TDB_EXEC | TDB_FORK)) != 0) {
+	if (traced ||
+	    (td->td_dbgflags & (TDB_EXEC | TDB_FORK | TDB_BORN)) != 0) {
 		PROC_LOCK(p);
 		/*
 		 * If tracing the execed process, trap to the debugger
@@ -216,10 +217,10 @@ syscallret(struct thread *td, int error, struct syscall_args *sa)
 		 * returns, do it now too.
 		 */
 		if (traced &&
-		    ((td->td_dbgflags & (TDB_FORK | TDB_EXEC)) != 0 ||
+		    ((td->td_dbgflags & (TDB_EXEC | TDB_FORK | TDB_BORN)) != 0 ||
 		    (p->p_stops & S_PT_SCX) != 0))
 			ptracestop(td, SIGTRAP);
-		td->td_dbgflags &= ~(TDB_SCX | TDB_EXEC | TDB_FORK);
+		td->td_dbgflags &= ~(TDB_SCX | TDB_EXEC | TDB_FORK | TDB_BORN);
 		PROC_UNLOCK(p);
 	}
 
