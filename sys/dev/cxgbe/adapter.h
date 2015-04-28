@@ -204,15 +204,15 @@ enum {
 	PORT_SYSCTL_CTX	= (1 << 2),
 #endif
 	HAS_TRACEQ	= (1 << 3),
-	INTR_RXQ	= (1 << 4),	/* All NIC rxq's take interrupts */
-	INTR_OFLD_RXQ	= (1 << 5),	/* All TOE rxq's take interrupts */
-	INTR_NM_RXQ	= (1 << 6),	/* All netmap rxq's take interrupts */
-	INTR_ALL	= (INTR_RXQ | INTR_OFLD_RXQ | INTR_NM_RXQ),
 
 	/* VI flags */
 	VI_INIT_DONE	= (1 << 1),
 	VI_SYSCTL_CTX	= (1 << 2),
-	/* XXX: I think the RXQ and OFLD_RXQ flags should be per-VI as well */
+	INTR_RXQ	= (1 << 4),	/* All NIC rxq's take interrupts */
+	INTR_OFLD_RXQ	= (1 << 5),	/* All TOE rxq's take interrupts */
+	INTR_ALL	= (INTR_RXQ | INTR_OFLD_RXQ),
+	VI_NETMAP	= (1 << 6),
+	/* XXX: Do we need a flag for "is main VI"? */
 };
 
 #define IS_DOOMED(pi)	((pi)->flags & DOOMED)
@@ -261,18 +261,13 @@ struct vi_info {
 	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
 };
 
-struct extra_vi {
-	struct vi_info vi;
-
-	int index;
-};
-
 struct port_info {
 	device_t dev;
 	struct adapter *adapter;
 
-	/* XXX: Eventually move this. */
-	struct vi_info vi;
+	struct vi_info *vi;
+	int nvi;
+	int up_vis;
 
 	struct mtx pi_lock;
 	char lockname[16];
@@ -286,20 +281,6 @@ struct port_info {
 	uint8_t  tx_chan;
 	uint8_t  rx_chan_map;	/* rx MPS channel bitmap */
 
-#ifdef DEV_NETMAP
-	/* XXX: This should become an extra vi_info */
-	int nnmtxq;		/* # of netmap tx queues */
-	int first_nm_txq;	/* index of first netmap tx queue */
-	int nnmrxq;		/* # of netmap rx queues */
-	int first_nm_rxq;	/* index of first netmap rx queue */
-
-	struct ifnet *nm_ifp;
-	struct ifmedia nm_media;
-	int nmif_flags;
-	uint16_t nm_viid;
-	int16_t nm_xact_addr_filt;
-	uint16_t nm_rss_size;	/* size of netmap VI's RSS table slice */
-#endif
 	int linkdnrc;
 	struct link_config link_cfg;
 
@@ -309,8 +290,6 @@ struct port_info {
 	u_int tx_parse_error;
 
 	struct callout tick;
-
-	int up_vis;
 };
 
 /* Where the cluster came from, how it has been carved up. */
@@ -889,12 +868,14 @@ struct adapter {
 #define for_each_ofld_rxq(vi, iter, q) \
 	for (q = &vi->pi->adapter->sge.ofld_rxq[vi->first_ofld_rxq], iter = 0; \
 	    iter < vi->nofldrxq; ++iter, ++q)
-#define for_each_nm_txq(pi, iter, q) \
-	for (q = &pi->adapter->sge.nm_txq[pi->first_nm_txq], iter = 0; \
-	    iter < pi->nnmtxq; ++iter, ++q)
-#define for_each_nm_rxq(pi, iter, q) \
-	for (q = &pi->adapter->sge.nm_rxq[pi->first_nm_rxq], iter = 0; \
-	    iter < pi->nnmrxq; ++iter, ++q)
+#define for_each_nm_txq(vi, iter, q) \
+	for (q = &vi->pi->adapter->sge.nm_txq[vi->first_txq], iter = 0; \
+	    iter < vi->ntxq; ++iter, ++q)
+#define for_each_nm_rxq(vi, iter, q) \
+	for (q = &vi->pi->adapter->sge.nm_rxq[pi->first_rxq], iter = 0; \
+	    iter < pi->nrxq; ++iter, ++q)
+#define	for_each_vi(pi, iter, vi) \
+	for (vi = pi->vi, iter = 0; iter < pi->nvi; ++iter, ++vi)
 
 #define IDXINCR(idx, incr, wrap) do { \
 	idx = wrap - idx > incr ? idx + incr : incr - (wrap - idx); \
@@ -986,7 +967,7 @@ static inline void
 t4_os_set_hw_addr(struct adapter *sc, int idx, uint8_t hw_addr[])
 {
 
-	bcopy(hw_addr, sc->port[idx]->vi.hw_addr, ETHER_ADDR_LEN);
+	bcopy(hw_addr, sc->port[idx]->vi[0].hw_addr, ETHER_ADDR_LEN);
 }
 
 static inline bool

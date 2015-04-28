@@ -115,7 +115,7 @@ static device_method_t vcxgbe_methods[] = {
 static driver_t vcxgbe_driver = {
 	"vcxgbe",
 	vcxgbe_methods,
-	sizeof(struct extra_vi)
+	sizeof(struct vi_info)
 };
 
 static d_ioctl_t t4_ioctl;
@@ -392,7 +392,7 @@ static int validate_mt_off_len(struct adapter *, int, uint32_t, int,
     uint32_t *);
 static void memwin_info(struct adapter *, int, uint32_t *, uint32_t *);
 static uint32_t position_memwin(struct adapter *, int, uint32_t);
-static int cfg_itype_and_nqueues(struct adapter *, int, int,
+static int cfg_itype_and_nqueues(struct adapter *, int, int, int,
     struct intrs_and_queues *);
 static int prep_firmware(struct adapter *);
 static int partition_resources(struct adapter *, const struct firmware *,
@@ -599,7 +599,7 @@ static int
 t4_attach(device_t dev)
 {
 	struct adapter *sc;
-	int rc = 0, i, n10g, n1g, rqidx, tqidx;
+	int rc = 0, i, j, n10g, n1g, rqidx, tqidx;
 	struct intrs_and_queues iaq;
 	struct sge *s;
 #ifdef TCP_OFFLOAD
@@ -608,6 +608,7 @@ t4_attach(device_t dev)
 #ifdef DEV_NETMAP
 	int nm_rqidx, nm_tqidx;
 #endif
+	int num_vis;
 	const char *pcie_ts;
 
 	sc = device_get_softc(dev);
@@ -724,6 +725,20 @@ t4_attach(device_t dev)
 		goto done; /* error message displayed already */
 
 	/*
+	 * Number of VIs to create per-port.  The first VI is the
+	 * "main" regular VI for the port.  The second VI is used for
+	 * netmap if present, and any remaining VIs are used for
+	 * additional virtual interfaces.
+	 */
+	if (t4_num_vis >= 1)
+		num_vis = t4_num_vis;
+	else
+		num_vis = 1;
+#ifdef DEV_NETMAP
+	num_vis++;
+#endif
+
+	/*
 	 * First pass over all the ports - allocate VIs and initialize some
 	 * basic parameters like mac address, port type, etc.  We also figure
 	 * out whether a port is 10G or 1G and use that information when
@@ -732,6 +747,7 @@ t4_attach(device_t dev)
 	n10g = n1g = 0;
 	for_each_port(sc, i) {
 		struct port_info *pi;
+		struct vi_info *vi;
 
 		pi = malloc(sizeof(*pi), M_CXGBE, M_ZERO | M_WAITOK);
 		sc->port[i] = pi;
@@ -739,12 +755,19 @@ t4_attach(device_t dev)
 		/* These must be set before t4_port_init */
 		pi->adapter = sc;
 		pi->port_id = i;
+		pi->nvi = num_vis;
+		pi->vi = malloc(sizeof(struct vi_info) * num_vis, M_CXGBE,
+		    M_ZERO | M_WAITOK);
 
-		/* Allocate the vi and initialize parameters like mac addr */
+		/*
+		 * Allocate the "main" VI and initialize parameters
+		 * like mac addr.
+		 */
 		rc = -t4_port_init(pi, sc->mbox, sc->pf, 0);
 		if (rc != 0) {
 			device_printf(dev, "unable to initialize port %d: %d\n",
 			    i, rc);
+			free(pi->vi, M_CXGBE);
 			free(pi, M_CXGBE);
 			sc->port[i] = NULL;
 			goto done;
@@ -758,6 +781,7 @@ t4_attach(device_t dev)
 		rc = -t4_link_start(sc, sc->mbox, pi->tx_chan, &pi->link_cfg);
 		if (rc != 0) {
 			device_printf(dev, "port %d l1cfg failed: %d\n", i, rc);
+			free(pi->vi, M_CXGBE);
 			free(pi, M_CXGBE);
 			sc->port[i] = NULL;
 			goto done;
@@ -770,19 +794,25 @@ t4_attach(device_t dev)
 
 		if (is_10G_port(pi) || is_40G_port(pi)) {
 			n10g++;
-			pi->vi.tmr_idx = t4_tmr_idx_10g;
-			pi->vi.pktc_idx = t4_pktc_idx_10g;
+			for_each_vi(pi, j, vi) {
+				vi->tmr_idx = t4_tmr_idx_10g;
+				vi->pktc_idx = t4_pktc_idx_10g;
+			}
 		} else {
 			n1g++;
-			pi->vi.tmr_idx = t4_tmr_idx_1g;
-			pi->vi.pktc_idx = t4_pktc_idx_1g;
+			for_each_vi(pi, j, vi) {
+				vi->tmr_idx = t4_tmr_idx_1g;
+				vi->pktc_idx = t4_pktc_idx_1g;
+			}
 		}
 
 		pi->linkdnrc = -1;
 
-		pi->vi.qsize_rxq = t4_qsize_rxq;
-		pi->vi.qsize_txq = t4_qsize_txq;
-		pi->vi.pi = pi;
+		for_each_vi(pi, j, vi) {
+			vi->qsize_rxq = t4_qsize_rxq;
+			vi->qsize_txq = t4_qsize_txq;
+			vi->pi = pi;
+		}
 
 		pi->dev = device_add_child(dev, is_t4(sc) ? "cxgbe" : "cxl", -1);
 		if (pi->dev == NULL) {
@@ -791,14 +821,17 @@ t4_attach(device_t dev)
 			rc = ENXIO;
 			goto done;
 		}
-		pi->vi.dev = dev;
+		pi->vi[0].dev = dev;
 		device_set_softc(pi->dev, pi);
 	}
 
 	/*
 	 * Interrupt type, # of interrupts, # of rx/tx queues, etc.
 	 */
-	rc = cfg_itype_and_nqueues(sc, n10g, n1g, &iaq);
+#ifdef DEV_NETMAP
+	num_vis--;
+#endif
+	rc = cfg_itype_and_nqueues(sc, n10g, n1g, num_vis, &iaq);
 	if (rc != 0)
 		goto done; /* error message displayed already */
 
@@ -865,56 +898,73 @@ t4_attach(device_t dev)
 #endif
 	for_each_port(sc, i) {
 		struct port_info *pi = sc->port[i];
+		struct vi_info *vi;
 
 		if (pi == NULL)
 			continue;
 
-		pi->vi.first_rxq = rqidx;
-		pi->vi.first_txq = tqidx;
-		if (is_10G_port(pi) || is_40G_port(pi)) {
-			pi->flags |= iaq.intr_flags_10g;
-			pi->vi.nrxq = iaq.nrxq10g;
-			pi->vi.ntxq = iaq.ntxq10g;
-		} else {
-			pi->flags |= iaq.intr_flags_1g;
-			pi->vi.nrxq = iaq.nrxq1g;
-			pi->vi.ntxq = iaq.ntxq1g;
-		}
-
-		if (pi->vi.ntxq > 1)
-			pi->vi.rsrv_noflowq = iaq.rsrv_noflowq ? 1 : 0;
-		else
-			pi->vi.rsrv_noflowq = 0;
-
-		rqidx += pi->vi.nrxq;
-		tqidx += pi->vi.ntxq;
-#ifdef TCP_OFFLOAD
-		if (is_offload(sc)) {
-			pi->vi.first_ofld_rxq = ofld_rqidx;
-			pi->vi.first_ofld_txq = ofld_tqidx;
-			if (is_10G_port(pi) || is_40G_port(pi)) {
-				pi->vi.nofldrxq = iaq.nofldrxq10g;
-				pi->vi.nofldtxq = iaq.nofldtxq10g;
-			} else {
-				pi->vi.nofldrxq = iaq.nofldrxq1g;
-				pi->vi.nofldtxq = iaq.nofldtxq1g;
-			}
-			ofld_rqidx += pi->vi.nofldrxq;
-			ofld_tqidx += pi->vi.nofldtxq;
-		}
-#endif
+		for_each_vi(pi, j, vi) {
 #ifdef DEV_NETMAP
-		pi->first_nm_rxq = nm_rqidx;
-		pi->first_nm_txq = nm_tqidx;
-		if (is_10G_port(pi) || is_40G_port(pi)) {
-			pi->nnmrxq = iaq.nnmrxq10g;
-			pi->nnmtxq = iaq.nnmtxq10g;
-		} else {
-			pi->nnmrxq = iaq.nnmrxq1g;
-			pi->nnmtxq = iaq.nnmtxq1g;
+			if (j == 1)
+				/* Netmap is handled below. */
+				continue;
+#endif
+			
+			vi->first_rxq = rqidx;
+			vi->first_txq = tqidx;
+			if (is_10G_port(pi) || is_40G_port(pi)) {
+				vi->flags |= iaq.intr_flags_10g & INTR_RXQ;
+				vi->nrxq = iaq.nrxq10g;
+				vi->ntxq = iaq.ntxq10g;
+			} else {
+				vi->flags |= iaq.intr_flags_1g & INTR_RXQ;
+				vi->nrxq = iaq.nrxq1g;
+				vi->ntxq = iaq.ntxq1g;
+			}
+
+			if (vi->ntxq > 1)
+				vi->rsrv_noflowq = iaq.rsrv_noflowq ? 1 : 0;
+			else
+				vi->rsrv_noflowq = 0;
+
+			rqidx += vi->nrxq;
+			tqidx += vi->ntxq;
+
+#ifdef TCP_OFFLOAD
+			/* Offload is only enabled on the first VI. */
+			if (j != 0 || !is_offload(sc))
+				continue;
+			vi->first_ofld_rxq = ofld_rqidx;
+			vi->first_ofld_txq = ofld_tqidx;
+			if (is_10G_port(pi) || is_40G_port(pi)) {
+				vi->flags |= iaq.intr_flags_10g &
+				    INTR_OFLD_RXQ;
+				vi->nofldrxq = iaq.nofldrxq10g;
+				vi->nofldtxq = iaq.nofldtxq10g;
+			} else {
+				vi->flags |= iaq.intr_flags_1g &
+				    INTR_OFLD_RXQ;
+				vi->nofldrxq = iaq.nofldrxq1g;
+				vi->nofldtxq = iaq.nofldtxq1g;
+			}
+			ofld_rqidx += vi->nofldrxq;
+			ofld_tqidx += vi->nofldtxq;
+#endif
 		}
-		nm_rqidx += pi->nnmrxq;
-		nm_tqidx += pi->nnmtxq;
+#ifdef DEV_NETMAP
+		vi = &pi->vi[1];
+		vi->flags |= VI_NETMAP;
+		vi->first_rxq = nm_rqidx;
+		vi->first_txq = nm_tqidx;
+		if (is_10G_port(pi) || is_40G_port(pi)) {
+			vi->nrxq = iaq.nnmrxq10g;
+			vi->ntxq = iaq.nnmtxq10g;
+		} else {
+			vi->nrxq = iaq.nnmrxq1g;
+			vi->ntxq = iaq.nnmtxq1g;
+		}
+		nm_rqidx += vi->nrxq;
+		nm_tqidx += vi->ntxq;
 #endif
 	}
 
@@ -1005,11 +1055,12 @@ t4_detach(device_t dev)
 	for (i = 0; i < MAX_NPORTS; i++) {
 		pi = sc->port[i];
 		if (pi) {
-			t4_free_vi(sc, sc->mbox, sc->pf, 0, pi->vi.viid);
+			t4_free_vi(sc, sc->mbox, sc->pf, 0, pi->vi[0].viid);
 			if (pi->dev)
 				device_delete_child(dev, pi->dev);
 
 			mtx_destroy(&pi->pi_lock);
+			free(pi->vi, M_CXGBE);
 			free(pi, M_CXGBE);
 		}
 	}
@@ -1121,8 +1172,7 @@ cxgbe_viattach(device_t dev, struct vi_info *vi)
 
 	ifp->if_capabilities = T4_CAP;
 #ifdef TCP_OFFLOAD
-	/* XXX: Hack to only enable TOE on first VI. */
-	if (is_offload(vi->pi->adapter) && vi == &vi->pi->vi)
+	if (vi->nofldrxq != 0)
 		ifp->if_capabilities |= IFCAP_TOE;
 #endif
 	ifp->if_capenable = T4_CAP_ENABLE;
@@ -1133,7 +1183,7 @@ cxgbe_viattach(device_t dev, struct vi_info *vi)
 	ifp->if_hw_tsomaxsegcount = TX_SGL_SEGS;
 	ifp->if_hw_tsomaxsegsize = 65536;
 
-	/* Initialize ifmedia for this port */
+	/* Initialize ifmedia for this VI */
 	ifmedia_init(&vi->media, IFM_IMASK, cxgbe_media_change,
 	    cxgbe_media_status);
 	build_medialist(vi->pi, &vi->media);
@@ -1144,16 +1194,12 @@ cxgbe_viattach(device_t dev, struct vi_info *vi)
 	ether_ifattach(ifp, vi->hw_addr);
 
 	sb = sbuf_new_auto();
-	sbuf_printf(sb, "%d txq, %d rxq (NIC)", vi->ntxq, vi->nrxq);
+	sbuf_printf(sb, "%d txq, %d rxq (%s)", vi->ntxq, vi->nrxq,
+	    vi->flags & VI_NETMAP ? "netmap" : "NIC");
 #ifdef TCP_OFFLOAD
 	if (ifp->if_capabilities & IFCAP_TOE)
 		sbuf_printf(sb, "; %d txq, %d rxq (TOE)",
 		    vi->nofldtxq, vi->nofldrxq);
-#endif
-#ifdef DEV_NETMAP
-	if (vi == &vi->pi->vi)
-		sbuf_printf(sb, "; %d txq, %d rxq (netmap)", vi->pi->nnmtxq,
-		    vi->pi->nnmrxq);
 #endif
 	sbuf_finish(sb);
 	device_printf(dev, "%s\n", sbuf_data(sb));
@@ -1170,24 +1216,47 @@ static int
 cxgbe_attach(device_t dev)
 {
 	struct port_info *pi = device_get_softc(dev);
-	int error;
+	struct vi_info *vi;
+	int error, i;
 
 	callout_init_mtx(&pi->tick, &pi->pi_lock, 0);
 
-	error = cxgbe_viattach(dev, &pi->vi);
+	error = cxgbe_viattach(dev, &pi->vi[0]);
 	if (error)
 		return (error);
 
-	/* XXX: Create extra VIs */
-	
+	for_each_vi(pi, i, vi) {
+		if (i == 0)
+			continue;
 #ifdef DEV_NETMAP
-	/* nm_media handled here to keep implementation private to this file */
-	ifmedia_init(&pi->nm_media, IFM_IMASK, cxgbe_media_change,
-	    cxgbe_media_status);
-	build_medialist(pi, &pi->nm_media);
-	create_netmap_ifnet(pi);	/* logs errors it something fails */
+		if (i == 1) {
+			/*
+			 * nm_media handled here to keep
+			 * implementation private to this file
+			 */
+			ifmedia_init(&vi->media, IFM_IMASK, cxgbe_media_change,
+			    cxgbe_media_status);
+			build_medialist(pi, &vi->media);
+			vi->dev = device_add_child(dev, is_t4(pi->adapter) ?
+			    "ncxgbe" : "ncxl", device_get_unit(dev));
+#if 0
+			/* This needs to move into a ncxgbe_attach. */
+			create_netmap_ifnet(pi);
 #endif
+		} else
+#endif
+			vi->dev = device_add_child(dev, is_t4(pi->adapter) ?
+			    "vcxgbe" : "vcxl", -1);
+		if (vi->dev == NULL) {
+			device_printf(dev, "failed to add VI %d\n", i);
+			continue;
+		}
+		device_set_softc(vi->dev, vi);
+	}
+		
 	cxgbe_sysctls(pi);
+
+	bus_generic_attach(dev);
 
 	return (0);
 }
@@ -1215,7 +1284,15 @@ cxgbe_detach(device_t dev)
 {
 	struct port_info *pi = device_get_softc(dev);
 	struct adapter *sc = pi->adapter;
+	int error;
 
+	/* Detach the extra VIs first. */
+	error = bus_generic_detach(dev);
+	if (error)
+		return (error);
+	device_delete_children(dev);
+
+	/* XXX: We could make DOOMED a VI flag and move this to videtach. */
 	/* Tell if_ioctl and if_init that the port is going away */
 	ADAPTER_LOCK(sc);
 	SET_DOOMED(pi);
@@ -1239,11 +1316,14 @@ cxgbe_detach(device_t dev)
 	PORT_UNLOCK(pi);
 	callout_drain(&pi->tick);
 
-	cxgbe_videtach(&pi->vi);
+	cxgbe_videtach(&pi->vi[0]);
 
 #ifdef DEV_NETMAP
+#if 0
+	/* XXX: This should move to ncxgbe_detach. */
 	/* XXXNM: equivalent of cxgbe_uninit_synchronized to ifdown nm_ifp */
 	destroy_netmap_ifnet(pi);
+#endif
 #endif
 
 	ADAPTER_LOCK(sc);
@@ -1557,7 +1637,7 @@ cxgbe_get_counter(struct ifnet *ifp, ift_counter c)
 	struct port_stats *s = &pi->stats;
 
 	/* XXX: No stats for extra VIs */
-	if (vi != &pi->vi)
+	if (vi != &pi->vi[0])
 		return (if_get_counter_default(ifp, c));
 
 	cxgbe_refresh_stats(sc, pi);
@@ -1675,10 +1755,10 @@ static int
 vcxgbe_probe(device_t dev)
 {
 	char buf[128];
-	struct extra_vi *evi = device_get_softc(dev);
+	struct vi_info *vi = device_get_softc(dev);
 
-	snprintf(buf, sizeof(buf), "port %d vi %d", evi->vi.pi->port_id,
-	    evi->index);
+	snprintf(buf, sizeof(buf), "port %d vi %td", vi->pi->port_id,
+	    vi - vi->pi->vi);
 	device_set_desc_copy(dev, buf);
 
 	return (BUS_PROBE_DEFAULT);
@@ -1693,7 +1773,7 @@ vcxgbe_attach(device_t dev)
 static int
 vcxgbe_detach(device_t dev)
 {
-	return (ENXIO);
+	return (0);
 }
 
 void
@@ -2017,7 +2097,7 @@ position_memwin(struct adapter *sc, int n, uint32_t addr)
 }
 
 static int
-cfg_itype_and_nqueues(struct adapter *sc, int n10g, int n1g,
+cfg_itype_and_nqueues(struct adapter *sc, int n10g, int n1g, int num_vis,
     struct intrs_and_queues *iaq)
 {
 	int rc, itype, navail, nrxq10g, nrxq1g, n;
@@ -2071,8 +2151,9 @@ restart:
 		 * netmap).
 		 */
 		iaq->nirq = T4_EXTRA_INTR;
-		iaq->nirq += n10g * (nrxq10g + nofldrxq10g + nnmrxq10g);
-		iaq->nirq += n1g * (nrxq1g + nofldrxq1g + nnmrxq1g);
+		iaq->nirq += n10g * (nrxq10g * num_vis + nofldrxq10g +
+		    nnmrxq10g);
+		iaq->nirq += n1g * (nrxq1g * num_vis + nofldrxq1g + nnmrxq1g);
 		if (iaq->nirq <= navail &&
 		    (itype != INTR_MSI || powerof2(iaq->nirq))) {
 			iaq->intr_flags_10g = INTR_ALL;
@@ -2092,7 +2173,7 @@ restart:
 		iaq->nirq = T4_EXTRA_INTR;
 		if (nrxq10g >= nofldrxq10g) {
 			iaq->intr_flags_10g = INTR_RXQ;
-			iaq->nirq += n10g * nrxq10g;
+			iaq->nirq += n10g * nrxq10g * num_vis;
 #ifdef DEV_NETMAP
 			iaq->nnmrxq10g = min(nnmrxq10g, nrxq10g);
 #endif
@@ -2105,7 +2186,7 @@ restart:
 		}
 		if (nrxq1g >= nofldrxq1g) {
 			iaq->intr_flags_1g = INTR_RXQ;
-			iaq->nirq += n1g * nrxq1g;
+			iaq->nirq += n1g * nrxq1g * num_vis;
 #ifdef DEV_NETMAP
 			iaq->nnmrxq1g = min(nnmrxq1g, nrxq1g);
 #endif
@@ -2122,12 +2203,12 @@ restart:
 
 		/*
 		 * Next best option: an interrupt vector for errors, one for the
-		 * firmware event queue, and at least one per port.  At this
+		 * firmware event queue, and at least one per VI.  At this
 		 * point we know we'll have to downsize nrxq and/or nofldrxq
 		 * and/or nnmrxq to fit what's available to us.
 		 */
 		iaq->nirq = T4_EXTRA_INTR;
-		iaq->nirq += n10g + n1g;
+		iaq->nirq += (n10g + n1g) * num_vis;
 		if (iaq->nirq <= navail) {
 			int leftover = navail - iaq->nirq;
 

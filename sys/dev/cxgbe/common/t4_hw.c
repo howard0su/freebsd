@@ -5718,11 +5718,11 @@ int __devinit t4_port_init(struct port_info *p, int mbox, int pf, int vf)
 	if (ret < 0)
 		return ret;
 
-	p->vi.viid = ret;
+	p->vi[0].viid = ret;
 	p->tx_chan = j;
 	p->rx_chan_map = get_mps_bg_map(adap, j);
 	p->lport = j;
-	p->vi.rss_size = rss_size;
+	p->vi[0].rss_size = rss_size;
 	t4_os_set_hw_addr(adap, p->port_id, addr);
 
 	ret = ntohl(c.u.info.lstatus_to_modtype);
