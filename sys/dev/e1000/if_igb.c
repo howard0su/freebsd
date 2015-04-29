@@ -1047,7 +1047,7 @@ igb_mq_start_locked(struct ifnet *ifp, struct tx_ring *txr)
 		drbr_advance(ifp, txr->br);
 		enq++;
 		if (next->m_flags & M_MCAST && adapter->vf_ifp)
-			adapter->stats->mptc++;
+			if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
 		ETHER_BPF_MTAP(ifp, next);
 		if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
 			break;
@@ -5550,6 +5550,47 @@ igb_led_func(void *arg, int onoff)
 }
 
 static uint64_t
+igb_get_vf_counter(if_t ifp, ift_counter cnt)
+{
+	struct adapter *adapter;
+	struct e1000_vf_stats *stats;
+#ifndef IGB_LEGACY_TX
+	struct tx_ring *txr;
+	uint64_t rv;
+#endif
+
+	adapter = if_getsoftc(ifp);
+	stats = (struct e1000_vf_stats *)adapter->stats;
+
+	switch (cnt) {
+	case IFCOUNTER_IPACKETS:
+		return (stats->gprc);
+	case IFCOUNTER_OPACKETS:
+		return (stats->gptc);
+	case IFCOUNTER_IBYTES:
+		return (stats->gorc);
+	case IFCOUNTER_OBYTES:
+		return (stats->gotc);
+	case IFCOUNTER_IMCASTS:
+		return (stats->mprc);
+	case IFCOUNTER_IERRORS:
+		return (adapter->dropped_pkts);
+	case IFCOUNTER_OERRORS:
+		return (adapter->watchdog_events);
+#ifndef IGB_LEGACY_TX
+	case IFCOUNTER_OQDROPS:
+		rv = 0;
+		txr = adapter->tx_rings;
+		for (int i = 0; i < adapter->num_queues; i++, txr++)
+			rv += txr->br->br_drops;
+		return (rv);
+#endif
+	default:
+		return (if_get_counter_default(ifp, cnt));
+	}
+}
+
+static uint64_t
 igb_get_counter(if_t ifp, ift_counter cnt)
 {
 	struct adapter *adapter;
@@ -5560,6 +5601,9 @@ igb_get_counter(if_t ifp, ift_counter cnt)
 #endif
 
 	adapter = if_getsoftc(ifp);
+	if (adapter->vf_ifp)
+		return (igb_get_vf_counter(ifp, cnt));
+
 	stats = (struct e1000_hw_stats *)adapter->stats;
 
 	switch (cnt) {
