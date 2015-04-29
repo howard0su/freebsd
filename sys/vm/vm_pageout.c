@@ -913,6 +913,10 @@ SYSCTL_INT(_vm, OID_AUTO, pages_freed_interval,
     CTLFLAG_RW, &vm_pages_freed_interval, 0,
     "How often to check for early pagedaemon wakeup");
 
+static u_int vm_pdearly;
+SYSCTL_UINT(_vm_stats_vm, OID_AUTO, v_pdearly, CTLFLAG_RW, &vm_pdearly, 0,
+    "Early wakeups from pagedaemon");
+
 /*
  *	vm_pageout_scan does the dirty work for the pageout daemon.
  *
@@ -938,8 +942,10 @@ vm_pageout_scan(struct vm_domain *vmd, int pass)
 	++pages_freed;							\
 	if (pages_freed == vm_pages_freed_interval) {			\
 		pages_freed = 0;					\
-		if (vm_paging_early_wakeup())				\
+		if (vm_paging_early_wakeup()) {				\
 			wakeup(&cnt.v_free_count);			\
+			vm_pdearly++;					\
+		}							\
 	}								\
 } while (0)
 	
