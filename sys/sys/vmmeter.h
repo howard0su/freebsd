@@ -164,6 +164,24 @@ vm_page_count_target(void)
 }
 
 /*
+ * XXX: A hack.
+ *
+ * Return TRUE if have made some amount of progress during the
+ * scan and can wake up waiters even though we haven't finished.
+ */
+static __inline
+int
+vm_paging_early_wakeup(void)
+{
+    u_int have, pmin, pmax;
+
+    have = cnt.v_free_count + cnt.v_cache_count;
+    pmax = cnt.v_free_target + cnt.v_cache_min;
+    pmin = cnt.v_free_reserved + cnt.v_cache_min;
+    return (have >= pmax || have >= pmin * 11 / 10);
+}
+
+/*
  * Return the number of pages we need to free-up or cache
  * A positive number indicates that we do not have enough free pages.
  */

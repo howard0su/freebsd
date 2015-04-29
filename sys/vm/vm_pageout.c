@@ -908,6 +908,11 @@ vm_pageout_map_deactivate_pages(map, desired)
 }
 #endif		/* !defined(NO_SWAPPING) */
 
+static int vm_pages_freed_interval = 16;
+SYSCTL_INT(_vm, OID_AUTO, pages_freed_interval,
+    CTLFLAG_RW, &vm_pages_freed_interval, 0,
+    "How often to check for early pagedaemon wakeup");
+
 /*
  *	vm_pageout_scan does the dirty work for the pageout daemon.
  *
@@ -926,7 +931,18 @@ vm_pageout_scan(struct vm_domain *vmd, int pass)
 	int maxlaunder;
 	int lockmode;
 	boolean_t queues_locked;
+	int pages_freed;
 
+	pages_freed = 0;
+#define FREE_PAGE do {							\
+	++pages_freed;							\
+	if (pages_freed == vm_pages_freed_interval) {			\
+		pages_freed = 0;					\
+		if (vm_paging_early_wakeup())				\
+			wakeup(&cnt.v_free_count);			\
+	}								\
+} while (0)
+	
 	/*
 	 * If we need to reclaim memory ask kernel caches to return
 	 * some.  We rate limit to avoid thrashing.
@@ -1125,6 +1141,7 @@ vm_pageout_scan(struct vm_domain *vmd, int pass)
 			vm_page_free(m);
 			PCPU_INC(cnt.v_dfree);
 			--page_shortage;
+			FREE_PAGE;
 		} else if (m->dirty == 0) {
 			/*
 			 * Clean pages can be placed onto the cache queue.
@@ -1132,6 +1149,7 @@ vm_pageout_scan(struct vm_domain *vmd, int pass)
 			 */
 			vm_page_cache(m);
 			--page_shortage;
+			FREE_PAGE;
 		} else if ((m->flags & PG_WINATCFLS) == 0 && pass < 2) {
 			/*
 			 * Dirty pages need to be paged out, but flushing
@@ -1291,6 +1309,7 @@ vm_pageout_scan(struct vm_domain *vmd, int pass)
 			if (vm_pageout_clean(m) != 0) {
 				--page_shortage;
 				--maxlaunder;
+				FREE_PAGE;
 			}
 unlock_and_continue:
 			vm_page_lock_assert(m, MA_NOTOWNED);
