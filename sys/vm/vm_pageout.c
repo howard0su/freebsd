@@ -729,6 +729,11 @@ vm_pageout_map_deactivate_pages(map, desired)
 }
 #endif		/* !defined(NO_SWAPPING) */
 
+static int vm_pages_freed_interval = 16;
+SYSCTL_INT(_vm, OID_AUTO, pages_freed_interval,
+    CTLFLAG_RW, &vm_pages_freed_interval, 0,
+    "How often to check for early pagedaemon wakeup");
+
 /*
  *	vm_pageout_scan does the dirty work for the pageout daemon.
  */
@@ -743,7 +748,18 @@ vm_pageout_scan(int pass)
 	int actcount;
 	int vnodes_skipped = 0;
 	int maxlaunder;
+	int pages_freed;
 
+	pages_freed = 0;
+#define FREE_PAGE do {							\
+	++pages_freed;							\
+	if (pages_freed == vm_pages_freed_interval) {			\
+		pages_freed = 0;					\
+		if (vm_paging_early_wakeup())				\
+			wakeup(&cnt.v_free_count);			\
+	}								\
+} while (0)
+	
 	/*
 	 * Decrease registered cache sizes.
 	 */
@@ -926,6 +942,7 @@ rescan0:
 			vm_page_free(m);
 			cnt.v_dfree++;
 			--page_shortage;
+			FREE_PAGE;
 		} else if (m->dirty == 0) {
 			/*
 			 * Clean pages can be placed onto the cache queue.
@@ -933,6 +950,7 @@ rescan0:
 			 */
 			vm_page_cache(m);
 			--page_shortage;
+			FREE_PAGE;
 		} else if ((m->flags & PG_WINATCFLS) == 0 && pass == 0) {
 			/*
 			 * Dirty pages need to be paged out, but flushing
@@ -1097,6 +1115,7 @@ rescan0:
 			if (vm_pageout_clean(m) != 0) {
 				--page_shortage;
 				--maxlaunder;
+				FREE_PAGE;
 			}
 			vm_page_lock_queues();
 unlock_and_continue:
