@@ -914,7 +914,7 @@ SYSCTL_INT(_vm, OID_AUTO, pages_freed_interval,
     "How often to check for early pagedaemon wakeup");
 
 static u_int vm_pdearly;
-SYSCTL_UINT(_vm_stats_vm, OID_AUTO, v_pdearly, CTLFLAG_RW, &vm_pdearly, 0,
+SYSCTL_UINT(_vm_stats_misc, OID_AUTO, v_pdearly, CTLFLAG_RW, &vm_pdearly, 0,
     "Early wakeups from pagedaemon");
 
 /*
