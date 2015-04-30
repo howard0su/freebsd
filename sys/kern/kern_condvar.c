@@ -137,7 +137,7 @@ _cv_wait(struct cv *cvp, struct lock_object *lock)
 			sleepq_lock(cvp);
 	}
 	sleepq_wait(cvp, 0);
-	atomic_sub_int(&cvp->cv_waiters, 1);
+	atomic_subtract_int(&cvp->cv_waiters, 1);
 
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_CSW))
@@ -195,7 +195,7 @@ _cv_wait_unlock(struct cv *cvp, struct lock_object *lock)
 	if (class->lc_flags & LC_SLEEPABLE)
 		sleepq_lock(cvp);
 	sleepq_wait(cvp, 0);
-	atomic_sub_int(&cvp->cv_waiters, 1);
+	atomic_subtract_int(&cvp->cv_waiters, 1);
 
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_CSW))
@@ -258,7 +258,7 @@ _cv_wait_sig(struct cv *cvp, struct lock_object *lock)
 			sleepq_lock(cvp);
 	}
 	rval = sleepq_wait_sig(cvp, 0);
-	atomic_sub_int(&cvp->cv_waiters, 1);
+	atomic_subtract_int(&cvp->cv_waiters, 1);
 
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_CSW))
@@ -326,7 +326,7 @@ _cv_timedwait_sbt(struct cv *cvp, struct lock_object *lock, sbintime_t sbt,
 			sleepq_lock(cvp);
 	}
 	rval = sleepq_timedwait(cvp, 0);
-	atomic_sub_int(&cvp->cv_waiters, 1);
+	atomic_subtract_int(&cvp->cv_waiters, 1);
 
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_CSW))
@@ -397,7 +397,7 @@ _cv_timedwait_sig_sbt(struct cv *cvp, struct lock_object *lock,
 			sleepq_lock(cvp);
 	}
 	rval = sleepq_timedwait_sig(cvp, 0);
-	atomic_sub_int(&cvp->cv_waiters, 1);
+	atomic_subtract_int(&cvp->cv_waiters, 1);
 
 #ifdef KTRACE
 	if (KTRPOINT(td, KTR_CSW))
