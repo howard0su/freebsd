@@ -908,12 +908,8 @@ vi_intr_iq(struct vi_info *vi, int idx)
 	if (sc->intr_count == 1)
 		return (&sc->sge.fwq);
 
-#ifdef DEV_NETMAP
-	/* Exclude netmap queues as they can't take anyone else's interrupts */
-	if (vi->flags & VI_NETMAP)
-		/* XXX: sc->sge.fwq instead? */
-		return (NULL);
-#endif
+	KASSERT(!(vi->flags & VI_NETMAP),
+	    ("%s: called on netmap VI", __func__));
 	nintr = vi_intr_count(vi);
 	KASSERT(nintr != 0,
 	    ("%s: vi %p has no exclusive interrupts, total interrupts = %d",

@@ -1762,6 +1762,8 @@ vcxgbe_attach(device_t dev)
 	vi = device_get_softc(dev);
 	pi = vi->pi;
 	sc = pi->adapter;
+
+	/* XXX: This may just give us the main VI's MAC address. */
 	rc = t4_alloc_vi(sc, sc->mbox, pi->tx_chan, sc->pf, 0, 1, vi->hw_addr,
 	    &vi->rss_size);
 	if (rc)
