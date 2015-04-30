@@ -1024,7 +1024,7 @@ t4_tom_activate(struct adapter *sc)
 
 	/* XXX: Should be for_each_vi? */
 	for_each_port(sc, i)
-		TOEDEV(sc->port[i]->vi.ifp) = &td->tod;
+		TOEDEV(sc->port[i]->vi[0].ifp) = &td->tod;
 
 	sc->tom_softc = td;
 	register_toedev(sc->tom_softc);

@@ -292,6 +292,8 @@ struct port_info {
 	struct callout tick;
 };
 
+#define	IS_MAIN_VI(vi)		((vi) == &((vi)->pi->vi[0]))
+
 /* Where the cluster came from, how it has been carved up. */
 struct cluster_layout {
 	int8_t zidx;
@@ -607,7 +609,7 @@ struct sge_wrq {
 
 #ifdef DEV_NETMAP
 struct sge_nm_rxq {
-	struct port_info *pi;
+	struct vi_info *vi;
 
 	struct iq_desc *iq_desc;
 	uint16_t iq_abs_id;
@@ -874,8 +876,9 @@ struct adapter {
 #define for_each_nm_rxq(vi, iter, q) \
 	for (q = &vi->pi->adapter->sge.nm_rxq[pi->first_rxq], iter = 0; \
 	    iter < pi->nrxq; ++iter, ++q)
-#define	for_each_vi(pi, iter, vi) \
-	for (vi = pi->vi, iter = 0; iter < pi->nvi; ++iter, ++vi)
+#define for_each_vi(_pi, _iter, _vi) \
+	for ((_vi) = (_pi)->vi, (_iter) = 0; (_iter) < (_pi)->nvi; \
+	     ++(_iter), ++(_vi))
 
 #define IDXINCR(idx, incr, wrap) do { \
 	idx = wrap - idx > incr ? idx + incr : incr - (wrap - idx); \
@@ -1010,6 +1013,7 @@ int adapter_full_init(struct adapter *);
 int adapter_full_uninit(struct adapter *);
 int vi_full_init(struct vi_info *);
 int vi_full_uninit(struct vi_info *);
+void vi_sysctls(struct vi_info *);
 
 #ifdef DEV_NETMAP
 /* t4_netmap.c */

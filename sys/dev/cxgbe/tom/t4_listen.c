@@ -507,7 +507,7 @@ t4_listen_start(struct toedev *tod, struct tcpcb *tp)
 	struct port_info *pi;
 	struct inpcb *inp = tp->t_inpcb;
 	struct listen_ctx *lctx;
-	int i, rc;
+	int i, rc, v;
 
 	INP_WLOCK_ASSERT(inp);
 
@@ -530,25 +530,24 @@ t4_listen_start(struct toedev *tod, struct tcpcb *tp)
 #endif
 
 	/*
-	 * Find a running port with IFCAP_TOE (4 or 6).  We'll use the first
-	 * such port's queues to send the passive open and receive the reply to
+	 * Find a running VI with IFCAP_TOE (4 or 6).  We'll use the first
+	 * such VI's queues to send the passive open and receive the reply to
 	 * it.
 	 *
 	 * XXX: need a way to mark a port in use by offload.  if_cxgbe should
 	 * then reject any attempt to bring down such a port (and maybe reject
 	 * attempts to disable IFCAP_TOE on that port too?).
-	 *
-	 * XXX: I think this should be for_each_vi().
 	 */
 	for_each_port(sc, i) {
-		if (sc->port[i]->vi.ifp->if_drv_flags & IFF_DRV_RUNNING &&
-		    sc->port[i]->vi.ifp->if_capenable & IFCAP_TOE)
-				break;
+		pi = sc->port[i];
+		for_each_vi(pi, v, vi) {
+			if (vi->ifp->if_drv_flags & IFF_DRV_RUNNING &&
+			    vi->ifp->if_capenable & IFCAP_TOE)
+				goto found;
+		}
 	}
-	if (i == sc->params.nports)
-		goto done;	/* no port that's UP with IFCAP_TOE enabled */
-	pi = sc->port[i];
-	vi = &pi->vi;
+	goto done;	/* no port that's UP with IFCAP_TOE enabled */
+found:
 
 	if (listen_hash_find(sc, inp) != NULL)
 		goto done;	/* already setup */
@@ -1249,8 +1248,11 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 
 	pi = sc->port[G_SYN_INTF(be16toh(cpl->l2info))];
 
-	/* XXX: I'm sure this isn't right. */
-	vi = &pi->vi;
+	/*
+	 * XXX: To support multiple VIs with TOE we would have to use the
+	 * mac_ix field to determine which VI received the SYN.
+	 */
+	vi = &pi->vi[0];
 	hw_ifp = vi->ifp;	/* the cxgbeX ifnet */
 	m->m_pkthdr.rcvif = hw_ifp;
 	tod = TOEDEV(hw_ifp);

@@ -422,8 +422,8 @@ static int cpl_not_handled(struct sge_iq *, const struct rss_header *,
     struct mbuf *);
 static int an_not_handled(struct sge_iq *, const struct rsp_ctrl *);
 static int fw_msg_not_handled(struct adapter *, const __be64 *);
-static int t4_sysctls(struct adapter *);
-static int cxgbe_sysctls(struct port_info *);
+static void t4_sysctls(struct adapter *);
+static void cxgbe_sysctls(struct port_info *);
 static int sysctl_int_array(SYSCTL_HANDLER_ARGS);
 static int sysctl_bitfield(SYSCTL_HANDLER_ARGS);
 static int sysctl_btphy(SYSCTL_HANDLER_ARGS);
@@ -435,6 +435,7 @@ static int sysctl_qsize_txq(SYSCTL_HANDLER_ARGS);
 static int sysctl_pause_settings(SYSCTL_HANDLER_ARGS);
 static int sysctl_handle_t4_reg64(SYSCTL_HANDLER_ARGS);
 static int sysctl_temperature(SYSCTL_HANDLER_ARGS);
+static int sysctl_viid(SYSCTL_HANDLER_ARGS);
 #ifdef SBUF_DRAIN
 static int sysctl_cctrl(SYSCTL_HANDLER_ARGS);
 static int sysctl_cim_ibq_obq(SYSCTL_HANDLER_ARGS);
@@ -905,9 +906,21 @@ t4_attach(device_t dev)
 
 		for_each_vi(pi, j, vi) {
 #ifdef DEV_NETMAP
-			if (j == 1)
-				/* Netmap is handled below. */
+			if (j == 1) {
+				vi->flags |= VI_NETMAP;
+				vi->first_rxq = nm_rqidx;
+				vi->first_txq = nm_tqidx;
+				if (is_10G_port(pi) || is_40G_port(pi)) {
+					vi->nrxq = iaq.nnmrxq10g;
+					vi->ntxq = iaq.nnmtxq10g;
+				} else {
+					vi->nrxq = iaq.nnmrxq1g;
+					vi->ntxq = iaq.nnmtxq1g;
+				}
+				nm_rqidx += vi->nrxq;
+				nm_tqidx += vi->ntxq;
 				continue;
+			}
 #endif
 			
 			vi->first_rxq = rqidx;
@@ -951,21 +964,6 @@ t4_attach(device_t dev)
 			ofld_tqidx += vi->nofldtxq;
 #endif
 		}
-#ifdef DEV_NETMAP
-		vi = &pi->vi[1];
-		vi->flags |= VI_NETMAP;
-		vi->first_rxq = nm_rqidx;
-		vi->first_txq = nm_tqidx;
-		if (is_10G_port(pi) || is_40G_port(pi)) {
-			vi->nrxq = iaq.nnmrxq10g;
-			vi->ntxq = iaq.nnmtxq10g;
-		} else {
-			vi->nrxq = iaq.nnmrxq1g;
-			vi->ntxq = iaq.nnmtxq1g;
-		}
-		nm_rqidx += vi->nrxq;
-		nm_tqidx += vi->ntxq;
-#endif
 	}
 
 	rc = setup_intr_handlers(sc);
@@ -1145,7 +1143,7 @@ cxgbe_probe(device_t dev)
 #define T4_CAP_ENABLE (T4_CAP)
 
 static int
-cxgbe_viattach(device_t dev, struct vi_info *vi)
+cxgbe_vi_attach(device_t dev, struct vi_info *vi)
 {
 	struct ifnet *ifp;
 	struct sbuf *sb;
@@ -1205,9 +1203,7 @@ cxgbe_viattach(device_t dev, struct vi_info *vi)
 	device_printf(dev, "%s\n", sbuf_data(sb));
 	sbuf_delete(sb);
 
-#ifdef notyet
 	vi_sysctls(vi);
-#endif
 
 	return (0);
 }
@@ -1217,21 +1213,21 @@ cxgbe_attach(device_t dev)
 {
 	struct port_info *pi = device_get_softc(dev);
 	struct vi_info *vi;
-	int error, i;
+	int i, rc;
 
 	callout_init_mtx(&pi->tick, &pi->pi_lock, 0);
 
-	error = cxgbe_viattach(dev, &pi->vi[0]);
-	if (error)
-		return (error);
+	rc = cxgbe_vi_attach(dev, &pi->vi[0]);
+	if (rc)
+		return (rc);
 
 	for_each_vi(pi, i, vi) {
 		if (i == 0)
 			continue;
 #ifdef DEV_NETMAP
-		if (i == 1) {
+		if (vi->flags & VI_NETMAP) {
 			/*
-			 * nm_media handled here to keep
+			 * media handled here to keep
 			 * implementation private to this file
 			 */
 			ifmedia_init(&vi->media, IFM_IMASK, cxgbe_media_change,
@@ -1262,7 +1258,7 @@ cxgbe_attach(device_t dev)
 }
 
 static void
-cxgbe_videtach(struct vi_info *vi)
+cxgbe_vi_detach(struct vi_info *vi)
 {
 	struct ifnet *ifp = vi->ifp;
 
@@ -1284,15 +1280,15 @@ cxgbe_detach(device_t dev)
 {
 	struct port_info *pi = device_get_softc(dev);
 	struct adapter *sc = pi->adapter;
-	int error;
+	int rc;
 
 	/* Detach the extra VIs first. */
-	error = bus_generic_detach(dev);
-	if (error)
-		return (error);
+	rc = bus_generic_detach(dev);
+	if (rc)
+		return (rc);
 	device_delete_children(dev);
 
-	/* XXX: We could make DOOMED a VI flag and move this to videtach. */
+	/* XXX: We could make DOOMED a VI flag and move this to vi_detach. */
 	/* Tell if_ioctl and if_init that the port is going away */
 	ADAPTER_LOCK(sc);
 	SET_DOOMED(pi);
@@ -1316,7 +1312,7 @@ cxgbe_detach(device_t dev)
 	PORT_UNLOCK(pi);
 	callout_drain(&pi->tick);
 
-	cxgbe_videtach(&pi->vi[0]);
+	cxgbe_vi_detach(&pi->vi[0]);
 
 #ifdef DEV_NETMAP
 #if 0
@@ -1637,7 +1633,7 @@ cxgbe_get_counter(struct ifnet *ifp, ift_counter c)
 	struct port_stats *s = &pi->stats;
 
 	/* XXX: No stats for extra VIs */
-	if (vi != &pi->vi[0])
+	if (!IS_MAIN_VI(vi))
 		return (if_get_counter_default(ifp, c));
 
 	cxgbe_refresh_stats(sc, pi);
@@ -1709,22 +1705,13 @@ cxgbe_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct vi_info *vi = ifp->if_softc;
 	struct port_info *pi = vi->pi;
-	struct ifmedia *media = NULL;
 	struct ifmedia_entry *cur;
 	int speed = pi->link_cfg.speed;
 #ifdef INVARIANTS
 	int data = (pi->port_type << 8) | pi->mod_type;
 #endif
 
-	if (ifp == vi->ifp)
-		media = &vi->media;
-#ifdef DEV_NETMAP
-	else if (ifp == pi->nm_ifp)
-		media = &pi->nm_media;
-#endif
-	MPASS(media != NULL);
-
-	cur = media->ifm_cur;
+	cur = vi->media.ifm_cur;
 	MPASS(cur->ifm_data == data);
 
 	ifmr->ifm_status = IFM_AVALID;
@@ -1767,12 +1754,37 @@ vcxgbe_probe(device_t dev)
 static int
 vcxgbe_attach(device_t dev)
 {
-	return (ENXIO);
+	struct vi_info *vi;
+	struct port_info *pi;
+	struct adapter *sc;
+	int rc;
+
+	vi = device_get_softc(dev);
+	pi = vi->pi;
+	sc = pi->adapter;
+	rc = t4_alloc_vi(sc, sc->mbox, pi->tx_chan, sc->pf, 0, 1, vi->hw_addr,
+	    &vi->rss_size);
+	if (rc)
+		return (rc);
+	vi->viid = rc;
+	rc = cxgbe_vi_attach(dev, vi);
+	if (rc) {
+		t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
+		return (rc);
+	}
+	return (0);
 }
 
 static int
 vcxgbe_detach(device_t dev)
 {
+	struct vi_info *vi;
+	struct adapter *sc;
+
+	vi = device_get_softc(dev);
+	sc = vi->pi->adapter;
+	cxgbe_vi_detach(vi);
+	t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
 	return (0);
 }
 
@@ -3194,12 +3206,6 @@ update_mac_settings(struct ifnet *ifp, int flags)
 		viid = vi->viid;
 		xact_addr_filt = &vi->xact_addr_filt;
 	}
-#ifdef DEV_NETMAP
-	else if (ifp == pi->nm_ifp) {
-		viid = pi->nm_viid;
-		xact_addr_filt = &pi->nm_xact_addr_filt;
-	}
-#endif
 	if (flags & XGMAC_MTU)
 		mtu = ifp->if_mtu;
 
@@ -3435,7 +3441,7 @@ cxgbe_init_synchronized(struct vi_info *vi)
 	/*
 	 * The first iq of the first port to come up is used for tracing.
 	 */
-	if (sc->traceq < 0 && vi == &pi->vi) {
+	if (sc->traceq < 0 && IS_MAIN_VI(vi)) {
 		sc->traceq = sc->sge.rxq[vi->first_rxq].iq.abs_id;
 		t4_write_reg(sc, is_t4(sc) ?  A_MPS_TRC_RSS_CONTROL :
 		    A_MPS_T5_TRC_RSS_CONTROL, V_RSSCONTROL(pi->tx_chan) |
@@ -3532,7 +3538,7 @@ cxgbe_uninit_synchronized(struct vi_info *vi)
 static int
 setup_intr_handlers(struct adapter *sc)
 {
-	int rc, rid, p, q;
+	int rc, rid, p, q, v;
 	char s[8];
 	struct irq *irq;
 	struct port_info *pi;
@@ -3571,45 +3577,58 @@ setup_intr_handlers(struct adapter *sc)
 	irq++;
 	rid++;
 
-	/* XXX: This should probably be for_each_vi() instead. */
 	for_each_port(sc, p) {
 		pi = sc->port[p];
-		vi = &pi->vi;
-
-		if (pi->flags & INTR_RXQ) {
-			for_each_rxq(vi, q, rxq) {
-				snprintf(s, sizeof(s), "%d.%d", p, q);
-				rc = t4_alloc_irq(sc, irq, rid, t4_intr, rxq,
-				    s);
-				if (rc != 0)
-					return (rc);
-				irq++;
-				rid++;
-			}
-		}
-#ifdef TCP_OFFLOAD
-		if (pi->flags & INTR_OFLD_RXQ) {
-			for_each_ofld_rxq(vi, q, ofld_rxq) {
-				snprintf(s, sizeof(s), "%d,%d", p, q);
-				rc = t4_alloc_irq(sc, irq, rid, t4_intr,
-				    ofld_rxq, s);
-				if (rc != 0)
-					return (rc);
-				irq++;
-				rid++;
-			}
-		}
-#endif
+		for_each_vi(pi, v, vi) {
+			/*
+			 * One idea here might be to move this into the
+			 * VI attach routines and have each VI driver
+			 * allocate its IRQs.  That would let us move
+			 * the netmap bits below into their own driver.
+			 * All we would need to do is save the starting
+			 * irq/rid values in each vi_info.
+			 */
 #ifdef DEV_NETMAP
-		if (pi->flags & INTR_NM_RXQ) {
-			for_each_nm_rxq(pi, q, nm_rxq) {
-				snprintf(s, sizeof(s), "%d-%d", p, q);
-				rc = t4_alloc_irq(sc, irq, rid, t4_nm_intr,
-				    nm_rxq, s);
-				if (rc != 0)
-					return (rc);
-				irq++;
-				rid++;
+			if (vi->flags & VI_NETMAP) {
+				for_each_nm_rxq(pi, q, nm_rxq) {
+					snprintf(s, sizeof(s), "%d-%d", p, q);
+					rc = t4_alloc_irq(sc, irq, rid,
+					    t4_nm_intr, nm_rxq, s);
+					if (rc != 0)
+						return (rc);
+					irq++;
+					rid++;
+				}
+				continue;
+			}
+#endif
+			if (vi->flags & INTR_RXQ) {
+				for_each_rxq(vi, q, rxq) {
+					if (v == 0)
+						snprintf(s, sizeof(s), "%d.%d",
+						    p, q);
+					else
+						snprintf(s, sizeof(s),
+						    "%d(%d).%d", p, v, q);
+					rc = t4_alloc_irq(sc, irq, rid,
+					    t4_intr, rxq, s);
+					if (rc != 0)
+						return (rc);
+					irq++;
+					rid++;
+				}
+			}
+#ifdef TCP_OFFLOAD
+			if (vi->flags & INTR_OFLD_RXQ) {
+				for_each_ofld_rxq(vi, q, ofld_rxq) {
+					snprintf(s, sizeof(s), "%d,%d", p, q);
+					rc = t4_alloc_irq(sc, irq, rid,
+					    t4_intr, ofld_rxq, s);
+					if (rc != 0)
+						return (rc);
+					irq++;
+					rid++;
+				}
 			}
 		}
 #endif
@@ -3749,7 +3768,7 @@ vi_full_uninit(struct vi_info *vi)
 		/* Need to quiesce queues.  */
 
 		/* XXX: Only for the first VI? */
-		if (vi == &pi->vi)
+		if (IS_MAIN_VI(vi))
 			quiesce_wrq(sc, &sc->sge.ctrlq[pi->port_id]);
 
 		for_each_txq(vi, i, txq) {
@@ -4714,7 +4733,7 @@ t4_register_fw_msg_handler(struct adapter *sc, int type, fw_msg_handler_t h)
 	return (0);
 }
 
-static int
+static void
 t4_sysctls(struct adapter *sc)
 {
 	struct sysctl_ctx_list *ctx;
@@ -5016,18 +5035,79 @@ t4_sysctls(struct adapter *sc)
 		    CTLFLAG_RW, &sc->tt.tx_align, 0, "chop and align payload");
 	}
 #endif
-
-
-	return (0);
 }
 
-static int
+void
+vi_sysctls(struct vi_info *vi)
+{
+	struct sysctl_ctx_list *ctx;
+	struct sysctl_oid *oid;
+	struct sysctl_oid_list *children;
+
+	ctx = device_get_sysctl_ctx(vi->dev);
+
+	/*
+	 * dev.[nv](cxgbe|cxl).X.
+	 */
+	oid = device_get_sysctl_tree(vi->dev);
+	children = SYSCTL_CHILDREN(oid);
+
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "viid", CTLTYPE_INT |
+	    CTLFLAG_RD, vi, 0, sysctl_viid, "IU", "VI identifer");
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nrxq", CTLFLAG_RD,
+	    &vi->nrxq, 0, "# of rx queues");
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "ntxq", CTLFLAG_RD,
+	    &vi->ntxq, 0, "# of tx queues");
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_rxq", CTLFLAG_RD,
+	    &vi->first_rxq, 0, "index of first rx queue");
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_txq", CTLFLAG_RD,
+	    &vi->first_txq, 0, "index of first tx queue");
+
+	if (vi->flags & VI_NETMAP)
+		return;
+
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "rsrv_noflowq", CTLTYPE_INT |
+	    CTLFLAG_RW, vi, 0, sysctl_noflowq, "IU",
+	    "Reserve queue 0 for non-flowid packets");
+
+#ifdef TCP_OFFLOAD
+	if (vi->nofldrxq != 0) {
+		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nofldrxq", CTLFLAG_RD,
+		    &vi->nofldrxq, 0,
+		    "# of rx queues for offloaded TCP connections");
+		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nofldtxq", CTLFLAG_RD,
+		    &vi->nofldtxq, 0,
+		    "# of tx queues for offloaded TCP connections");
+		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_ofld_rxq",
+		    CTLFLAG_RD, &vi->first_ofld_rxq, 0,
+		    "index of first TOE rx queue");
+		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_ofld_txq",
+		    CTLFLAG_RD, &vi->first_ofld_txq, 0,
+		    "index of first TOE tx queue");
+	}
+#endif
+
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "holdoff_tmr_idx",
+	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_holdoff_tmr_idx, "I",
+	    "holdoff timer index");
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "holdoff_pktc_idx",
+	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_holdoff_pktc_idx, "I",
+	    "holdoff packet counter index");
+
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "qsize_rxq",
+	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_qsize_rxq, "I",
+	    "rx queue size");
+	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "qsize_txq",
+	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_qsize_txq, "I",
+	    "tx queue size");
+}
+
+static void
 cxgbe_sysctls(struct port_info *pi)
 {
 	struct sysctl_ctx_list *ctx;
 	struct sysctl_oid *oid;
 	struct sysctl_oid_list *children;
-	struct vi_info *vi = &pi->vi;
 	struct adapter *sc = pi->adapter;
 
 	ctx = device_get_sysctl_ctx(pi->dev);
@@ -5048,60 +5128,6 @@ cxgbe_sysctls(struct port_info *pi)
 		    CTLTYPE_INT | CTLFLAG_RD, pi, 1, sysctl_btphy, "I",
 		    "PHY firmware version");
 	}
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nrxq", CTLFLAG_RD,
-	    &vi->nrxq, 0, "# of rx queues");
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "ntxq", CTLFLAG_RD,
-	    &vi->ntxq, 0, "# of tx queues");
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_rxq", CTLFLAG_RD,
-	    &vi->first_rxq, 0, "index of first rx queue");
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_txq", CTLFLAG_RD,
-	    &vi->first_txq, 0, "index of first tx queue");
-	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "rsrv_noflowq", CTLTYPE_INT |
-	    CTLFLAG_RW, vi, 0, sysctl_noflowq, "IU",
-	    "Reserve queue 0 for non-flowid packets");
-
-#ifdef TCP_OFFLOAD
-	if (is_offload(sc)) {
-		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nofldrxq", CTLFLAG_RD,
-		    &vi->nofldrxq, 0,
-		    "# of rx queues for offloaded TCP connections");
-		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nofldtxq", CTLFLAG_RD,
-		    &vi->nofldtxq, 0,
-		    "# of tx queues for offloaded TCP connections");
-		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_ofld_rxq",
-		    CTLFLAG_RD, &vi->first_ofld_rxq, 0,
-		    "index of first TOE rx queue");
-		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_ofld_txq",
-		    CTLFLAG_RD, &vi->first_ofld_txq, 0,
-		    "index of first TOE tx queue");
-	}
-#endif
-#ifdef DEV_NETMAP
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nnmrxq", CTLFLAG_RD,
-	    &pi->nnmrxq, 0, "# of rx queues for netmap");
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nnmtxq", CTLFLAG_RD,
-	    &pi->nnmtxq, 0, "# of tx queues for netmap");
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_nm_rxq",
-	    CTLFLAG_RD, &pi->first_nm_rxq, 0,
-	    "index of first netmap rx queue");
-	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_nm_txq",
-	    CTLFLAG_RD, &pi->first_nm_txq, 0,
-	    "index of first netmap tx queue");
-#endif
-
-	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "holdoff_tmr_idx",
-	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_holdoff_tmr_idx, "I",
-	    "holdoff timer index");
-	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "holdoff_pktc_idx",
-	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_holdoff_pktc_idx, "I",
-	    "holdoff packet counter index");
-
-	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "qsize_rxq",
-	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_qsize_rxq, "I",
-	    "rx queue size");
-	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "qsize_txq",
-	    CTLTYPE_INT | CTLFLAG_RW, vi, 0, sysctl_qsize_txq, "I",
-	    "tx queue size");
 
 	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "pause_settings",
 	    CTLTYPE_STRING | CTLFLAG_RW, pi, PAUSE_TX, sysctl_pause_settings,
@@ -5265,8 +5291,6 @@ cxgbe_sysctls(struct port_info *pi)
 	    "# of buffer-group 3 truncated packets");
 
 #undef SYSCTL_ADD_T4_PORTSTAT
-
-	return (0);
 }
 
 static int
@@ -5585,6 +5609,16 @@ sysctl_temperature(SYSCTL_HANDLER_ARGS)
 
 	rc = sysctl_handle_int(oidp, &t, 0, req);
 	return (rc);
+}
+
+static int
+sysctl_viid(SYSCTL_HANDLER_ARGS)
+{
+	struct vi_info *vi = arg1;
+	u_int v;
+
+	v = vi->viid;
+	return (sysctl_handle_int(oidp, &v, 0, req));
 }
 
 #ifdef SBUF_DRAIN
@@ -8068,9 +8102,9 @@ set_sched_queue(struct adapter *sc, struct t4_sched_queue *p)
 		goto done;
 	}
 
-	/* XXX: VIs? */
+	/* XXX: VI */
 	pi = sc->port[p->port];
-	vi = &pi->vi;
+	vi = &pi->vi[0];
 	if (!in_range(p->queue, 0, vi->ntxq - 1) || !in_range(p->cl, 0, 7)) {
 		rc = EINVAL;
 		goto done;
@@ -8152,18 +8186,18 @@ void
 t4_os_portmod_changed(const struct adapter *sc, int idx)
 {
 	struct port_info *pi = sc->port[idx];
+	struct vi_info *vi;
 	struct ifnet *ifp;
+	int v;
 	static const char *mod_str[] = {
 		NULL, "LR", "SR", "ER", "TWINAX", "active TWINAX", "LRM"
 	};
 
-	/* XXX: Loop over all VIs */
-	build_medialist(pi, &pi->vi.media);
-#ifdef DEV_NETMAP
-	build_medialist(pi, &pi->nm_media);
-#endif
+	for_each_vi(pi, v, vi) {
+		build_medialist(pi, &vi->media);
+	}
 
-	ifp = pi->vi.ifp;
+	ifp = pi->vi[0].ifp;
 	if (pi->mod_type == FW_PORT_MOD_TYPE_NONE)
 		if_printf(ifp, "transceiver unplugged.\n");
 	else if (pi->mod_type == FW_PORT_MOD_TYPE_UNKNOWN)
@@ -8183,17 +8217,27 @@ void
 t4_os_link_changed(struct adapter *sc, int idx, int link_stat, int reason)
 {
 	struct port_info *pi = sc->port[idx];
-	struct ifnet *ifp = pi->vi.ifp;
+	struct vi_info *vi;
+	struct ifnet *ifp;
+	int v;
 
-	/* XXX: Loop over all VIs */
-	if (link_stat) {
+	if (link_stat)
 		pi->linkdnrc = -1;
-		ifp->if_baudrate = IF_Mbps(pi->link_cfg.speed);
-		if_link_state_change(ifp, LINK_STATE_UP);
-	} else {
+	else {
 		if (reason >= 0)
 			pi->linkdnrc = reason;
-		if_link_state_change(ifp, LINK_STATE_DOWN);
+	}
+	for_each_vi(pi, v, vi) {
+		ifp = vi->ifp;
+		if (ifp == NULL)
+			continue;
+
+		if (link_stat) {
+			ifp->if_baudrate = IF_Mbps(pi->link_cfg.speed);
+			if_link_state_change(ifp, LINK_STATE_UP);
+		} else {
+			if_link_state_change(ifp, LINK_STATE_DOWN);
+		}
 	}
 }
 
@@ -8313,7 +8357,7 @@ t4_ioctl(struct cdev *dev, unsigned long cmd, caddr_t data, int fflag,
 		rc = read_i2c(sc, (struct t4_i2c_data *)data);
 		break;
 	case CHELSIO_T4_CLEAR_STATS: {
-		int i;
+		int i, v;
 		u_int port_id = *(uint32_t *)data;
 		struct port_info *pi;
 		struct vi_info *vi;
@@ -8326,47 +8370,58 @@ t4_ioctl(struct cdev *dev, unsigned long cmd, caddr_t data, int fflag,
 		t4_clr_port_stats(sc, pi->tx_chan);
 		pi->tx_parse_error = 0;
 
-		/* XXX: Loop over all VIs */
-		vi = &pi->vi;
-		if (vi->flags & VI_INIT_DONE) {
-			struct sge_rxq *rxq;
-			struct sge_txq *txq;
-			struct sge_wrq *wrq;
+		/*
+		 * Not sure if looping over all VIs is really ideal vs
+		 * having this command clear VI stats instead of port
+		 * stats.
+		 */
+		for_each_vi(pi, v, vi) {
+			if (vi->flags & VI_INIT_DONE) {
+				struct sge_rxq *rxq;
+				struct sge_txq *txq;
+				struct sge_wrq *wrq;
 
-			for_each_rxq(vi, i, rxq) {
+				if (vi->flags & VI_NETMAP)
+					continue;
+
+				for_each_rxq(vi, i, rxq) {
 #if defined(INET) || defined(INET6)
-				rxq->lro.lro_queued = 0;
-				rxq->lro.lro_flushed = 0;
+					rxq->lro.lro_queued = 0;
+					rxq->lro.lro_flushed = 0;
 #endif
-				rxq->rxcsum = 0;
-				rxq->vlan_extraction = 0;
-			}
+					rxq->rxcsum = 0;
+					rxq->vlan_extraction = 0;
+				}
 
-			for_each_txq(vi, i, txq) {
-				txq->txcsum = 0;
-				txq->tso_wrs = 0;
-				txq->vlan_insertion = 0;
-				txq->imm_wrs = 0;
-				txq->sgl_wrs = 0;
-				txq->txpkt_wrs = 0;
-				txq->txpkts0_wrs = 0;
-				txq->txpkts1_wrs = 0;
-				txq->txpkts0_pkts = 0;
-				txq->txpkts1_pkts = 0;
-				mp_ring_reset_stats(txq->r);
-			}
+				for_each_txq(vi, i, txq) {
+					txq->txcsum = 0;
+					txq->tso_wrs = 0;
+					txq->vlan_insertion = 0;
+					txq->imm_wrs = 0;
+					txq->sgl_wrs = 0;
+					txq->txpkt_wrs = 0;
+					txq->txpkts0_wrs = 0;
+					txq->txpkts1_wrs = 0;
+					txq->txpkts0_pkts = 0;
+					txq->txpkts1_pkts = 0;
+					mp_ring_reset_stats(txq->r);
+				}
 
 #ifdef TCP_OFFLOAD
-			/* nothing to clear for each ofld_rxq */
+				/* nothing to clear for each ofld_rxq */
 
-			for_each_ofld_txq(vi, i, wrq) {
-				wrq->tx_wrs_direct = 0;
-				wrq->tx_wrs_copied = 0;
-			}
+				for_each_ofld_txq(vi, i, wrq) {
+					wrq->tx_wrs_direct = 0;
+					wrq->tx_wrs_copied = 0;
+				}
 #endif
-			wrq = &sc->sge.ctrlq[pi->port_id];
-			wrq->tx_wrs_direct = 0;
-			wrq->tx_wrs_copied = 0;
+
+				if (IS_MAIN_VI(vi)) {
+					wrq = &sc->sge.ctrlq[pi->port_id];
+					wrq->tx_wrs_direct = 0;
+					wrq->tx_wrs_copied = 0;
+				}
+			}
 		}
 		break;
 	}
@@ -8403,11 +8458,15 @@ t4_iscsi_init(struct ifnet *ifp, unsigned int tag_mask,
 		V_HPZ3(pgsz_order[3]));
 }
 
+/*
+ * XXX: If we wanted to permit TOE on extra VIs we would need to
+ * rework this somehow.
+ */
 static int
 toe_capability(struct port_info *pi, int enable)
 {
 	int rc;
-	struct vi_info *vi = &pi->vi;
+	struct vi_info *vi = &pi->vi[0];
 	struct adapter *sc = pi->adapter;
 
 	ASSERT_SYNCHRONIZED_OP(sc);
