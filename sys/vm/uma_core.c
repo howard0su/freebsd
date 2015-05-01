@@ -307,9 +307,8 @@ bucket_init(void)
 {
 	struct uma_bucket_zone *ubz;
 	int size;
-	int i;
 
-	for (i = 0, ubz = &bucket_zones[0]; ubz->ubz_entries != 0; ubz++) {
+	for (ubz = &bucket_zones[0]; ubz->ubz_entries != 0; ubz++) {
 		size = roundup(sizeof(struct uma_bucket), sizeof(void *));
 		size += sizeof(void *) * ubz->ubz_entries;
 		ubz->ubz_zone = uma_zcreate(ubz->ubz_name, size,
@@ -1822,7 +1821,7 @@ uma_startup(void *bootmem, int boot_pages)
 #endif
 	args.name = "UMA Zones";
 	args.size = sizeof(struct uma_zone) +
-	    (sizeof(struct uma_cache) * (mp_maxid));
+	    (sizeof(struct uma_cache) * (mp_maxid + 1));
 	args.ctor = zone_ctor;
 	args.dtor = zone_dtor;
 	args.uminit = zero_init;

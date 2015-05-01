@@ -607,7 +607,7 @@ acpi_attach(device_t dev)
 	sc->acpi_handle_reboot = 1;
 
     /* Only enable S4BIOS by default if the FACS says it is available. */
-    if (AcpiGbl_FACS->Flags & ACPI_FACS_S4_BIOS_PRESENT)
+    if (AcpiGbl_FACS != NULL && AcpiGbl_FACS->Flags & ACPI_FACS_S4_BIOS_PRESENT)
 	sc->acpi_s4bios = 1;
 
     /* Probe all supported sleep states. */
@@ -1121,13 +1121,12 @@ acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, cpuset_t *cpuset)
 }
 
 /*
- * Fetch the NUMA domain for the given device.
+ * Fetch the NUMA domain for the given device 'dev'.
  *
  * If a device has a _PXM method, map that to a NUMA domain.
- *
- * If none is found, then it'll call the parent method.
- * If there's no domain or the domain cannot be determined,
- * return ENOENT.
+ * Otherwise, pass the request up to the parent.
+ * If there's no matching domain or the domain cannot be
+ * determined, return ENOENT.
  */
 int
 acpi_get_domain(device_t dev, device_t child, int *domain)
