@@ -31,6 +31,8 @@
 __FBSDID("$FreeBSD$");
 
 #include "opt_acpi.h"
+#include "opt_psm.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
@@ -65,6 +67,9 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/acpica/acpivar.h>
 #include <dev/acpica/acpiio.h>
+#ifdef DEV_PSM
+#include <dev/atkbdc/psm.h>
+#endif
 
 #include <vm/vm_param.h>
 
@@ -1257,6 +1262,20 @@ acpi_set_resource(device_t dev, device_t child, int type, int rid,
 	    AcpiOsFree(devinfo);
 	}
     }
+
+#ifdef DEV_PSM
+    /*
+     * Ignore I/O port resources for PS/2 mouse devices.  Some BIOSes
+     * place the I/O port resources for the AT keyboard controller
+     * under the PS/2 mouse device instead of the keyboard device.
+     * Rather than engaging in crazy gymnastics to move the resources
+     * over to the keyboard controller, just ignore any I/O port
+     * resources and rely on the default hints to provide resources
+     * for the keyboard controller.
+     */
+    if (type == SYS_RES_IOPORT && ISA_PNP_PROBE(dev, child, psmcpnp_ids) == 0)
+	return (0);
+#endif
 
     /* If the resource is already allocated, fail. */
     if (resource_list_busy(rl, type, rid))

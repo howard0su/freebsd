@@ -19,6 +19,7 @@ OFW_PCI_DEBUG		opt_ofw_pci.h
 
 PMAP_STATS		opt_pmap.h
 
+DEV_PSM			opt_psm.h
 PSM_DEBUG		opt_psm.h
 PSM_HOOKRESUME		opt_psm.h
 PSM_RESETAFTERSUSPEND	opt_psm.h

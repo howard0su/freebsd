@@ -4921,7 +4921,7 @@ static driver_t psmcpnp_driver = {
 	1,			/* no softc */
 };
 
-static struct isa_pnp_id psmcpnp_ids[] = {
+struct isa_pnp_id psmcpnp_ids[] = {
 	{ 0x030fd041, "PS/2 mouse port" },		/* PNP0F03 */
 	{ 0x0e0fd041, "PS/2 mouse port" },		/* PNP0F0E */
 	{ 0x120fd041, "PS/2 mouse port" },		/* PNP0F12 */

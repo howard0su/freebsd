@@ -29,4 +29,6 @@
 
 #define	PSM_DRIVER_NAME	"psm"
 
+extern struct isa_pnp_id psmcpnp_ids[];
+
 #endif /* !_DEV_ATKBDC_PSM_H_ */
