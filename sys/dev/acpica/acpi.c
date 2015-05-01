@@ -1086,7 +1086,7 @@ acpi_parse_pxm(device_t dev)
 
 	handle = acpi_get_handle(dev);
 	if (handle == NULL)
-		return (-1);
+		return (-2);
 	status = acpi_GetInteger(handle, "_PXM", &pxm);
 	if (ACPI_SUCCESS(status))
 		return (acpi_map_pxm_to_vm_domainid(pxm));
