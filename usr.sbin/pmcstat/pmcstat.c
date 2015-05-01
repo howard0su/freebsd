@@ -618,14 +618,12 @@ main(int argc, char **argv)
 		err(EX_OSERR, "ERROR: Cannot determine path of running kernel");
 
 	/*
-	 * The initial CPU mask specifies all non-halted CPUS in the
-	 * system.
+	 * The initial CPU mask specifies the root mask of this process
+	 * which is usually all CPUs in the system.
 	 */
-	len = sizeof(int);
-	if (sysctlbyname("hw.ncpu", &ncpu, &len, NULL, 0) < 0)
-		err(EX_OSERR, "ERROR: Cannot determine the number of CPUs");
-	for (hcpu = 0; hcpu < ncpu; hcpu++)
-		CPU_SET(hcpu, &cpumask);
+	if (cpuset_getaffinity(CPU_LEVEL_ROOT, CPU_WHICH_PID, -1,
+	    sizeof(cpumask), &cpumask) == -1)
+		err(EX_OSERR, "ERROR: Cannot determine the root set of CPUs");
 
 	while ((option = getopt(argc, argv,
 	    "CD:EF:G:M:NO:P:R:S:TWa:c:df:gk:l:m:n:o:p:qr:s:t:vw:z:")) != -1)
