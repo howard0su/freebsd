@@ -157,6 +157,7 @@ static uma_zone_t obj_zone;
 
 static int vm_object_zinit(void *mem, int size, int flags);
 
+#ifdef INVARIANTS
 static void vm_object_zdtor(void *mem, int size, void *arg);
 
 static void
@@ -188,8 +189,11 @@ vm_object_zdtor(void *mem, int size, void *arg)
 	KASSERT(object->shadow_count == 0,
 	    ("object %p shadow_count = %d",
 	    object, object->shadow_count));
-	object->type = OBJT_DEAD;
+	KASSERT(object->type == OBJT_DEAD,
+	    ("object %p has non-dead type %d",
+	    object, object->type));
 }
+#endif
 
 static int
 vm_object_zinit(void *mem, int size, int flags)
@@ -788,6 +792,7 @@ vm_object_terminate(vm_object_t object)
 	 * Let the pager know object is dead.
 	 */
 	vm_pager_deallocate(object);
+	object->type = OBJT_DEAD;
 	VM_OBJECT_WUNLOCK(object);
 
 	vm_object_destroy(object);
@@ -1799,6 +1804,7 @@ vm_object_collapse(vm_object_t object)
 			KASSERT(backing_object->ref_count == 1, (
 "backing_object %p was somehow re-referenced during collapse!",
 			    backing_object));
+			backing_object->type = OBJT_DEAD;
 			backing_object->ref_count = 0;
 			VM_OBJECT_WUNLOCK(backing_object);
 			vm_object_destroy(backing_object);
