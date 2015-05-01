@@ -553,7 +553,7 @@ main(int argc, char **argv)
 	cpuset_t cpumask, rootmask;
 	double interval;
 	double duration;
-	int hcpu, option, npmc;
+	int option, npmc;
 	int c, check_driver_stats, current_sampling_count;
 	int do_callchain, do_descendants, do_logproccsw, do_logprocexit;
 	int do_print, do_read;
