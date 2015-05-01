@@ -1799,6 +1799,7 @@ vm_object_collapse(vm_object_t object)
 			KASSERT(backing_object->ref_count == 1, (
 "backing_object %p was somehow re-referenced during collapse!",
 			    backing_object));
+			backing_object->ref_count = 0;
 			VM_OBJECT_WUNLOCK(backing_object);
 			vm_object_destroy(backing_object);
 
