@@ -111,7 +111,7 @@ vmtotal(SYSCTL_HANDLER_ARGS)
 	 */
 	mtx_lock(&vm_object_list_mtx);
 	TAILQ_FOREACH(object, &vm_object_list, object_list) {
-		VM_OBJECT_LOCK(object);
+		VM_OBJECT_WLOCK(object);
 		vm_object_clear_flag(object, OBJ_ACTIVE);
 		VM_OBJECT_WUNLOCK(object);
 	}
