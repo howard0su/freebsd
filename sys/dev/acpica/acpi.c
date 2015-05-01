@@ -1126,7 +1126,8 @@ acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, cpuset_t *cpuset)
  * If a device has a _PXM method, map that to a NUMA domain.
  *
  * If none is found, then it'll call the parent method.
- * If there's no domain, return ENOENT.
+ * If there's no domain or the domain cannot be determined,
+ * return ENOENT.
  */
 int
 acpi_get_domain(device_t dev, device_t child, int *domain)
