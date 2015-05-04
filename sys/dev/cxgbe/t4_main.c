@@ -3189,16 +3189,10 @@ update_mac_settings(struct ifnet *ifp, int flags)
 	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 	int mtu = -1, promisc = -1, allmulti = -1, vlanex = -1;
-	uint16_t viid = 0xffff;
-	int16_t *xact_addr_filt = NULL;
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 	KASSERT(flags, ("%s: not told what to update.", __func__));
 
-	if (ifp == vi->ifp) {
-		viid = vi->viid;
-		xact_addr_filt = &vi->xact_addr_filt;
-	}
 	if (flags & XGMAC_MTU)
 		mtu = ifp->if_mtu;
 
@@ -3212,8 +3206,8 @@ update_mac_settings(struct ifnet *ifp, int flags)
 		vlanex = ifp->if_capenable & IFCAP_VLAN_HWTAGGING ? 1 : 0;
 
 	if (flags & (XGMAC_MTU|XGMAC_PROMISC|XGMAC_ALLMULTI|XGMAC_VLANEX)) {
-		rc = -t4_set_rxmode(sc, sc->mbox, viid, mtu, promisc, allmulti,
-		    1, vlanex, false);
+		rc = -t4_set_rxmode(sc, sc->mbox, vi->viid, mtu, promisc,
+		    allmulti, 1, vlanex, false);
 		if (rc) {
 			if_printf(ifp, "set_rxmode (%x) failed: %d\n", flags,
 			    rc);
@@ -3225,14 +3219,14 @@ update_mac_settings(struct ifnet *ifp, int flags)
 		uint8_t ucaddr[ETHER_ADDR_LEN];
 
 		bcopy(IF_LLADDR(ifp), ucaddr, sizeof(ucaddr));
-		rc = t4_change_mac(sc, sc->mbox, viid, *xact_addr_filt, ucaddr,
-		    true, true);
+		rc = t4_change_mac(sc, sc->mbox, vi->viid, vi->xact_addr_filt,
+		    ucaddr, true, true);
 		if (rc < 0) {
 			rc = -rc;
 			if_printf(ifp, "change_mac failed: %d\n", rc);
 			return (rc);
 		} else {
-			*xact_addr_filt = rc;
+			vi->xact_addr_filt = rc;
 			rc = 0;
 		}
 	}
@@ -3254,8 +3248,8 @@ update_mac_settings(struct ifnet *ifp, int flags)
 			i++;
 
 			if (i == FW_MAC_EXACT_CHUNK) {
-				rc = t4_alloc_mac_filt(sc, sc->mbox, viid, del,
-				    i, mcaddr, NULL, &hash, 0);
+				rc = t4_alloc_mac_filt(sc, sc->mbox, vi->viid,
+				    del, i, mcaddr, NULL, &hash, 0);
 				if (rc < 0) {
 					rc = -rc;
 					for (j = 0; j < i; j++) {
@@ -3275,7 +3269,7 @@ update_mac_settings(struct ifnet *ifp, int flags)
 			}
 		}
 		if (i > 0) {
-			rc = t4_alloc_mac_filt(sc, sc->mbox, viid, del, i,
+			rc = t4_alloc_mac_filt(sc, sc->mbox, vi->viid, del, i,
 			    mcaddr, NULL, &hash, 0);
 			if (rc < 0) {
 				rc = -rc;
@@ -3293,7 +3287,7 @@ update_mac_settings(struct ifnet *ifp, int flags)
 			}
 		}
 
-		rc = -t4_set_addr_hash(sc, sc->mbox, viid, 0, hash, 0);
+		rc = -t4_set_addr_hash(sc, sc->mbox, vi->viid, 0, hash, 0);
 		if (rc != 0)
 			if_printf(ifp, "failed to set mc address hash: %d", rc);
 mcfail:
