@@ -199,10 +199,6 @@ enum {
 
 	/* port flags */
 	DOOMED		= (1 << 0),
-#if 0
-	PORT_INIT_DONE	= (1 << 1),
-	PORT_SYSCTL_CTX	= (1 << 2),
-#endif
 	HAS_TRACEQ	= (1 << 3),
 
 	/* VI flags */
