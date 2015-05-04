@@ -1235,10 +1235,6 @@ cxgbe_attach(device_t dev)
 			build_medialist(pi, &vi->media);
 			vi->dev = device_add_child(dev, is_t4(pi->adapter) ?
 			    "ncxgbe" : "ncxl", device_get_unit(dev));
-#if 0
-			/* This needs to move into a ncxgbe_attach. */
-			create_netmap_ifnet(pi);
-#endif
 		} else
 #endif
 			vi->dev = device_add_child(dev, is_t4(pi->adapter) ?
@@ -1313,14 +1309,6 @@ cxgbe_detach(device_t dev)
 	callout_drain(&pi->tick);
 
 	cxgbe_vi_detach(&pi->vi[0]);
-
-#ifdef DEV_NETMAP
-#if 0
-	/* XXX: This should move to ncxgbe_detach. */
-	/* XXXNM: equivalent of cxgbe_uninit_synchronized to ifdown nm_ifp */
-	destroy_netmap_ifnet(pi);
-#endif
-#endif
 
 	ADAPTER_LOCK(sc);
 	CLR_BUSY(sc);
@@ -1766,8 +1754,11 @@ vcxgbe_attach(device_t dev)
 	/* XXX: This may just give us the main VI's MAC address. */
 	rc = t4_alloc_vi(sc, sc->mbox, pi->tx_chan, sc->pf, 0, 1, vi->hw_addr,
 	    &vi->rss_size);
-	if (rc)
-		return (rc);
+	if (rc < 0) {
+		device_printf(dev, "Failed to allocate virtual interface "
+		    "for port %d: %d\n", pi->port_id, -rc);
+		return (-rc);
+	}
 	vi->viid = rc;
 	rc = cxgbe_vi_attach(dev, vi);
 	if (rc) {
@@ -3592,7 +3583,7 @@ setup_intr_handlers(struct adapter *sc)
 			 */
 #ifdef DEV_NETMAP
 			if (vi->flags & VI_NETMAP) {
-				for_each_nm_rxq(pi, q, nm_rxq) {
+				for_each_nm_rxq(vi, q, nm_rxq) {
 					snprintf(s, sizeof(s), "%d-%d", p, q);
 					rc = t4_alloc_irq(sc, irq, rid,
 					    t4_nm_intr, nm_rxq, s);

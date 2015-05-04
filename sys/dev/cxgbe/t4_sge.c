@@ -1201,7 +1201,7 @@ t4_teardown_vi_queues(struct vi_info *vi)
 		}
 		
 		for_each_nm_rxq(vi, i, nm_rxq) {
-			free_nm_rxq(pi, nm_rxq);
+			free_nm_rxq(vi, nm_rxq);
 		}
 		return (0);
 	}

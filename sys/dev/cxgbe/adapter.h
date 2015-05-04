@@ -874,8 +874,8 @@ struct adapter {
 	for (q = &vi->pi->adapter->sge.nm_txq[vi->first_txq], iter = 0; \
 	    iter < vi->ntxq; ++iter, ++q)
 #define for_each_nm_rxq(vi, iter, q) \
-	for (q = &vi->pi->adapter->sge.nm_rxq[pi->first_rxq], iter = 0; \
-	    iter < pi->nrxq; ++iter, ++q)
+	for (q = &vi->pi->adapter->sge.nm_rxq[vi->first_rxq], iter = 0; \
+	    iter < vi->nrxq; ++iter, ++q)
 #define for_each_vi(_pi, _iter, _vi) \
 	for ((_vi) = (_pi)->vi, (_iter) = 0; (_iter) < (_pi)->nvi; \
 	     ++(_iter), ++(_vi))
