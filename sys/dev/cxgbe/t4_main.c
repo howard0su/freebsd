@@ -1278,12 +1278,6 @@ cxgbe_detach(device_t dev)
 	struct adapter *sc = pi->adapter;
 	int rc;
 
-	/* Detach the extra VIs first. */
-	rc = bus_generic_detach(dev);
-	if (rc)
-		return (rc);
-	device_delete_children(dev);
-
 	/* XXX: We could make DOOMED a VI flag and move this to vi_detach. */
 	/* Tell if_ioctl and if_init that the port is going away */
 	ADAPTER_LOCK(sc);
@@ -1297,6 +1291,18 @@ cxgbe_detach(device_t dev)
 	sc->last_op_thr = curthread;
 #endif
 	ADAPTER_UNLOCK(sc);
+
+	/* Detach the extra VIs first. */
+	rc = bus_generic_detach(dev);
+	if (rc) {
+		/* XXX: Can't clear DOOMED. */
+		ADAPTER_LOCK(sc);
+		CLR_BUSY(sc);
+		wakeup(&sc->flags);
+		ADAPTER_UNLOCK(sc);
+		return (rc);
+	}
+	device_delete_children(dev);
 
 	if (pi->flags & HAS_TRACEQ) {
 		sc->traceq = -1;	/* cloner should not create ifnet */
