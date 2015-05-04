@@ -840,8 +840,8 @@ t4_attach(device_t dev)
 	sc->intr_count = iaq.nirq;
 
 	s = &sc->sge;
-	s->nrxq = n10g * iaq.nrxq10g + n1g * iaq.nrxq1g;
-	s->ntxq = n10g * iaq.ntxq10g + n1g * iaq.ntxq1g;
+	s->nrxq = (n10g * iaq.nrxq10g + n1g * iaq.nrxq1g) * num_vis;
+	s->ntxq = (n10g * iaq.ntxq10g + n1g * iaq.ntxq1g) * num_vis;
 	s->neq = s->ntxq + s->nrxq;	/* the free list in an rxq is an eq */
 	s->neq += sc->params.nports + 1;/* ctrl queues: 1 per port + 1 mgmt */
 	s->niq = s->nrxq + 1;		/* 1 extra for firmware event queue */
@@ -1245,7 +1245,7 @@ cxgbe_attach(device_t dev)
 		}
 		device_set_softc(vi->dev, vi);
 	}
-		
+
 	cxgbe_sysctls(pi);
 
 	bus_generic_attach(dev);
