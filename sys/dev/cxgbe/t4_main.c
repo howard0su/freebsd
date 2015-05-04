@@ -1745,15 +1745,31 @@ vcxgbe_attach(device_t dev)
 	struct vi_info *vi;
 	struct port_info *pi;
 	struct adapter *sc;
-	int rc;
+	static int mac_funcs[] = {
+		FW_VI_FUNC_OFLD,
+		FW_VI_FUNC_IWARP,
+		FW_VI_FUNC_OPENISCSI,
+		FW_VI_FUNC_OPENFCOE,
+		FW_VI_FUNC_FOISCSI,
+		FW_VI_FUNC_FOFCOE,
+	};
+	int func, index, rc;
 
 	vi = device_get_softc(dev);
 	pi = vi->pi;
 	sc = pi->adapter;
 
-	/* XXX: This may just give us the main VI's MAC address. */
-	rc = t4_alloc_vi(sc, sc->mbox, pi->tx_chan, sc->pf, 0, 1, vi->hw_addr,
-	    &vi->rss_size);
+	index = vi - pi->vi;
+	if (index < nitems(mac_funcs))
+		func = mac_funcs[index];
+	else
+		/*
+		 * XXX: In this case the user will need to assign
+		 * custom MAC addresses.
+		 */
+		func = FW_VI_FUNC_ETH;
+	rc = t4_alloc_vi_func(sc, sc->mbox, pi->tx_chan, sc->pf, 0, 1,
+	    vi->hw_addr, &vi->rss_size, func, 0);
 	if (rc < 0) {
 		device_printf(dev, "Failed to allocate virtual interface "
 		    "for port %d: %d\n", pi->port_id, -rc);
