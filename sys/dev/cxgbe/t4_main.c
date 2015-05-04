@@ -482,7 +482,7 @@ static int read_i2c(struct adapter *, struct t4_i2c_data *);
 static int set_sched_class(struct adapter *, struct t4_sched_params *);
 static int set_sched_queue(struct adapter *, struct t4_sched_queue *);
 #ifdef TCP_OFFLOAD
-static int toe_capability(struct port_info *, int);
+static int toe_capability(struct vi_info *, int);
 #endif
 static int mod_event(module_t, int, void *);
 
@@ -1278,10 +1278,15 @@ cxgbe_detach(device_t dev)
 	struct adapter *sc = pi->adapter;
 	int rc;
 
-	/* XXX: We could make DOOMED a VI flag and move this to vi_detach. */
-	/* Tell if_ioctl and if_init that the port is going away */
+	/* Detach the extra VIs first. */
+	rc = bus_generic_detach(dev);
+	if (rc)
+		return (rc);
+	device_delete_children(dev);
+
+	/* Tell if_ioctl and if_init that the VI is going away */
 	ADAPTER_LOCK(sc);
-	SET_DOOMED(pi);
+	SET_DOOMED(&pi->vi[0]);
 	wakeup(&sc->flags);
 	while (IS_BUSY(sc))
 		mtx_sleep(&sc->flags, &sc->sc_lock, 0, "t4detach", 0);
@@ -1291,18 +1296,6 @@ cxgbe_detach(device_t dev)
 	sc->last_op_thr = curthread;
 #endif
 	ADAPTER_UNLOCK(sc);
-
-	/* Detach the extra VIs first. */
-	rc = bus_generic_detach(dev);
-	if (rc) {
-		/* XXX: Can't clear DOOMED. */
-		ADAPTER_LOCK(sc);
-		CLR_BUSY(sc);
-		wakeup(&sc->flags);
-		ADAPTER_UNLOCK(sc);
-		return (rc);
-	}
-	device_delete_children(dev);
 
 	if (pi->flags & HAS_TRACEQ) {
 		sc->traceq = -1;	/* cloner should not create ifnet */
@@ -1328,10 +1321,9 @@ static void
 cxgbe_init(void *arg)
 {
 	struct vi_info *vi = arg;
-	struct port_info *pi = vi->pi;
-	struct adapter *sc = pi->adapter;
+	struct adapter *sc = vi->pi->adapter;
 
-	if (begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4init") != 0)
+	if (begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4init") != 0)
 		return;
 	cxgbe_init_synchronized(vi);
 	end_synchronized_op(sc, 0);
@@ -1342,8 +1334,7 @@ cxgbe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 {
 	int rc = 0, mtu, flags, can_sleep;
 	struct vi_info *vi = ifp->if_softc;
-	struct port_info *pi = vi->pi;
-	struct adapter *sc = pi->adapter;
+	struct adapter *sc = vi->pi->adapter;
 	struct ifreq *ifr = (struct ifreq *)data;
 	uint32_t mask;
 
@@ -1353,7 +1344,7 @@ cxgbe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 		if ((mtu < ETHERMIN) || (mtu > ETHERMTU_JUMBO))
 			return (EINVAL);
 
-		rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4mtu");
+		rc = begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4mtu");
 		if (rc)
 			return (rc);
 		ifp->if_mtu = mtu;
@@ -1368,7 +1359,7 @@ cxgbe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 	case SIOCSIFFLAGS:
 		can_sleep = 0;
 redo_sifflags:
-		rc = begin_synchronized_op(sc, pi,
+		rc = begin_synchronized_op(sc, vi,
 		    can_sleep ? (SLEEP_OK | INTR_OK) : HOLD_LOCK, "t4flg");
 		if (rc)
 			return (rc);
@@ -1408,7 +1399,7 @@ redo_sifflags:
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI: /* these two are called with a mutex held :-( */
-		rc = begin_synchronized_op(sc, pi, HOLD_LOCK, "t4multi");
+		rc = begin_synchronized_op(sc, vi, HOLD_LOCK, "t4multi");
 		if (rc)
 			return (rc);
 		if (ifp->if_drv_flags & IFF_DRV_RUNNING)
@@ -1417,7 +1408,7 @@ redo_sifflags:
 		break;
 
 	case SIOCSIFCAP:
-		rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4cap");
+		rc = begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4cap");
 		if (rc)
 			return (rc);
 
@@ -1491,7 +1482,7 @@ redo_sifflags:
 		if (mask & IFCAP_TOE) {
 			int enable = (ifp->if_capenable ^ mask) & IFCAP_TOE;
 
-			rc = toe_capability(pi, enable);
+			rc = toe_capability(vi, enable);
 			if (rc != 0)
 				goto fail;
 
@@ -1539,10 +1530,10 @@ fail:
 			rc = EINVAL;
 			break;
 		}
-		rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4i2c");
+		rc = begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4i2c");
 		if (rc)
 			return (rc);
-		rc = -t4_i2c_rd(sc, sc->mbox, pi->port_id, i2c.dev_addr,
+		rc = -t4_i2c_rd(sc, sc->mbox, vi->pi->port_id, i2c.dev_addr,
 		    i2c.offset, i2c.len, &i2c.data[0]);
 		end_synchronized_op(sc, 0);
 		if (rc == 0)
@@ -1798,8 +1789,28 @@ vcxgbe_detach(device_t dev)
 
 	vi = device_get_softc(dev);
 	sc = vi->pi->adapter;
+
+	/* Tell if_ioctl and if_init that the VI is going away */
+	ADAPTER_LOCK(sc);
+	SET_DOOMED(vi);
+	wakeup(&sc->flags);
+	while (IS_BUSY(sc))
+		mtx_sleep(&sc->flags, &sc->sc_lock, 0, "t4detach", 0);
+	SET_BUSY(sc);
+#ifdef INVARIANTS
+	sc->last_op = "t4detach";
+	sc->last_op_thr = curthread;
+#endif
+	ADAPTER_UNLOCK(sc);
+
 	cxgbe_vi_detach(vi);
 	t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
+
+	ADAPTER_LOCK(sc);
+	CLR_BUSY(sc);
+	wakeup(&sc->flags);
+	ADAPTER_UNLOCK(sc);
+
 	return (0);
 }
 
@@ -3323,7 +3334,7 @@ mcfail:
  * {begin|end}_synchronized_op must be called from the same thread.
  */
 int
-begin_synchronized_op(struct adapter *sc, struct port_info *pi, int flags,
+begin_synchronized_op(struct adapter *sc, struct vi_info *vi, int flags,
     char *wmesg)
 {
 	int rc, pri;
@@ -3343,7 +3354,7 @@ begin_synchronized_op(struct adapter *sc, struct port_info *pi, int flags,
 	ADAPTER_LOCK(sc);
 	for (;;) {
 
-		if (pi && IS_DOOMED(pi)) {
+		if (vi && IS_DOOMED(vi)) {
 			rc = ENXIO;
 			goto done;
 		}
@@ -5364,7 +5375,7 @@ sysctl_btphy(SYSCTL_HANDLER_ARGS)
 	u_int v;
 	int rc;
 
-	rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4btt");
+	rc = begin_synchronized_op(sc, &pi->vi[0], SLEEP_OK | INTR_OK, "t4btt");
 	if (rc)
 		return (rc);
 	/* XXX: magic numbers */
@@ -5420,7 +5431,7 @@ sysctl_holdoff_tmr_idx(SYSCTL_HANDLER_ARGS)
 	if (idx < 0 || idx >= SGE_NTIMERS)
 		return (EINVAL);
 
-	rc = begin_synchronized_op(sc, vi->pi, HOLD_LOCK | SLEEP_OK | INTR_OK,
+	rc = begin_synchronized_op(sc, vi, HOLD_LOCK | SLEEP_OK | INTR_OK,
 	    "t4tmr");
 	if (rc)
 		return (rc);
@@ -5464,7 +5475,7 @@ sysctl_holdoff_pktc_idx(SYSCTL_HANDLER_ARGS)
 	if (idx < -1 || idx >= SGE_NCOUNTERS)
 		return (EINVAL);
 
-	rc = begin_synchronized_op(sc, vi->pi, HOLD_LOCK | SLEEP_OK | INTR_OK,
+	rc = begin_synchronized_op(sc, vi, HOLD_LOCK | SLEEP_OK | INTR_OK,
 	    "t4pktc");
 	if (rc)
 		return (rc);
@@ -5494,7 +5505,7 @@ sysctl_qsize_rxq(SYSCTL_HANDLER_ARGS)
 	if (qsize < 128 || (qsize & 7))
 		return (EINVAL);
 
-	rc = begin_synchronized_op(sc, vi->pi, HOLD_LOCK | SLEEP_OK | INTR_OK,
+	rc = begin_synchronized_op(sc, vi, HOLD_LOCK | SLEEP_OK | INTR_OK,
 	    "t4rxqs");
 	if (rc)
 		return (rc);
@@ -5524,7 +5535,7 @@ sysctl_qsize_txq(SYSCTL_HANDLER_ARGS)
 	if (qsize < 128 || qsize > 65536)
 		return (EINVAL);
 
-	rc = begin_synchronized_op(sc, vi->pi, HOLD_LOCK | SLEEP_OK | INTR_OK,
+	rc = begin_synchronized_op(sc, vi, HOLD_LOCK | SLEEP_OK | INTR_OK,
 	    "t4txqs");
 	if (rc)
 		return (rc);
@@ -5580,7 +5591,8 @@ sysctl_pause_settings(SYSCTL_HANDLER_ARGS)
 		if (n & ~(PAUSE_TX | PAUSE_RX))
 			return (EINVAL);	/* some other bit is set too */
 
-		rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4PAUSE");
+		rc = begin_synchronized_op(sc, &pi->vi[0], SLEEP_OK | INTR_OK,
+		    "t4PAUSE");
 		if (rc)
 			return (rc);
 		if ((lc->requested_fc & (PAUSE_TX | PAUSE_RX)) != n) {
@@ -8486,10 +8498,10 @@ t4_iscsi_init(struct ifnet *ifp, unsigned int tag_mask,
  * rework this somehow.
  */
 static int
-toe_capability(struct port_info *pi, int enable)
+toe_capability(struct vi_info *vi, int enable)
 {
 	int rc;
-	struct vi_info *vi = &pi->vi[0];
+	struct port_info *pi = vi->pi;
 	struct adapter *sc = pi->adapter;
 
 	ASSERT_SYNCHRONIZED_OP(sc);

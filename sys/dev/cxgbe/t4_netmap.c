@@ -114,10 +114,9 @@ static void
 cxgbe_nm_init(void *arg)
 {
 	struct vi_info *vi = arg;
-	struct port_info *pi = vi->pi;
-	struct adapter *sc = pi->adapter;
+	struct adapter *sc = vi->pi->adapter;
 
-	if (begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4nminit") != 0)
+	if (begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4nminit") != 0)
 		return;
 	cxgbe_nm_init_synchronized(vi);
 	end_synchronized_op(sc, 0);
@@ -174,8 +173,7 @@ cxgbe_nm_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 {
 	int rc = 0, mtu, flags;
 	struct vi_info *vi = ifp->if_softc;
-	struct port_info *pi = vi->pi;
-	struct adapter *sc = pi->adapter;
+	struct adapter *sc = vi->pi->adapter;
 	struct ifreq *ifr = (struct ifreq *)data;
 	uint32_t mask;
 
@@ -187,7 +185,7 @@ cxgbe_nm_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 		if ((mtu < ETHERMIN) || (mtu > ETHERMTU_JUMBO))
 			return (EINVAL);
 
-		rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4nmtu");
+		rc = begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4nmtu");
 		if (rc)
 			return (rc);
 		ifp->if_mtu = mtu;
@@ -197,7 +195,7 @@ cxgbe_nm_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 		break;
 
 	case SIOCSIFFLAGS:
-		rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4nflg");
+		rc = begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4nflg");
 		if (rc)
 			return (rc);
 
@@ -219,7 +217,7 @@ cxgbe_nm_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI: /* these two are called with a mutex held :-( */
-		rc = begin_synchronized_op(sc, pi, HOLD_LOCK, "t4nmulti");
+		rc = begin_synchronized_op(sc, vi, HOLD_LOCK, "t4nmulti");
 		if (rc)
 			return (rc);
 		if (ifp->if_drv_flags & IFF_DRV_RUNNING)
@@ -620,11 +618,10 @@ cxgbe_netmap_reg(struct netmap_adapter *na, int on)
 {
 	struct ifnet *ifp = na->ifp;
 	struct vi_info *vi = ifp->if_softc;
-	struct port_info *pi = vi->pi;
-	struct adapter *sc = pi->adapter;
+	struct adapter *sc = vi->pi->adapter;
 	int rc;
 
-	rc = begin_synchronized_op(sc, pi, SLEEP_OK | INTR_OK, "t4nmreg");
+	rc = begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "t4nmreg");
 	if (rc != 0)
 		return (rc);
 	if (on)

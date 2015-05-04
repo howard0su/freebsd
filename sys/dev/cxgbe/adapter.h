@@ -198,10 +198,10 @@ enum {
 	CXGBE_BUSY	= (1 << 9),
 
 	/* port flags */
-	DOOMED		= (1 << 0),
 	HAS_TRACEQ	= (1 << 3),
 
 	/* VI flags */
+	DOOMED		= (1 << 0),
 	VI_INIT_DONE	= (1 << 1),
 	VI_SYSCTL_CTX	= (1 << 2),
 	INTR_RXQ	= (1 << 4),	/* All NIC rxq's take interrupts */
@@ -211,8 +211,8 @@ enum {
 	/* XXX: Do we need a flag for "is main VI"? */
 };
 
-#define IS_DOOMED(pi)	((pi)->flags & DOOMED)
-#define SET_DOOMED(pi)	do {(pi)->flags |= DOOMED;} while (0)
+#define IS_DOOMED(vi)	((vi)->flags & DOOMED)
+#define SET_DOOMED(vi)	do {(vi)->flags |= DOOMED;} while (0)
 #define IS_BUSY(sc)	((sc)->flags & CXGBE_BUSY)
 #define SET_BUSY(sc)	do {(sc)->flags |= CXGBE_BUSY;} while (0)
 #define CLR_BUSY(sc)	do {(sc)->flags &= ~CXGBE_BUSY;} while (0)
@@ -1002,7 +1002,7 @@ int t4_register_cpl_handler(struct adapter *, int, cpl_handler_t);
 int t4_register_an_handler(struct adapter *, an_handler_t);
 int t4_register_fw_msg_handler(struct adapter *, int, fw_msg_handler_t);
 int t4_filter_rpl(struct sge_iq *, const struct rss_header *, struct mbuf *);
-int begin_synchronized_op(struct adapter *, struct port_info *, int, char *);
+int begin_synchronized_op(struct adapter *, struct vi_info *, int, char *);
 void end_synchronized_op(struct adapter *, int);
 int update_mac_settings(struct ifnet *, int);
 int adapter_full_init(struct adapter *);
