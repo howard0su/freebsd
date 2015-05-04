@@ -1128,8 +1128,10 @@ ncxgbe_detach(device_t dev)
 	vi = device_get_softc(dev);
 	sc = vi->pi->adapter;
 	netmap_detach(vi->ifp);
-	ifmedia_removeall(&vi->media);
 	ether_ifdetach(vi->ifp);
+	cxgbe_nm_uninit_synchronized(vi);
+	vi_full_uninit(vi);
+	ifmedia_removeall(&vi->media);
 	if_free(vi->ifp);
 	t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
 	return (0);

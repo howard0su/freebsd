@@ -3728,6 +3728,13 @@ vi_full_init(struct vi_info *vi)
 	if (rc != 0)
 		goto done;	/* error message displayed already */
 
+#ifdef DEV_NETMAP
+	/* Netmap VIs configure RSS when netmap is enabled. */
+	if (vi->flags & VI_NETMAP) {
+		vi->flags |= VI_INIT_DONE;
+		return (0);
+	}
+#endif
 	/*
 	 * Setup RSS for this VI.  Save a copy of the RSS table for later use.
 	 */
@@ -3775,6 +3782,10 @@ vi_full_uninit(struct vi_info *vi)
 	if (vi->flags & VI_INIT_DONE) {
 
 		/* Need to quiesce queues.  */
+#ifdef DEV_NETMAP
+		if (vi->flags & VI_NETMAP)
+			goto skip;
+#endif
 
 		/* XXX: Only for the first VI? */
 		if (IS_MAIN_VI(vi))
@@ -3803,6 +3814,9 @@ vi_full_uninit(struct vi_info *vi)
 #endif
 		free(vi->rss, M_CXGBE);
 	}
+#ifdef DEV_NETMAP
+skip:
+#endif
 
 	t4_teardown_vi_queues(vi);
 	vi->flags &= ~VI_INIT_DONE;
