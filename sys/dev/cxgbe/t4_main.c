@@ -822,7 +822,7 @@ t4_attach(device_t dev)
 			rc = ENXIO;
 			goto done;
 		}
-		pi->vi[0].dev = dev;
+		pi->vi[0].dev = pi->dev;
 		device_set_softc(pi->dev, pi);
 	}
 
