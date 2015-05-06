@@ -792,7 +792,6 @@ vm_object_terminate(vm_object_t object)
 	 * Let the pager know object is dead.
 	 */
 	vm_pager_deallocate(object);
-	object->type = OBJT_DEAD;
 	VM_OBJECT_WUNLOCK(object);
 
 	vm_object_destroy(object);
