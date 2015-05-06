@@ -681,9 +681,6 @@ vm_object_destroy(vm_object_t object)
 	 * Release the allocation charge.
 	 */
 	if (object->cred != NULL) {
-		KASSERT(object->type == OBJT_DEFAULT ||
-		    object->type == OBJT_SWAP,
-		    ("%s: non-swap obj %p has cred", __func__, object));
 		swap_release_by_cred(object->charge, object->cred);
 		object->charge = 0;
 		crfree(object->cred);
@@ -787,6 +784,10 @@ vm_object_terminate(vm_object_t object)
 #endif
 	if (__predict_false(!vm_object_cache_is_empty(object)))
 		vm_page_cache_free(object, 0, 0);
+
+	KASSERT(object->cred == NULL || object->type == OBJT_DEFAULT ||
+	    object->type == OBJT_SWAP,
+	    ("%s: non-swap obj %p has cred", __func__, object));
 
 	/*
 	 * Let the pager know object is dead.
