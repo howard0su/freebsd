@@ -203,8 +203,8 @@ core_pcpu_fini(struct pmc_mdep *md, int cpu)
 static pmc_value_t
 iaf_perfctr_value_to_reload_count(pmc_value_t v)
 {
-	v &= (1ULL << core_iaf_width) - 1;
-	return (1ULL << core_iaf_width) - v;
+	/* Sign extend the value and then invert it. */
+	return -(int64_t)v << (64 - core_iaf_width) >> (64 - core_iaf_width);
 }
 
 static pmc_value_t
