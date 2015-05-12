@@ -56,8 +56,8 @@ static struct {
 } *ioapics;
 
 static struct lapic_info {
-	u_int la_enabled:1;
-	u_int la_acpi_id:8;
+	u_int la_enabled;
+	u_int la_acpi_id;
 } lapics[MAX_APIC_ID + 1];
 
 int madt_found_sci_override;
@@ -258,6 +258,7 @@ static void
 madt_probe_cpus_handler(ACPI_SUBTABLE_HEADER *entry, void *arg)
 {
 	ACPI_MADT_LOCAL_APIC *proc;
+	ACPI_MADT_LOCAL_X2APIC *x2apic;
 	struct lapic_info *la;
 
 	switch (entry->Type) {
@@ -283,6 +284,32 @@ madt_probe_cpus_handler(ACPI_SUBTABLE_HEADER *entry, void *arg)
 		la->la_enabled = 1;
 		la->la_acpi_id = proc->ProcessorId;
 		lapic_create(proc->Id, 0);
+		break;
+	case ACPI_MADT_TYPE_LOCAL_X2APIC:
+		/*
+		 * The MADT does not include a BSP flag, so we have to
+		 * let the MP code figure out which CPU is the BSP on
+		 * its own.
+		 */
+		x2apic = (ACPI_MADT_LOCAL_X2APIC *)entry;
+		if (bootverbose)
+			printf("MADT: Found CPU APIC ID %u ACPI ID %u: %s\n",
+			    x2apic->LocalApicId, x2apic->Uid,
+			    (x2apic->LapicFlags & ACPI_MADT_ENABLED) ?
+			    "enabled" : "disabled");
+		if (!(x2apic->LapicFlags & ACPI_MADT_ENABLED))
+			break;
+		if (x2apic->LocalApicId > MAX_APIC_ID) {
+			printf("MADT: Ignoring local APIC ID %u (too high)\n",
+			    x2apic->LocalApicId);
+			break;
+		}
+		la = &lapics[x2apic->LocalApicId];
+		KASSERT(la->la_enabled == 0,
+		    ("Duplicate local APIC ID %u", x2apic->LocalApicId));
+		la->la_enabled = 1;
+		la->la_acpi_id = x2apic->Uid;
+		lapic_create(x2apic->LocalApicId, 0);
 		break;
 	}
 }
@@ -577,6 +604,36 @@ madt_parse_local_nmi(ACPI_MADT_LOCAL_APIC_NMI *nmi)
 }
 
 /*
+ * Parse an entry for an NMI routed to a local x2APIC LVT pin.
+ */
+static void
+madt_parse_local_x2apic_nmi(ACPI_MADT_LOCAL_X2APIC_NMI *nmi)
+{
+	u_int apic_id, pin;
+
+	if (nmi->Uid == 0xffffffff)
+		apic_id = APIC_ID_ALL;
+	else if (nmi->Uid > MAX_APIC_ID ||
+	    madt_find_cpu(nmi->Uid, &apic_id) != 0) {
+		if (bootverbose)
+			printf("MADT: Ignoring local NMI routed to "
+			    "ACPI CPU %u\n", nmi->Uid);
+		return;
+	}
+	if (nmi->Lint == 0)
+		pin = APIC_LVT_LINT0;
+	else
+		pin = APIC_LVT_LINT1;
+	lapic_set_lvt_mode(apic_id, pin, APIC_LVT_DM_NMI);
+	if (!(nmi->IntiFlags & ACPI_MADT_TRIGGER_CONFORMS))
+		lapic_set_lvt_triggermode(apic_id, pin,
+		    interrupt_trigger(nmi->IntiFlags, 0));
+	if (!(nmi->IntiFlags & ACPI_MADT_POLARITY_CONFORMS))
+		lapic_set_lvt_polarity(apic_id, pin,
+		    interrupt_polarity(nmi->IntiFlags, 0));
+}
+
+/*
  * Parse interrupt entries.
  */
 static void
@@ -593,6 +650,10 @@ madt_parse_ints(ACPI_SUBTABLE_HEADER *entry, void *arg __unused)
 		break;
 	case ACPI_MADT_TYPE_LOCAL_APIC_NMI:
 		madt_parse_local_nmi((ACPI_MADT_LOCAL_APIC_NMI *)entry);
+		break;
+	case ACPI_MADT_TYPE_LOCAL_X2APIC_NMI:
+		madt_parse_local_x2apic_nmi(
+		    (ACPI_MADT_LOCAL_X2APIC_NMI *)entry);
 		break;
 	}
 }
