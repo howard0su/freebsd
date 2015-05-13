@@ -1088,6 +1088,10 @@ ncxgbe_attach(device_t dev)
 
 	ether_ifattach(ifp, vi->hw_addr);
 
+	device_printf(dev, "%d txq, %d rxq (netmap)\n", vi->ntxq, vi->nrxq);
+
+	vi_sysctls(vi);
+	
 	/*
 	 * Register with netmap in the kernel.
 	 */

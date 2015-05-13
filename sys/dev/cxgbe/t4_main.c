@@ -1192,8 +1192,7 @@ cxgbe_vi_attach(device_t dev, struct vi_info *vi)
 	ether_ifattach(ifp, vi->hw_addr);
 
 	sb = sbuf_new_auto();
-	sbuf_printf(sb, "%d txq, %d rxq (%s)", vi->ntxq, vi->nrxq,
-	    vi->flags & VI_NETMAP ? "netmap" : "NIC");
+	sbuf_printf(sb, "%d txq, %d rxq (NIC)", vi->ntxq, vi->nrxq);
 #ifdef TCP_OFFLOAD
 	if (ifp->if_capabilities & IFCAP_TOE)
 		sbuf_printf(sb, "; %d txq, %d rxq (TOE)",
