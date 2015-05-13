@@ -4690,7 +4690,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	if (timevalcmp(&tv, &vi->last_refreshed, <))
 		return;
 
-	if (begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "vistats") != 0)
+	if (begin_synchronized_op(sc, vi, HOLD_LOCK, "vistats") != 0)
 		return;
 	for (offset = 0; offset < (sizeof(vi->stats) / sizeof(__be64));
 	     offset += 6) {
@@ -4705,15 +4705,17 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, 4 * 16, &c);
 		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
 		    G_FW_CMD_RETVAL(ntohl(c.op_to_viid)) != FW_SUCCESS) {
-			device_printf(vi->dev, "failed to fetch VI stats\n");
-			end_synchronized_op(sc, 0);
+			device_printf(vi->dev,
+		    "failed to fetch VI stats: rc %d, op_to_viid = %#x\n",
+			    rc, ntohl(c.op_to_viid));
+			end_synchronized_op(sc, LOCK_HELD);
 			return;
 		}
 		memcpy((__be64 *)&vi->stats + offset, &c.u.ctl.stat0,
 		    todo * sizeof(__be64));
 	}
 	getmicrotime(&vi->last_refreshed);
-	end_synchronized_op(sc, 0);
+	end_synchronized_op(sc, LOCK_HELD);
 }
 
 static void
