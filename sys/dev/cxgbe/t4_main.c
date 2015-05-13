@@ -4704,10 +4704,10 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		    V_FW_VI_STATS_CMD_IX(offset));
 		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, 4 * 16, &c);
 		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
-		    G_FW_CMD_RETVAL(ntohl(c.op_to_viid)) != FW_SUCCESS) {
+		    G_FW_CMD_RETVAL(ntohl(c.retval_len16)) != FW_SUCCESS) {
 			device_printf(vi->dev,
-		    "failed to fetch VI stats: rc %d, op_to_viid = %#x\n",
-			    rc, ntohl(c.op_to_viid));
+			    "failed to fetch VI stats: rc %d, retval = %d\n",
+			    rc, G_FW_CMD_RETVAL(ntohl(c.retval_len16)));
 			end_synchronized_op(sc, LOCK_HELD);
 			return;
 		}
