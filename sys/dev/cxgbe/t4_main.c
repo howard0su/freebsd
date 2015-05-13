@@ -4702,6 +4702,8 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		c.retval_len16 = htonl(4);
 		c.u.ctl.nstats_ix = htons(V_FW_VI_STATS_CMD_NSTATS(todo) |
 		    V_FW_VI_STATS_CMD_IX(offset));
+		device_printf(vi->dev, "Fetching %d stats at offset %d\n",
+		    todo, offset);
 		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, 4 * 16, &c);
 		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
 		    G_FW_CMD_RETVAL(ntohl(c.retval_len16)) != FW_SUCCESS) {
