@@ -415,6 +415,7 @@ static int t4_free_irq(struct adapter *, struct irq *);
 static void reg_block_dump(struct adapter *, uint8_t *, unsigned int,
     unsigned int);
 static void t4_get_regs(struct adapter *, struct t4_regdump *, uint8_t *);
+static void vi_refresh_stats(struct adapter *, struct vi_info *);
 static void cxgbe_refresh_stats(struct adapter *, struct port_info *);
 static void cxgbe_tick(void *);
 static void cxgbe_vlan_config(void *, struct ifnet *, uint16_t);
@@ -1609,6 +1610,60 @@ cxgbe_qflush(struct ifnet *ifp)
 }
 
 static uint64_t
+vi_get_counter(struct ifnet *ifp, ift_counter c)
+{
+	struct vi_info *vi = ifp->if_softc;
+	struct fw_vi_stats_pf *s = &vi->stats;
+
+	vi_refresh_stats(vi->pi->adapter, vi);
+
+	switch (c) {
+	case IFCOUNTER_IPACKETS:
+		return (be64toh(s->rx_pf_frames));
+	case IFCOUNTER_IERRORS:
+		return (be64toh(s->rx_err_frames));
+	case IFCOUNTER_OPACKETS:
+		return (be64toh(s->tx_bcast_frames) +
+		    be64toh(s->tx_mcast_frames) + be64toh(s->tx_ucast_frames) +
+		    be64toh(s->tx_offload_frames));
+#if 0
+	case IFCOUNTER_OERRORS:
+#endif
+	case IFCOUNTER_IBYTES:
+		return (be64toh(s->rx_pf_bytes));
+	case IFCOUNTER_OBYTES:
+		return (be64toh(s->tx_bcast_bytes) +
+		    be64toh(s->tx_mcast_bytes) + be64toh(s->tx_ucast_bytes) +
+		    be64toh(s->tx_offload_bytes));
+	case IFCOUNTER_IMCASTS:
+		return (be64toh(s->rx_mcast_frames));
+	case IFCOUNTER_OMCASTS:
+		return (be64toh(s->tx_mcast_frames));
+#if 0
+	case IFCOUNTER_IQDROPS:
+#endif
+	case IFCOUNTER_OQDROPS: {
+		uint64_t drops;
+
+		drops = 0;
+		if (vi->flags & VI_INIT_DONE) {
+			int i;
+			struct sge_txq *txq;
+
+			for_each_txq(vi, i, txq)
+				drops += counter_u64_fetch(txq->r->drops);
+		}
+
+		return (drops);
+
+	}
+
+	default:
+		return (if_get_counter_default(ifp, c));
+	}
+}
+
+static uint64_t
 cxgbe_get_counter(struct ifnet *ifp, ift_counter c)
 {
 	struct vi_info *vi = ifp->if_softc;
@@ -1616,9 +1671,8 @@ cxgbe_get_counter(struct ifnet *ifp, ift_counter c)
 	struct adapter *sc = pi->adapter;
 	struct port_stats *s = &pi->stats;
 
-	/* XXX: No stats for extra VIs */
-	if (!IS_MAIN_VI(vi))
-		return (if_get_counter_default(ifp, c));
+	if (pi->nvi > 1)
+		return (vi_get_counter(ifp, c));
 
 	cxgbe_refresh_stats(sc, pi);
 
@@ -4623,8 +4677,35 @@ t4_get_regs(struct adapter *sc, struct t4_regdump *regs, uint8_t *buf)
 }
 
 static void
+vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
+{
+	struct fw_vi_stats_cmd c;
+	int offset, rc;
+
+	for (offset = 0; offset < (sizeof(vi->stats) / sizeof(__be64));
+	     offset += 6) {
+		memset(&c, 0, sizeof(c));
+		c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_STATS_CMD) |
+		    F_FW_CMD_REQUEST | F_FW_CMD_READ |
+		    V_FW_VI_STATS_CMD_VIID(vi->viid));
+		c.retval_len16 = htonl(4);
+		c.u.ctl.nstats_ix = htons(V_FW_VI_STATS_CMD_NSTATS(6) |
+		    V_FW_VI_STATS_CMD_IX(offset));
+		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, 4 * 16, &c);
+		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
+		    G_FW_CMD_RETVAL(ntohl(c.op_to_viid)) != FW_SUCCESS) {
+			device_printf(vi->dev, "failed to fetch VI stats\n");
+			return;
+		}
+		memcpy((__be64 *)&vi->stats + offset, &c.u.ctl.stat0,
+		    G_FW_VI_STATS_CMD_NSTATS(ntohs(c.u.ctl.nstats_ix)));
+	}
+}
+
+static void
 cxgbe_refresh_stats(struct adapter *sc, struct port_info *pi)
 {
+	struct vi_info *vi;
 	int i;
 	u_int v, tnl_cong_drops;
 	struct timeval tv;
@@ -4647,6 +4728,11 @@ cxgbe_refresh_stats(struct adapter *sc, struct port_info *pi)
 		}
 	}
 	pi->tnl_cong_drops = tnl_cong_drops;
+	if (pi->nvi > 1) {
+		for_each_vi(pi, i, vi) {
+			vi_refresh_stats(sc, vi);
+		}
+	}
 	getmicrotime(&pi->last_refreshed);
 }
 

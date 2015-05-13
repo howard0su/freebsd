@@ -255,6 +255,7 @@ struct vi_info {
 	struct sysctl_ctx_list ctx;	/* from ifconfig up to driver detach */
 
 	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
+	struct fw_vi_stats_pf stats;
 };
 
 struct port_info {
