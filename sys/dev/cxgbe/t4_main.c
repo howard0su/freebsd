@@ -4681,7 +4681,14 @@ static void
 vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 {
 	struct fw_vi_stats_cmd c;
+	struct timeval tv;
+	const struct timeval interval = {0, 250000};	/* 250ms */
 	int offset, rc, todo;
+
+	getmicrotime(&tv);
+	timevalsub(&tv, &interval);
+	if (timevalcmp(&tv, &vi->last_refreshed, <))
+		return;
 
 	if (begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "vistats") != 0)
 		return;
@@ -4705,6 +4712,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		memcpy((__be64 *)&vi->stats + offset, &c.u.ctl.stat0,
 		    todo * sizeof(__be64));
 	}
+	getmicrotime(&vi->last_refreshed);
 	end_synchronized_op(sc, 0);
 }
 
