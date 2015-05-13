@@ -1269,6 +1269,7 @@ cxgbe_vi_detach(struct vi_info *vi)
 
 	ifmedia_removeall(&vi->media);
 	if_free(vi->ifp);
+	vi->ifp = NULL;
 }
 
 static int

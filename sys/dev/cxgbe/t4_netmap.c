@@ -1151,6 +1151,7 @@ ncxgbe_detach(device_t dev)
 	vi_full_uninit(vi);
 	ifmedia_removeall(&vi->media);
 	if_free(vi->ifp);
+	vi->ifp = NULL;
 	t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
 
 	ADAPTER_LOCK(sc);
