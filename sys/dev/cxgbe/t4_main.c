@@ -4681,16 +4681,17 @@ static void
 vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 {
 	struct fw_vi_stats_cmd c;
-	int offset, rc;
+	int offset, rc, todo;
 
 	for (offset = 0; offset < (sizeof(vi->stats) / sizeof(__be64));
 	     offset += 6) {
+		todo = imax(6, sizeof(vi->stats) / sizeof(__be64) - offset);
 		memset(&c, 0, sizeof(c));
 		c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_STATS_CMD) |
 		    F_FW_CMD_REQUEST | F_FW_CMD_READ |
 		    V_FW_VI_STATS_CMD_VIID(vi->viid));
 		c.retval_len16 = htonl(4);
-		c.u.ctl.nstats_ix = htons(V_FW_VI_STATS_CMD_NSTATS(6) |
+		c.u.ctl.nstats_ix = htons(V_FW_VI_STATS_CMD_NSTATS(todo) |
 		    V_FW_VI_STATS_CMD_IX(offset));
 		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, 4 * 16, &c);
 		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
@@ -4699,7 +4700,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 			return;
 		}
 		memcpy((__be64 *)&vi->stats + offset, &c.u.ctl.stat0,
-		    G_FW_VI_STATS_CMD_NSTATS(ntohs(c.u.ctl.nstats_ix)));
+		    todo * sizeof(__be64));
 	}
 }
 
