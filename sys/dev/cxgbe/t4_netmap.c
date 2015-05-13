@@ -588,6 +588,9 @@ cxgbe_netmap_off(struct adapter *sc, struct vi_info *vi, struct ifnet *ifp,
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 
+	if ((vi->flags & VI_INIT_DONE) == 0)
+		return (0);
+	
 	rc = -t4_enable_vi(sc, sc->mbox, vi->viid, false, false);
 	if (rc != 0)
 		if_printf(ifp, "netmap disable_vi failed: %d\n", rc);
