@@ -4683,6 +4683,8 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	struct fw_vi_stats_cmd c;
 	int offset, rc, todo;
 
+	if (begin_synchronized_op(sc, vi, SLEEP_OK | INTR_OK, "vistats") != 0)
+		return;
 	for (offset = 0; offset < (sizeof(vi->stats) / sizeof(__be64));
 	     offset += 6) {
 		todo = imax(6, sizeof(vi->stats) / sizeof(__be64) - offset);
@@ -4697,17 +4699,18 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
 		    G_FW_CMD_RETVAL(ntohl(c.op_to_viid)) != FW_SUCCESS) {
 			device_printf(vi->dev, "failed to fetch VI stats\n");
+			end_synchronized_op(sc, 0);
 			return;
 		}
 		memcpy((__be64 *)&vi->stats + offset, &c.u.ctl.stat0,
 		    todo * sizeof(__be64));
 	}
+	end_synchronized_op(sc, 0);
 }
 
 static void
 cxgbe_refresh_stats(struct adapter *sc, struct port_info *pi)
 {
-	struct vi_info *vi;
 	int i;
 	u_int v, tnl_cong_drops;
 	struct timeval tv;
@@ -4730,11 +4733,6 @@ cxgbe_refresh_stats(struct adapter *sc, struct port_info *pi)
 		}
 	}
 	pi->tnl_cong_drops = tnl_cong_drops;
-	if (pi->nvi > 1) {
-		for_each_vi(pi, i, vi) {
-			vi_refresh_stats(sc, vi);
-		}
-	}
 	getmicrotime(&pi->last_refreshed);
 }
 
