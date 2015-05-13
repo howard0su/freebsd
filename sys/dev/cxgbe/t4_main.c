@@ -907,7 +907,7 @@ t4_attach(device_t dev)
 		for_each_vi(pi, j, vi) {
 #ifdef DEV_NETMAP
 			if (j == 1) {
-				vi->flags |= VI_NETMAP;
+				vi->flags |= VI_NETMAP | INTR_RXQ;
 				vi->first_rxq = nm_rqidx;
 				vi->first_txq = nm_tqidx;
 				if (is_10G_port(pi) || is_40G_port(pi)) {
