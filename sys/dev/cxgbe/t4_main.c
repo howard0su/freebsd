@@ -4694,7 +4694,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		return;
 	for (offset = 0; offset < (sizeof(vi->stats) / sizeof(__be64));
 	     offset += 6) {
-		todo = imax(6, sizeof(vi->stats) / sizeof(__be64) - offset);
+		todo = imin(6, sizeof(vi->stats) / sizeof(__be64) - offset);
 		memset(&c, 0, sizeof(c));
 		c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_STATS_CMD) |
 		    F_FW_CMD_REQUEST | F_FW_CMD_READ |
