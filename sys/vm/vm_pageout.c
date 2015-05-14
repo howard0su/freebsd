@@ -948,7 +948,7 @@ vm_pageout_scan(struct vm_domain *vmd, int pass)
 		}							\
 	}								\
 } while (0)
-	
+
 	/*
 	 * If we need to reclaim memory ask kernel caches to return
 	 * some.  We rate limit to avoid thrashing.
