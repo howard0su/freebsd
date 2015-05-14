@@ -97,7 +97,7 @@ FEATURE(ktr, "Kernel support for KTR kernel tracing facility");
 
 volatile int	ktr_idx = 0;
 uint64_t ktr_mask = KTR_MASK;
-int	ktr_compile = KTR_COMPILE;
+uint64_t ktr_compile = KTR_COMPILE;
 int	ktr_entries = KTR_BOOT_ENTRIES;
 int	ktr_version = KTR_VERSION;
 struct	ktr_entry ktr_buf_init[KTR_BOOT_ENTRIES];
@@ -109,7 +109,7 @@ static SYSCTL_NODE(_debug, OID_AUTO, ktr, CTLFLAG_RD, 0, "KTR options");
 SYSCTL_INT(_debug_ktr, OID_AUTO, version, CTLFLAG_RD,
     &ktr_version, 0, "Version of the KTR interface");
 
-SYSCTL_UINT(_debug_ktr, OID_AUTO, compile, CTLFLAG_RD,
+SYSCTL_UQUAD(_debug_ktr, OID_AUTO, compile, CTLFLAG_RD,
     &ktr_compile, 0, "Bitmask of KTR event classes compiled into the kernel");
 
 static int
