@@ -1620,26 +1620,24 @@ vi_get_counter(struct ifnet *ifp, ift_counter c)
 
 	switch (c) {
 	case IFCOUNTER_IPACKETS:
-		return (be64toh(s->rx_pf_frames));
+		return (s->rx_pf_frames);
 	case IFCOUNTER_IERRORS:
-		return (be64toh(s->rx_err_frames));
+		return (s->rx_err_frames);
 	case IFCOUNTER_OPACKETS:
-		return (be64toh(s->tx_bcast_frames) +
-		    be64toh(s->tx_mcast_frames) + be64toh(s->tx_ucast_frames) +
-		    be64toh(s->tx_offload_frames));
+		return (s->tx_bcast_frames + s->tx_mcast_frames +
+		    s->tx_ucast_frames + s->tx_offload_frames);
 #if 0
 	case IFCOUNTER_OERRORS:
 #endif
 	case IFCOUNTER_IBYTES:
-		return (be64toh(s->rx_pf_bytes));
+		return (s->rx_pf_bytes);
 	case IFCOUNTER_OBYTES:
-		return (be64toh(s->tx_bcast_bytes) +
-		    be64toh(s->tx_mcast_bytes) + be64toh(s->tx_ucast_bytes) +
-		    be64toh(s->tx_offload_bytes));
+		return (s->tx_bcast_bytes + s->tx_mcast_bytes +
+		    s->tx_ucast_bytes + s->tx_offload_bytes);
 	case IFCOUNTER_IMCASTS:
-		return (be64toh(s->rx_mcast_frames));
+		return (s->rx_mcast_frames);
 	case IFCOUNTER_OMCASTS:
-		return (be64toh(s->tx_mcast_frames));
+		return (s->tx_mcast_frames);
 #if 0
 	case IFCOUNTER_IQDROPS:
 #endif
@@ -4683,6 +4681,9 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	struct fw_vi_stats_cmd c;
 	struct timeval tv;
 	const struct timeval interval = {0, 250000};	/* 250ms */
+	struct fw_vi_stats_pf fwstats;
+	__be64 *statsp;
+	size_t len;
 	int offset, rc, todo;
 
 	getmicrotime(&tv);
@@ -4692,30 +4693,48 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 
 	if (begin_synchronized_op(sc, vi, HOLD_LOCK, "vistats") != 0)
 		return;
-	for (offset = 0; offset < (sizeof(vi->stats) / sizeof(__be64));
-	     offset += 6) {
-		todo = imin(6, sizeof(vi->stats) / sizeof(__be64) - offset);
+	statsp = (__be64 *)&fwstats;
+	len = offsetof(struct fw_vi_stats_cmd, u) +
+	    sizeof(struct fw_vi_stats_ctl);
+	len = roundup(len, 16);
+	for (offset = 0; offset < VI_PF_NUM_STATS; offset += 6) {
+		todo = imin(6, VI_PF_NUM_STATS - offset);
 		memset(&c, 0, sizeof(c));
 		c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_STATS_CMD) |
 		    F_FW_CMD_REQUEST | F_FW_CMD_READ |
 		    V_FW_VI_STATS_CMD_VIID(vi->viid));
-		c.retval_len16 = htonl(4);
+		c.retval_len16 = htonl(V_FW_CMD_LEN16(len / 16));
 		c.u.ctl.nstats_ix = htons(V_FW_VI_STATS_CMD_NSTATS(todo) |
 		    V_FW_VI_STATS_CMD_IX(offset));
 		device_printf(vi->dev, "Fetching %d stats at offset %d\n",
 		    todo, offset);
-		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, 4 * 16, &c);
-		if (rc != 0 || ntohl(c.op_to_viid) & F_FW_CMD_REQUEST ||
-		    G_FW_CMD_RETVAL(ntohl(c.retval_len16)) != FW_SUCCESS) {
+		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, len, &c);
+		if (rc != 0) {
 			device_printf(vi->dev,
-			    "failed to fetch VI stats: rc %d, retval = %d\n",
-			    rc, G_FW_CMD_RETVAL(ntohl(c.retval_len16)));
+			    "failed to fetch VI stats: rc %d\n", rc);
 			end_synchronized_op(sc, LOCK_HELD);
 			return;
 		}
-		memcpy((__be64 *)&vi->stats + offset, &c.u.ctl.stat0,
-		    todo * sizeof(__be64));
+		memcpy(statsp, &c.u.ctl.stat0, todo * sizeof(__be64));
+		statsp += todo;
 	}
+	vi->stats.tx_bcast_bytes = be64toh(fwstats.tx_bcast_bytes);
+	vi->stats.tx_bcast_frames = be64toh(fwstats.tx_bcast_frames);
+	vi->stats.tx_mcast_bytes = be64toh(fwstats.tx_mcast_bytes);
+	vi->stats.tx_mcast_frames = be64toh(fwstats.tx_mcast_frames);
+	vi->stats.tx_ucast_bytes = be64toh(fwstats.tx_ucast_bytes);
+	vi->stats.tx_ucast_frames = be64toh(fwstats.tx_ucast_frames);
+	vi->stats.tx_offload_bytes = be64toh(fwstats.tx_offload_bytes);
+	vi->stats.tx_offload_frames = be64toh(fwstats.tx_offload_frames);
+	vi->stats.rx_pf_bytes = be64toh(fwstats.rx_pf_bytes);
+	vi->stats.rx_pf_frames = be64toh(fwstats.rx_pf_frames);
+	vi->stats.rx_bcast_bytes = be64toh(fwstats.rx_bcast_bytes);
+	vi->stats.rx_bcast_frames = be64toh(fwstats.rx_bcast_frames);
+	vi->stats.rx_mcast_bytes = be64toh(fwstats.rx_mcast_bytes);
+	vi->stats.rx_mcast_frames = be64toh(fwstats.rx_mcast_frames);
+	vi->stats.rx_ucast_bytes = be64toh(fwstats.rx_ucast_bytes);
+	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
+	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
 	getmicrotime(&vi->last_refreshed);
 	end_synchronized_op(sc, LOCK_HELD);
 }
