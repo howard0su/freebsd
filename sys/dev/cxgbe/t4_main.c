@@ -4705,6 +4705,9 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	size_t len;
 	int offset, rc, todo;
 
+	if (!(vi->flags & VI_INIT_DONE))
+		return;
+
 	getmicrotime(&tv);
 	timevalsub(&tv, &interval);
 	if (timevalcmp(&tv, &vi->last_refreshed, <))
