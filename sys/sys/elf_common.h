@@ -202,6 +202,7 @@ typedef struct {
 #define	EM_386		3	/* Intel i386. */
 #define	EM_68K		4	/* Motorola 68000. */
 #define	EM_88K		5	/* Motorola 88000. */
+#define	EM_IAMCU	6	/* Intel MCU. */
 #define	EM_860		7	/* Intel i860. */
 #define	EM_MIPS		8	/* MIPS R3000 Big-Endian only. */
 #define	EM_S370		9	/* IBM System/370. */
@@ -363,6 +364,9 @@ typedef struct {
 #define	SHN_LOPROC	0xff00		/* First processor-specific. */
 #define	SHN_HIPROC	0xff1f		/* Last processor-specific. */
 #define	SHN_LOOS	0xff20		/* First operating system-specific. */
+#define	SHN_FBSD_CACHED	SHN_LOOS	/* Transient, for sys/kern/link_elf_obj
+					   linker only: Cached global in local
+					   symtab. */
 #define	SHN_HIOS	0xff3f		/* Last operating system-specific. */
 #define	SHN_ABS		0xfff1		/* Absolute values. */
 #define	SHN_COMMON	0xfff2		/* Common data. */
@@ -860,6 +864,7 @@ typedef struct {
 #define	R_386_TLS_TPOFF32	37	/* GOT entry of -ve static TLS offset */
 #define	R_386_IRELATIVE		42	/* PLT entry resolved indirectly at runtime */
 
+#define	R_AARCH64_NONE		0	/* No relocation */
 #define	R_AARCH64_ABS64		257	/* Absolute offset */
 #define	R_AARCH64_ABS32		258	/* Absolute, 32-bit overflow check */
 #define	R_AARCH64_ABS16		259	/* Absolute, 16-bit overflow check */
@@ -870,7 +875,11 @@ typedef struct {
 #define	R_AARCH64_GLOB_DAT	1025	/* Set GOT entry to data address */
 #define	R_AARCH64_JUMP_SLOT	1026	/* Set GOT entry to code address */
 #define	R_AARCH64_RELATIVE 	1027	/* Add load address of shared object */
+#define	R_AARCH64_TLS_DTPREL64	1028
+#define	R_AARCH64_TLS_DTPMOD64	1029
+#define	R_AARCH64_TLS_TPREL64 	1030
 #define	R_AARCH64_TLSDESC 	1031	/* Identify the TLS descriptor */
+#define	R_AARCH64_IRELATIVE	1032
 
 #define	R_ARM_NONE		0	/* No relocation. */
 #define	R_ARM_PC24		1

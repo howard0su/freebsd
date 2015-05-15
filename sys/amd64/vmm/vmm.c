@@ -1251,18 +1251,19 @@ vm_handle_inst_emul(struct vm *vm, int vcpuid, bool *retu)
 	struct vie *vie;
 	struct vcpu *vcpu;
 	struct vm_exit *vme;
-	uint64_t gla, gpa;
+	uint64_t gla, gpa, cs_base;
 	struct vm_guest_paging *paging;
 	mem_region_read_t mread;
 	mem_region_write_t mwrite;
 	enum vm_cpu_mode cpu_mode;
-	int cs_d, error, length;
+	int cs_d, error, fault, length;
 
 	vcpu = &vm->vcpu[vcpuid];
 	vme = &vcpu->exitinfo;
 
 	gla = vme->u.inst_emul.gla;
 	gpa = vme->u.inst_emul.gpa;
+	cs_base = vme->u.inst_emul.cs_base;
 	cs_d = vme->u.inst_emul.cs_d;
 	vie = &vme->u.inst_emul.vie;
 	paging = &vme->u.inst_emul.paging;
@@ -1277,23 +1278,23 @@ vm_handle_inst_emul(struct vm *vm, int vcpuid, bool *retu)
 		 * maximum size instruction.
 		 */
 		length = vme->inst_length ? vme->inst_length : VIE_INST_SIZE;
-		error = vmm_fetch_instruction(vm, vcpuid, paging, vme->rip,
-		    length, vie);
+		error = vmm_fetch_instruction(vm, vcpuid, paging, vme->rip +
+		    cs_base, length, vie, &fault);
 	} else {
 		/*
 		 * The instruction bytes have already been copied into 'vie'
 		 */
-		error = 0;
+		error = fault = 0;
 	}
-	if (error == 1)
-		return (0);		/* Resume guest to handle page fault */
-	else if (error == -1)
-		return (EFAULT);
-	else if (error != 0)
-		panic("%s: vmm_fetch_instruction error %d", __func__, error);
+	if (error || fault)
+		return (error);
 
-	if (vmm_decode_instruction(vm, vcpuid, gla, cpu_mode, cs_d, vie) != 0)
-		return (EFAULT);
+	if (vmm_decode_instruction(vm, vcpuid, gla, cpu_mode, cs_d, vie) != 0) {
+		VCPU_CTR1(vm, vcpuid, "Error decoding instruction at %#lx",
+		    vme->rip + cs_base);
+		*retu = true;	    /* dump instruction bytes in userspace */
+		return (0);
+	}
 
 	/*
 	 * If the instruction length was not specified then update it now
@@ -2318,7 +2319,7 @@ vm_copy_teardown(struct vm *vm, int vcpuid, struct vm_copyinfo *copyinfo,
 int
 vm_copy_setup(struct vm *vm, int vcpuid, struct vm_guest_paging *paging,
     uint64_t gla, size_t len, int prot, struct vm_copyinfo *copyinfo,
-    int num_copyinfo)
+    int num_copyinfo, int *fault)
 {
 	int error, idx, nused;
 	size_t n, off, remaining;
@@ -2331,8 +2332,8 @@ vm_copy_setup(struct vm *vm, int vcpuid, struct vm_guest_paging *paging,
 	remaining = len;
 	while (remaining > 0) {
 		KASSERT(nused < num_copyinfo, ("insufficient vm_copyinfo"));
-		error = vmm_gla2gpa(vm, vcpuid, paging, gla, prot, &gpa);
-		if (error)
+		error = vm_gla2gpa(vm, vcpuid, paging, gla, prot, &gpa, fault);
+		if (error || *fault)
 			return (error);
 		off = gpa & PAGE_MASK;
 		n = min(remaining, PAGE_SIZE - off);
@@ -2354,8 +2355,9 @@ vm_copy_setup(struct vm *vm, int vcpuid, struct vm_guest_paging *paging,
 
 	if (idx != nused) {
 		vm_copy_teardown(vm, vcpuid, copyinfo, num_copyinfo);
-		return (-1);
+		return (EFAULT);
 	} else {
+		*fault = 0;
 		return (0);
 	}
 }

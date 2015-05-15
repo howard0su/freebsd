@@ -24,7 +24,6 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <err.h>
@@ -35,7 +34,7 @@
 
 #include "elfcopy.h"
 
-ELFTC_VCSID("$Id: sections.c 3150 2015-02-15 19:07:46Z emaste $");
+ELFTC_VCSID("$Id: sections.c 3185 2015-04-11 08:56:34Z kaiwang27 $");
 
 static void	add_gnu_debuglink(struct elfcopy *ecp);
 static uint32_t calc_crc32(const char *p, size_t len, uint32_t crc);
@@ -47,6 +46,7 @@ static void	insert_to_strtab(struct section *t, const char *s);
 static int	is_append_section(struct elfcopy *ecp, const char *name);
 static int	is_compress_section(struct elfcopy *ecp, const char *name);
 static int	is_debug_section(const char *name);
+static int	is_dwo_section(const char *name);
 static int	is_modify_section(struct elfcopy *ecp, const char *name);
 static int	is_print_section(struct elfcopy *ecp, const char *name);
 static int	lookup_string(struct section *t, const char *s);
@@ -72,6 +72,11 @@ is_remove_section(struct elfcopy *ecp, const char *name)
 		else
 			return (0);
 	}
+
+	if (ecp->strip == STRIP_DWO && is_dwo_section(name))
+		return (1);
+	if (ecp->strip == STRIP_NONDWO && !is_dwo_section(name))
+		return (1);
 
 	if (is_debug_section(name)) {
 		if (ecp->strip == STRIP_ALL ||
@@ -230,6 +235,16 @@ is_debug_section(const char *name)
 			return (1);
 	}
 
+	return (0);
+}
+
+static int
+is_dwo_section(const char *name)
+{
+	size_t len;
+
+	if ((len = strlen(name)) > 4 && strcmp(name + len - 4, ".dwo") == 0)
+		return (1);
 	return (0);
 }
 
@@ -1207,6 +1222,14 @@ update_shdr(struct elfcopy *ecp, int update_link)
 		if ((s->type == SHT_REL || s->type == SHT_RELA) &&
 		    osh.sh_info != 0)
 			osh.sh_info = ecp->secndx[osh.sh_info];
+
+		/*
+		 * sh_info of SHT_GROUP section needs to point to the correct
+		 * string in the symbol table.
+		 */
+		if (s->type == SHT_GROUP && (ecp->flags & SYMTAB_EXIST) &&
+		    (ecp->flags & SYMTAB_INTACT) == 0)
+			osh.sh_info = ecp->symndx[osh.sh_info];
 
 		if (!gelf_update_shdr(s->os, &osh))
 			errx(EXIT_FAILURE, "gelf_update_shdr() failed: %s",

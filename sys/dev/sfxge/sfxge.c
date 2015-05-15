@@ -57,13 +57,16 @@ __FBSDID("$FreeBSD$");
 
 #include "sfxge.h"
 #include "sfxge_rx.h"
+#include "sfxge_version.h"
 
-#define	SFXGE_CAP (IFCAP_VLAN_MTU | \
-		   IFCAP_HWCSUM | IFCAP_VLAN_HWCSUM | IFCAP_TSO |	\
+#define	SFXGE_CAP (IFCAP_VLAN_MTU | IFCAP_VLAN_HWCSUM |			\
+		   IFCAP_RXCSUM | IFCAP_TXCSUM | IFCAP_TSO |		\
+		   IFCAP_RXCSUM_IPV6 | IFCAP_TXCSUM_IPV6 |		\
 		   IFCAP_JUMBO_MTU | IFCAP_LRO |			\
 		   IFCAP_VLAN_HWTSO | IFCAP_LINKSTATE | IFCAP_HWSTATS)
 #define	SFXGE_CAP_ENABLE SFXGE_CAP
-#define	SFXGE_CAP_FIXED (IFCAP_VLAN_MTU | IFCAP_HWCSUM | IFCAP_VLAN_HWCSUM | \
+#define	SFXGE_CAP_FIXED (IFCAP_VLAN_MTU | IFCAP_RXCSUM | IFCAP_VLAN_HWCSUM | \
+			 IFCAP_RXCSUM_IPV6 |				\
 			 IFCAP_JUMBO_MTU | IFCAP_LINKSTATE | IFCAP_HWSTATS)
 
 MALLOC_DEFINE(M_SFXGE, "sfxge", "Solarflare 10GigE driver");
@@ -275,10 +278,18 @@ sfxge_if_ioctl(struct ifnet *ifp, unsigned long command, caddr_t data)
 			ifp->if_hwassist |= (CSUM_IP | CSUM_TCP | CSUM_UDP);
 		else
 			ifp->if_hwassist &= ~(CSUM_IP | CSUM_TCP | CSUM_UDP);
-		if (ifp->if_capenable & IFCAP_TSO)
-			ifp->if_hwassist |= CSUM_TSO;
+		if (ifp->if_capenable & IFCAP_TXCSUM_IPV6)
+			ifp->if_hwassist |= (CSUM_TCP_IPV6 | CSUM_UDP_IPV6);
 		else
-			ifp->if_hwassist &= ~CSUM_TSO;
+			ifp->if_hwassist &= ~(CSUM_TCP_IPV6 | CSUM_UDP_IPV6);
+
+		/*
+		 * The kernel takes both IFCAP_TSOx and CSUM_TSO into
+		 * account before using TSO. So, we do not touch
+		 * checksum flags when IFCAP_TSOx is modified.
+		 * Note that CSUM_TSO is (CSUM_IP_TSO|CSUM_IP6_TSO),
+		 * but both bits are set in IPv4 and IPv6 mbufs.
+		 */
 
 		SFXGE_ADAPTER_UNLOCK(sc);
 		break;
@@ -325,23 +336,13 @@ sfxge_ifnet_init(struct ifnet *ifp, struct sfxge_softc *sc)
 
 	ifp->if_capabilities = SFXGE_CAP;
 	ifp->if_capenable = SFXGE_CAP_ENABLE;
-	ifp->if_hwassist = CSUM_TCP | CSUM_UDP | CSUM_IP | CSUM_TSO;
+	ifp->if_hwassist = CSUM_TCP | CSUM_UDP | CSUM_IP | CSUM_TSO |
+			   CSUM_TCP_IPV6 | CSUM_UDP_IPV6;
 
 	ether_ifattach(ifp, encp->enc_mac_addr);
 
-#ifdef SFXGE_HAVE_MQ
 	ifp->if_transmit = sfxge_if_transmit;
 	ifp->if_qflush = sfxge_if_qflush;
-#else
-	ifp->if_start = sfxge_if_start;
-	IFQ_SET_MAXLEN(&ifp->if_snd, sc->txq_entries - 1);
-	ifp->if_snd.ifq_drv_maxlen = sc->txq_entries - 1;
-	IFQ_SET_READY(&ifp->if_snd);
-
-	snprintf(sc->tx_lock_name, sizeof(sc->tx_lock_name),
-		 "%s:tx", device_get_nameunit(sc->dev));
-	mtx_init(&sc->tx_lock, sc->tx_lock_name, NULL, MTX_DEF);
-#endif
 
 	ifp->if_get_counter = sfxge_get_counter;
 
@@ -474,6 +475,12 @@ sfxge_create(struct sfxge_softc *sc)
 	/* Probe the NIC and build the configuration data area. */
 	if ((error = efx_nic_probe(enp)) != 0)
 		goto fail5;
+
+	SYSCTL_ADD_STRING(device_get_sysctl_ctx(dev),
+			  SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
+			  OID_AUTO, "version", CTLFLAG_RD,
+			  SFXGE_VERSION_STRING, 0,
+			  "Driver version");
 
 	/* Initialize the NVRAM. */
 	if ((error = efx_nvram_init(enp)) != 0)

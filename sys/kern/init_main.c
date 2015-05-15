@@ -515,7 +515,7 @@ proc0_init(void *dummy __unused)
 	newcred->cr_ruidinfo = uifind(0);
 	newcred->cr_prison = &prison0;
 	newcred->cr_loginclass = loginclass_find("default");
-	proc_set_cred(p, newcred);
+	proc_set_cred_init(p, newcred);
 #ifdef AUDIT
 	audit_cred_kproc0(newcred);
 #endif
@@ -561,9 +561,9 @@ proc0_init(void *dummy __unused)
 	p->p_stats = pstats_alloc();
 
 	/* Allocate a prototype map so we have something to fork. */
-	pmap_pinit0(vmspace_pmap(&vmspace0));
 	p->p_vmspace = &vmspace0;
 	vmspace0.vm_refcnt = 1;
+	pmap_pinit0(vmspace_pmap(&vmspace0));
 
 	/*
 	 * proc0 is not expected to enter usermode, so there is no special
@@ -709,6 +709,9 @@ start_init(void *dummy)
 	p = td->td_proc;
 
 	vfs_mountroot();
+
+	/* Wipe GELI passphrase from the environment. */
+	kern_unsetenv("kern.geom.eli.passphrase");
 
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.

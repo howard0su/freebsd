@@ -39,12 +39,13 @@
 #include <sys/uio.h>
 #include <sys/unistd.h>
 
-#define BLOCKIF_IOV_MAX		33	/* not practical to be IOV_MAX */
+#define BLOCKIF_IOV_MAX		67	/* not practical to be IOV_MAX */
 
 struct blockif_req {
 	struct iovec	br_iov[BLOCKIF_IOV_MAX];
 	int		br_iovcnt;
 	off_t		br_offset;
+	ssize_t		br_resid;
 	void		(*br_callback)(struct blockif_req *req, int err);
 	void		*br_param;
 };
