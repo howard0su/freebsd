@@ -1614,7 +1614,11 @@ static uint64_t
 vi_get_counter(struct ifnet *ifp, ift_counter c)
 {
 	struct vi_info *vi = ifp->if_softc;
+#ifdef USE_PF_STATS
 	struct fw_vi_stats_pf *s = &vi->stats;
+#else
+	struct fw_vi_stats_vf *s = &vi->stats;
+#endif
 
 	vi_refresh_stats(vi->pi->adapter, vi);
 
