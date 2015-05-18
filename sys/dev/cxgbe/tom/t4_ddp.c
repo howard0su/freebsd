@@ -1250,7 +1250,7 @@ t4_soreceive_ddp(struct socket *so, struct sockaddr **psa, struct uio *uio,
 	}
 	oresid = uio->uio_resid;
 
-	/* We will never ever get anything unless we are or were connected. */
+	/* We will never get anything unless we are or were connected. */
 	if (!(so->so_state & (SS_ISCONNECTED|SS_ISDISCONNECTED))) {
 		error = ENOTCONN;
 		goto out;
@@ -1608,13 +1608,13 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 	ulpmc = (struct ulp_txpkt *)(wrh + 1);
 
 	if (buf0 != NULL) {
-		/* Write buffer 0's tag */
+		/* Write buffer 0's tag. */
 		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
 		    W_TCB_RX_DDP_BUF0_TAG,
 		    V_TCB_RX_DDP_BUF0_TAG(M_TCB_RX_DDP_BUF0_TAG),
 		    V_TCB_RX_DDP_BUF0_TAG(buf0->db->tag));
 
-		/* Update buffer 0's offset and total length */
+		/* Update buffer 0's offset and total length. */
 		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
 		    W_TCB_RX_DDP_BUF0_OFFSET,
 		    V_TCB_RX_DDP_BUF0_OFFSET(M_TCB_RX_DDP_BUF0_OFFSET) |
@@ -1628,14 +1628,22 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 	}
 
 	if (buf1 != NULL) {
-		/* Write buffer 1's tag */
+		/* Write buffer 1's tag. */
 		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
 		    W_TCB_RX_DDP_BUF1_TAG,
 		    V_TCB_RX_DDP_BUF1_TAG(M_TCB_RX_DDP_BUF0_TAG),
 		    V_TCB_RX_DDP_BUF1_TAG(buf1->db->tag));
 
-		/* Update buffer 1's offset and total length */
-		/* XXX: jhb: why the shifts? */
+		/*
+		 * Update buffer 1's offset and total length.  Note
+		 * that buffer1's length is in the next 32-bit word
+		 * after W_TCB_RX_DDP_BUF1_OFFSET (unlike buffer 0
+		 * where both fields are in the same 32-bit word).
+		 * However, mk_set_tcb_field_ulp() actually sets 2
+		 * 32-bit words.  The extra shift left by 32 below
+		 * accounts for buffer 1's length field being in the
+		 * second word.
+		 */
 		ulpmc = mk_set_tcb_field_ulp(ulpmc, toep,
 		    W_TCB_RX_DDP_BUF1_OFFSET,
 		    V_TCB_RX_DDP_BUF1_OFFSET(M_TCB_RX_DDP_BUF1_OFFSET) |
@@ -1648,7 +1656,7 @@ mk_update_tcb_for_static_ddp(struct adapter *sc, struct toepcb *toep,
 		sd->queued[1] = buf1;
 	}
 
-	/* Update DDP flags */
+	/* Update DDP flags. */
 	ulpmc = mk_set_tcb_field_ulp(ulpmc, toep, W_TCB_RX_DDP_FLAGS,
 	    ddp_flags_mask, ddp_flags);
 

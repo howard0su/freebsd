@@ -1588,7 +1588,6 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 			KASSERT((toep->ddp_flags & DDP_STATIC_BUF) == 0 ||
 			    len == 0, ("%s: static DDP received non-DDP data",
 			    __func__));
-			    
 		} else if ((toep->ddp_flags & (DDP_OK|DDP_SC_REQ)) == DDP_OK &&
 		    tp->rcv_wnd > DDP_RSVD_WIN && len >= sc->tt.ddp_thres) {
 
