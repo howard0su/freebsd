@@ -1,7 +1,7 @@
 # $FreeBSD$
 
 LIB=	iobuf
-SRCS=	iobuf.c
+SRCS=	iobuf_pool.c
 INCS=	iobuf.h
 #MAN=	iobuf.3
 

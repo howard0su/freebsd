@@ -27,34 +27,20 @@
  * $FreeBSD$
  */
 
-#ifndef __IOBUF_H__
-#define	__IOBUF_H__
+#ifndef __IOBUF_INTERNAL_H__
+#define	__IOBUF_INTERNAL_H__
 
-struct iobuf;
-struct iobuf_pool;
-
-struct iobuf_vec {
-	struct iobuf *iv_buf;
-	size_t	iv_offset;
-	size_t	iv_len;
+struct iobuf {
+	struct iobuf_pool *io_pool;
+	int	io_id;
 };
 
-typedef struct iobuf *iobuf_t;
-typedef struct iobuf_pool *iobuf_pool_t;
-typedef struct iobuf_vec *iobuf_vec_t;
+struct iobuf_pool {
+	int	ip_fd;
+	size_t	ip_nbufs;
+	size_t	ip_bufsize;
+	void	*ip_mapping;
+	size_t	ip_mapping_len;
+};
 
-iobuf_pool_t iobuf_pool_create(size_t _number, size_t _size);
-void	iobuf_pool_delete(iobuf_pool_t _pool);
-
-iobuf_t	iobuf_alloc(iobuf_pool_t _pool);
-iobuf_t	iobuf_ref(iobuf_t _iobuf);
-void	iobuf_free(iobuf_t _iobuf);
-
-void	*iobuf_base(iobuf_t _iobuf);
-
-ssize_t	iobuf_read(int _fd, iobuf_vec_t _vec, int _veccnt);
-ssize_t	iobuf_pread(int _fd, iobuf_vec_t _vec, int _veccnt, off_t _offset);
-ssize_t	iobuf_write(int _fd, iobuf_vec_t _vec, int _veccnt);
-ssize_t	iobuf_pwrite(int _fd, iobuf_vec_t _vec, int _veccnt, off_t _offset);
-
-#endif /* !__IOBUF_H__ */
+#endif /* !__IOBUF_INTERNAL_H__ */
