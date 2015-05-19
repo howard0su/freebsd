@@ -525,6 +525,8 @@ exit1(struct thread *td, int rv)
 	 */
 	while ((q = LIST_FIRST(&p->p_orphans)) != NULL) {
 		PROC_LOCK(q);
+		CTR2(KTR_PTRACE, "exit: pid %d, clearing orphan %d", p->p_pid,
+		    q->p_pid);
 		clear_orphan(q);
 		PROC_UNLOCK(q);
 	}
@@ -857,6 +859,9 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 		t = proc_realparent(p);
 		PROC_LOCK(t);
 		PROC_LOCK(p);
+		CTR2(KTR_PTRACE,
+		    "wait: traced child %d moved back to parent %d", p->p_pid,
+		    t->p_pid);
 		proc_reparent(p, t);
 		p->p_oppid = 0;
 		PROC_UNLOCK(p);
@@ -948,7 +953,7 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 
 static int
 proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
-    int *status, int options, struct __wrusage *wrusage, siginfo_t *siginfo)
+    int *status, int options, struct __wrusage *wrusage, siginfo_t *siginfo, int orphan_check)
 {
 	struct proc *q;
 	struct rusage *rup;
@@ -1088,6 +1093,9 @@ proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
 
 	if (p->p_state == PRS_ZOMBIE) {
 		PROC_SLOCK(p);
+		if (orphan_check)
+			CTR1(KTR_PTRACE, "wait: reaping orphan child pid %d",
+			    p->p_pid);
 		proc_reap(td, p, status, options);
 		return (-1);
 	}
@@ -1180,7 +1188,7 @@ loop:
 	sx_xlock(&proctree_lock);
 	LIST_FOREACH(p, &q->p_children, p_sibling) {
 		ret = proc_to_reap(td, p, idtype, id, status, options,
-		    wrusage, siginfo);
+		    wrusage, siginfo, 0);
 		if (ret == 0)
 			continue;
 		else if (ret == 1)
@@ -1214,6 +1222,10 @@ loop:
 				PROC_UNLOCK(q);
 			}
 
+			CTR3(KTR_PTRACE,
+		    "wait: returning trapped pid %d status %#x xthread %d",
+			    p->p_pid, W_STOPCODE(p->p_xstat),
+			    p->p_xthread != NULL ? p->p_xthread->td_tid : -1);
 			PROC_UNLOCK(p);
 			return (0);
 		}
@@ -1280,7 +1292,7 @@ loop:
 	 */
 	LIST_FOREACH(p, &q->p_orphans, p_orphan) {
 		ret = proc_to_reap(td, p, idtype, id, status, options,
-		    wrusage, siginfo);
+		    wrusage, siginfo, 1);
 		if (ret == 0)
 			continue;
 		else if (ret == 1)
