@@ -377,12 +377,21 @@ pget(pid_t pid, int flags, struct proc **pp)
 		p = NULL;
 	}
 	sx_sunlock(&allproc_lock);
-	if (p == NULL)
+	if (p == NULL) {
+		if (flags == PGET_CANSEE)
+			CTR1(KTR_PTRACE,
+			    "pget: failed to find pid %d via pfind", pid);
 		return (ESRCH);
+	}
 	if ((flags & PGET_CANSEE) != 0) {
 		error = p_cansee(curthread, p);
-		if (error != 0)
+		if (error != 0) {
+		if (flags == PGET_CANSEE)
+			CTR1(KTR_PTRACE,
+			    "pget: failed to find pid %d via p_cansee: %d", pid,
+			    error);
 			goto errout;
+		}
 	}
 	if ((flags & PGET_CANDEBUG) != 0) {
 		error = p_candebug(curthread, p);
