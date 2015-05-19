@@ -855,7 +855,7 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 	 * If we got the child via a ptrace 'attach', we need to give it back
 	 * to the old parent.
 	 */
-	if (p->p_oppid != 0) {
+	if (p->p_oppid !=0 && p->p_oppid != p->p_pptr->p_pid) {
 		t = proc_realparent(p);
 		PROC_LOCK(t);
 		PROC_LOCK(p);
