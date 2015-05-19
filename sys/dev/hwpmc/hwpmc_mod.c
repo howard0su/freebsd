@@ -4633,7 +4633,7 @@ pmc_name_of_pmcclass(enum pmc_class class)
 #undef	__PMC_CLASS
 #define	__PMC_CLASS(S,V,D)						\
 	case PMC_CLASS_##S:						\
-		return #V;
+		return #S;
 	__PMC_CLASSES();
 	default:
 		return ("<unknown>");
