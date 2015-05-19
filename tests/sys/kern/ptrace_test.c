@@ -165,6 +165,7 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_debugger, tc)
 
 	if (debugger == 0) {
 		/* Debugger process. */
+		close(dpipe[0]);
 
 		ATF_REQUIRE(ptrace(PT_ATTACH, child, NULL, 0) != -1);
 
