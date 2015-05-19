@@ -29,6 +29,8 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/types.h>
 #include <sys/ptrace.h>
+#include <sys/sysctl.h>
+#include <sys/user.h>
 #include <sys/wait.h>
 #include <errno.h>
 #include <signal.h>
@@ -133,11 +135,121 @@ ATF_TC_BODY(ptrace__parent_wait_after_attach, tc)
 	ATF_REQUIRE(errno == ECHILD);
 }
 
+/*
+ * Verify that a parent process "sees" the exit of a debugged process only
+ * after the debugger has seen it.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__parent_sees_exit_after_debugger);
+ATF_TC_BODY(ptrace__parent_sees_exit_after_debugger, tc)
+{
+	pid_t child, debugger, wpid;
+	int cpipe[2], dpipe[2], status;
+	char c;
+
+	ATF_REQUIRE(pipe(cpipe) == 0);
+	ATF_REQUIRE((child = fork()) != -1);
+
+	if (child == 0) {
+		/* Child process. */
+		close(cpipe[0]);
+
+		/* Wait for parent to be ready. */
+		ATF_REQUIRE(read(cpipe[1], &c, sizeof(c)) == sizeof(c));
+
+		exit(1);
+	}
+	close(cpipe[1]);
+
+	ATF_REQUIRE(pipe(dpipe) == 0);
+	ATF_REQUIRE((debugger = fork()) != -1);
+
+	if (debugger == 0) {
+		/* Debugger process. */
+
+		ATF_REQUIRE(ptrace(PT_ATTACH, child, NULL, 0) != -1);
+
+		wpid = waitpid(child, &status, 0);
+		ATF_REQUIRE(wpid == child);
+		ATF_REQUIRE(WIFSTOPPED(status));
+		ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+
+		ATF_REQUIRE(ptrace(PT_CONTINUE, child, (caddr_t)1, 0) != -1);
+
+		/* Signal parent that debugger is attached. */
+		ATF_REQUIRE(write(dpipe[1], &c, sizeof(c)) == sizeof(c));
+
+		/* Wait for parent's failed wait. */
+		ATF_REQUIRE(read(dpipe[1], &c, sizeof(c)) == 0);
+
+		wpid = waitpid(child, &status, 0);
+		ATF_REQUIRE(wpid == child);
+		ATF_REQUIRE(WIFEXITED(status));
+		ATF_REQUIRE(WEXITSTATUS(status) == 1);
+
+		exit(0);
+	}
+	close(dpipe[1]);
+
+	/* Parent process. */
+
+	/* Wait for the debugger to attach to the child. */
+	ATF_REQUIRE(read(dpipe[0], &c, sizeof(c)) == sizeof(c));
+
+	/* Release the child. */
+	ATF_REQUIRE(write(cpipe[0], &c, sizeof(c)) == sizeof(c));
+	ATF_REQUIRE(read(cpipe[0], &c, sizeof(c)) == 0);
+	close(cpipe[0]);
+
+	/*
+	 * Wait for the child to exit.  This is kind of gross, but
+	 * there is not a better way.
+	 */
+	for (;;) {
+		struct kinfo_proc kp;
+		size_t len;
+		int mib[4];
+
+		mib[0] = CTL_KERN;
+		mib[1] = KERN_PROC;
+		mib[2] = KERN_PROC_PID;
+		mib[3] = child;
+		len = sizeof(kp);
+		ATF_REQUIRE(sysctl(mib, nitems(mib), &kp, &len, NULL, 0) == 0);
+		if (kp.ki_stat == SZOMB)
+			break;
+		usleep(5000);
+	}
+
+	/*
+	 * This wait should fail with ECHILD since the child should be
+	 * invisible until the debugger sees the exit.
+	 */
+	wpid = waitpid(child, &status, WNOHANG);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+
+	/* Signal the debugger to wait for the child. */
+	close(dpipe[0]);
+
+	/* Wait for the debugger. */
+	wpid = waitpid(debugger, &status, 0);
+	ATF_REQUIRE(wpid == debugger);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 0);
+
+	/* The child process should now be ready. */
+	wpid = waitpid(child, &status, WNOHANG);
+	ATF_REQUIRE(wpid == child);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 1);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
 	ATF_TP_ADD_TC(tp, ptrace__parent_wait_after_trace_me);
 	ATF_TP_ADD_TC(tp, ptrace__parent_wait_after_attach);
+	ATF_TP_ADD_TC(tp, ptrace__parent_sees_exit_after_debugger);
 
 	return (atf_no_error());
 }
