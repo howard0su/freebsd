@@ -215,9 +215,11 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_debugger, tc)
 		mib[2] = KERN_PROC_PID;
 		mib[3] = child;
 		len = sizeof(kp);
-		ATF_REQUIRE(sysctl(mib, nitems(mib), &kp, &len, NULL, 0) == 0);
-		if (kp.ki_stat == SZOMB)
+		if (sysctl(mib, nitems(mib), &kp, &len, NULL, 0) == -1) {
+			/* The KERN_PROC_PID sysctl fails for zombies. */
+			ATF_REQUIRE(errno == ESRCH);
 			break;
+		}
 		usleep(5000);
 	}
 
