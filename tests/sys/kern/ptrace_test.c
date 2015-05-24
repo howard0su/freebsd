@@ -224,12 +224,12 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_debugger, tc)
 	}
 
 	/*
-	 * This wait should fail with ECHILD since the child should be
-	 * invisible until the debugger sees the exit.
+	 * This wait should return an empty pid.  The parent should
+	 * see the child as non-exited until the debugger sees the
+	 * exit.
 	 */
 	wpid = waitpid(child, &status, WNOHANG);
-	ATF_REQUIRE(wpid == -1);
-	ATF_REQUIRE(errno == ECHILD);
+	ATF_REQUIRE(wpid == 0);
 
 	/* Signal the debugger to wait for the child. */
 	close(dpipe[0]);
