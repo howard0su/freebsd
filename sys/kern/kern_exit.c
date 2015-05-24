@@ -950,7 +950,8 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 
 static int
 proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
-    int *status, int options, struct __wrusage *wrusage, siginfo_t *siginfo)
+    int *status, int options, struct __wrusage *wrusage, siginfo_t *siginfo,
+    int check_only)
 {
 	struct proc *q;
 	struct rusage *rup;
@@ -1088,7 +1089,7 @@ proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
 		calccru(p, &rup->ru_utime, &rup->ru_stime);
 	}
 
-	if (p->p_state == PRS_ZOMBIE) {
+	if (p->p_state == PRS_ZOMBIE && !check_only) {
 		PROC_SLOCK(p);
 		proc_reap(td, p, status, options);
 		return (-1);
@@ -1182,7 +1183,7 @@ loop:
 	sx_xlock(&proctree_lock);
 	LIST_FOREACH(p, &q->p_children, p_sibling) {
 		ret = proc_to_reap(td, p, idtype, id, status, options,
-		    wrusage, siginfo);
+		    wrusage, siginfo, 0);
 		if (ret == 0)
 			continue;
 		else if (ret == 1)
@@ -1282,13 +1283,13 @@ loop:
 	 */
 	LIST_FOREACH(p, &q->p_orphans, p_orphan) {
 		ret = proc_to_reap(td, p, idtype, id, status, options,
-		    wrusage, siginfo);
+		    wrusage, siginfo, 1);
 		if (ret == 0)
 			continue;
 		else if (ret == 1)
 			nfound++;
 		else
-			return (0);
+			panic("reaped an orphan");
 	}
 	if (nfound == 0) {
 		sx_xunlock(&proctree_lock);
