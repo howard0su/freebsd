@@ -1219,9 +1219,9 @@ loop:
 				PROC_UNLOCK(q);
 			}
 
-			CTR3(KTR_PTRACE,
-		    "wait: returning trapped pid %d status %#x xthread %d",
-			    p->p_pid, W_STOPCODE(p->p_xstat),
+			CTR4(KTR_PTRACE,
+	    "wait: returning trapped pid %d status %#x (xstat %d) xthread %d",
+			    p->p_pid, W_STOPCODE(p->p_xstat), p->p_xstat,
 			    p->p_xthread != NULL ? p->p_xthread->td_tid : -1);
 			PROC_UNLOCK(p);
 			return (0);
