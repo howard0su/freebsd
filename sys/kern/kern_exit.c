@@ -953,7 +953,7 @@ proc_reap(struct thread *td, struct proc *p, int *status, int options)
 
 static int
 proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
-    int *status, int options, struct __wrusage *wrusage, siginfo_t *siginfo, int orphan_check)
+    int *status, int options, struct __wrusage *wrusage, siginfo_t *siginfo)
 {
 	struct proc *q;
 	struct rusage *rup;
@@ -1093,9 +1093,6 @@ proc_to_reap(struct thread *td, struct proc *p, idtype_t idtype, id_t id,
 
 	if (p->p_state == PRS_ZOMBIE) {
 		PROC_SLOCK(p);
-		if (orphan_check)
-			CTR1(KTR_PTRACE, "wait: reaping orphan child pid %d",
-			    p->p_pid);
 		proc_reap(td, p, status, options);
 		return (-1);
 	}
@@ -1188,7 +1185,7 @@ loop:
 	sx_xlock(&proctree_lock);
 	LIST_FOREACH(p, &q->p_children, p_sibling) {
 		ret = proc_to_reap(td, p, idtype, id, status, options,
-		    wrusage, siginfo, 0);
+		    wrusage, siginfo);
 		if (ret == 0)
 			continue;
 		else if (ret == 1)
@@ -1292,7 +1289,7 @@ loop:
 	 */
 	LIST_FOREACH(p, &q->p_orphans, p_orphan) {
 		ret = proc_to_reap(td, p, idtype, id, status, options,
-		    wrusage, siginfo, 1);
+		    wrusage, siginfo);
 		if (ret == 0)
 			continue;
 		else if (ret == 1)
