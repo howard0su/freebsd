@@ -882,7 +882,7 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 
 	case PT_FOLLOW_FORK:
 		CTR3(KTR_PTRACE, "PT_FOLLOW_FORK: pid %d %s -> %s", p->p_pid,
-		    p->p_flag ? P_FOLLOWFORK ? "enabled" : "disabled",
+		    p->p_flag & P_FOLLOWFORK ? "enabled" : "disabled",
 		    data ? "enabled" : "disabled");
 		if (data)
 			p->p_flag |= P_FOLLOWFORK;
