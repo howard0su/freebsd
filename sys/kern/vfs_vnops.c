@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 #include <sys/limits.h>
 #include <sys/lock.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/namei.h>
@@ -105,6 +106,7 @@ struct 	fileops vnops = {
 	.fo_sendfile = vn_sendfile,
 	.fo_seek = vn_seek,
 	.fo_fill_kinfo = vn_fill_kinfo,
+	.fo_mmap = vn_mmap,
 	.fo_flags = DFLAG_PASSABLE | DFLAG_SEEKABLE
 };
 
@@ -2357,4 +2359,65 @@ vn_fill_kinfo_vnode(struct vnode *vp, struct kinfo_file *kif)
 	kif->kf_un.kf_file.kf_file_size = va.va_size;
 	kif->kf_un.kf_file.kf_file_rdev = va.va_rdev;
 	return (0);
+}
+
+int
+vn_mmap(struct file *fp, vm_size_t size, vm_prot_t prot,
+    vm_prot_t *cap_maxprot, vm_prot_t *maxprot, int *flags, vm_ooffset_t *foff,
+    vm_object_t *obj, boolean_t *writecounted, struct thread *td)
+{
+	struct vnode *vp;
+	
+#if defined(COMPAT_FREEBSD7) || defined(COMPAT_FREEBSD6) || \
+    defined(COMPAT_FREEBSD5) || defined(COMPAT_FREEBSD4)
+	/*
+	 * POSIX shared-memory objects are defined to have
+	 * kernel persistence, and are not defined to support
+	 * read(2)/write(2) -- or even open(2).  Thus, we can
+	 * use MAP_ASYNC to trade on-disk coherence for speed.
+	 * The shm_open(3) library routine turns on the FPOSIXSHM
+	 * flag to request this behavior.
+	 */
+	if (fp->f_flag & FPOSIXSHM)
+		*flags |= MAP_NOSYNC;
+#endif
+	vp = fp->f_vnode;
+
+	/*
+	 * Ensure that file and memory protections are
+	 * compatible.  Note that we only worry about
+	 * writability if mapping is shared; in this case,
+	 * current and max prot are dictated by the open file.
+	 * XXX use the vnode instead?  Problem is: what
+	 * credentials do we use for determination? What if
+	 * proc does a setuid?
+	 */
+	if (vp->v_mount != NULL && vp->v_mount->mnt_flag & MNT_NOEXEC)
+		*maxprot = VM_PROT_NONE;
+	else
+		*maxprot = VM_PROT_EXECUTE;
+	if (fp->f_flag & FREAD)
+		*maxprot |= VM_PROT_READ;
+	else if (prot & PROT_READ)
+		return (EACCES);
+
+	/*
+	 * If we are sharing potential changes (either via
+	 * MAP_SHARED or via the implicit sharing of character
+	 * device mappings), and we are trying to get write
+	 * permission although we opened it without asking
+	 * for it, bail out.
+	 */
+	if ((*flags & MAP_SHARED) != 0) {
+		if ((fp->f_flag & FWRITE) != 0)
+			*maxprot |= VM_PROT_WRITE;
+		else if ((prot & PROT_WRITE) != 0)
+			return (EACCES);
+	} else if (vp->v_type != VCHR || (fp->f_flag & FWRITE) != 0) {
+		*maxprot |= VM_PROT_WRITE;
+		*cap_maxprot |= VM_PROT_WRITE;
+	}
+
+	return (vm_mmap_vnode(td, size, prot, maxprot, flags, vp, foff,
+	    obj, writecounted));
 }

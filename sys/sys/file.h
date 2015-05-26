@@ -42,6 +42,7 @@
 #include <sys/refcount.h>
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
+#include <vm/vm.h>
 
 struct filedesc;
 struct stat;
@@ -115,6 +116,10 @@ typedef int fo_seek_t(struct file *fp, off_t offset, int whence,
 		    struct thread *td);
 typedef int fo_fill_kinfo_t(struct file *fp, struct kinfo_file *kif,
 		    struct filedesc *fdp);
+typedef int fo_mmap_t(struct file *fp, vm_size_t size, vm_prot_t prot,
+		    vm_prot_t *cap_maxprot, vm_prot_t *maxprot, int *flags,
+		    vm_ooffset_t *foff, vm_object_t *obj,
+		    boolean_t *writecounted, struct thread *td);
 typedef	int fo_flags_t;
 
 struct fileops {
@@ -131,6 +136,7 @@ struct fileops {
 	fo_sendfile_t	*fo_sendfile;
 	fo_seek_t	*fo_seek;
 	fo_fill_kinfo_t	*fo_fill_kinfo;
+	fo_mmap_t	*fo_mmap;
 	fo_flags_t	fo_flags;	/* DFLAG_* below */
 };
 
@@ -248,6 +254,7 @@ fo_sendfile_t	vn_sendfile;
 fo_seek_t	vn_seek;
 fo_fill_kinfo_t	vn_fill_kinfo;
 int vn_fill_kinfo_vnode(struct vnode *vp, struct kinfo_file *kif);
+fo_mmap_t	vn_mmap;
 
 void finit(struct file *, u_int, short, void *, struct fileops *);
 int fgetvp(struct thread *td, int fd, cap_rights_t *rightsp,
@@ -389,6 +396,18 @@ fo_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 {
 
 	return ((*fp->f_ops->fo_fill_kinfo)(fp, kif, fdp));
+}
+
+static __inline int
+fo_mmap(struct file *fp, vm_size_t size, vm_prot_t prot,
+    vm_prot_t *cap_maxprot, vm_prot_t *maxprot, int *flags, vm_ooffset_t *foff,
+    vm_object_t *obj, boolean_t *writecounted, struct thread *td)
+{
+
+	if (fp->f_ops->fo_mmap == NULL)
+		return (ENODEV);
+	return ((*fp->f_ops->fo_mmap)(fp, size, prot, cap_maxprot, maxprot,
+	    flags, foff, obj, writecounted, td));
 }
 
 #endif /* _KERNEL */

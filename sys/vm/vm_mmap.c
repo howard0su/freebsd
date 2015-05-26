@@ -100,12 +100,10 @@ SYSCTL_INT(_vm, OID_AUTO, old_mlock, CTLFLAG_RWTUN, &old_mlock, 0,
 #define	MAP_32BIT_MAX_ADDR	((vm_offset_t)1 << 31)
 #endif
 
-static int vm_mmap_vnode(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
-    int *, struct vnode *, vm_ooffset_t *, vm_object_t *, boolean_t *);
+static int vm_mmap_shared(vm_map_t, vm_offset_t *, vm_size_t, vm_prot_t,
+    vm_prot_t, int, vm_object_t, vm_ooffset_t, boolean_t, struct thread *);
 static int vm_mmap_cdev(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
     int *, struct cdev *, vm_ooffset_t *, vm_object_t *);
-static int vm_mmap_shm(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
-    int *, struct shmfd *, vm_ooffset_t, vm_object_t *);
 
 #ifndef _SYS_SYSPROTO_H_
 struct sbrk_args {
@@ -201,16 +199,15 @@ sys_mmap(td, uap)
 	struct pmckern_map_in pkm;
 #endif
 	struct file *fp;
-	struct vnode *vp;
+	vm_object_t object;
 	vm_offset_t addr;
 	vm_size_t size, pageoff;
 	vm_prot_t cap_maxprot, maxprot;
-	void *handle;
-	objtype_t handle_type;
 	int align, error, flags, prot;
 	off_t pos;
 	struct vmspace *vms = td->td_proc->p_vmspace;
 	cap_rights_t rights;
+	boolean_t writecounted;
 
 	addr = (vm_offset_t) uap->addr;
 	size = uap->len;
@@ -334,14 +331,13 @@ sys_mmap(td, uap)
 			    lim_max(td->td_proc, RLIMIT_DATA));
 		PROC_UNLOCK(td->td_proc);
 	}
+	writecounted = FALSE;
 	if (flags & MAP_ANON) {
 		/*
 		 * Mapping blank space is trivial.
 		 */
-		handle = NULL;
-		handle_type = OBJT_DEFAULT;
+		object = NULL;
 		maxprot = VM_PROT_ALL;
-		cap_maxprot = VM_PROT_ALL;
 	} else {
 		/*
 		 * Mapping file, get fp for validation and don't let the
@@ -361,94 +357,29 @@ sys_mmap(td, uap)
 		error = fget_mmap(td, uap->fd, &rights, &cap_maxprot, &fp);
 		if (error != 0)
 			goto done;
+		td->td_fpop = fp;
 		if ((flags & (MAP_SHARED | MAP_PRIVATE)) == 0 &&
 		    td->td_proc->p_osrel >= P_OSREL_MAP_FSTRICT) {
 			error = EINVAL;
 			goto done;
 		}
-		if (fp->f_type == DTYPE_SHM) {
-			handle = fp->f_data;
-			handle_type = OBJT_SWAP;
-			maxprot = VM_PROT_NONE;
-
-			/* FREAD should always be set. */
-			if (fp->f_flag & FREAD)
-				maxprot |= VM_PROT_EXECUTE | VM_PROT_READ;
-			if (fp->f_flag & FWRITE)
-				maxprot |= VM_PROT_WRITE;
-			goto map;
-		}
-		if (fp->f_type != DTYPE_VNODE) {
-			error = ENODEV;
+		error = fo_mmap(fp, size, prot, &cap_maxprot, &maxprot, &flags,
+		    &pos, &object, &writecounted, td);
+		if (error != 0)
 			goto done;
-		}
-#if defined(COMPAT_FREEBSD7) || defined(COMPAT_FREEBSD6) || \
-    defined(COMPAT_FREEBSD5) || defined(COMPAT_FREEBSD4)
-		/*
-		 * POSIX shared-memory objects are defined to have
-		 * kernel persistence, and are not defined to support
-		 * read(2)/write(2) -- or even open(2).  Thus, we can
-		 * use MAP_ASYNC to trade on-disk coherence for speed.
-		 * The shm_open(3) library routine turns on the FPOSIXSHM
-		 * flag to request this behavior.
-		 */
-		if (fp->f_flag & FPOSIXSHM)
-			flags |= MAP_NOSYNC;
-#endif
-		vp = fp->f_vnode;
-		/*
-		 * Ensure that file and memory protections are
-		 * compatible.  Note that we only worry about
-		 * writability if mapping is shared; in this case,
-		 * current and max prot are dictated by the open file.
-		 * XXX use the vnode instead?  Problem is: what
-		 * credentials do we use for determination? What if
-		 * proc does a setuid?
-		 */
-		if (vp->v_mount != NULL && vp->v_mount->mnt_flag & MNT_NOEXEC)
-			maxprot = VM_PROT_NONE;
-		else
-			maxprot = VM_PROT_EXECUTE;
-		if (fp->f_flag & FREAD) {
-			maxprot |= VM_PROT_READ;
-		} else if (prot & PROT_READ) {
-			error = EACCES;
-			goto done;
-		}
-		/*
-		 * If we are sharing potential changes (either via
-		 * MAP_SHARED or via the implicit sharing of character
-		 * device mappings), and we are trying to get write
-		 * permission although we opened it without asking
-		 * for it, bail out.
-		 */
-		if ((flags & MAP_SHARED) != 0) {
-			if ((fp->f_flag & FWRITE) != 0) {
-				maxprot |= VM_PROT_WRITE;
-			} else if ((prot & PROT_WRITE) != 0) {
-				error = EACCES;
-				goto done;
-			}
-		} else if (vp->v_type != VCHR || (fp->f_flag & FWRITE) != 0) {
-			maxprot |= VM_PROT_WRITE;
-			cap_maxprot |= VM_PROT_WRITE;
-		}
-		handle = (void *)vp;
-		handle_type = OBJT_VNODE;
+		maxprot &= cap_maxprot;
 	}
-map:
-	td->td_fpop = fp;
-	maxprot &= cap_maxprot;
 
 	/* This relies on VM_PROT_* matching PROT_*. */
-	error = vm_mmap(&vms->vm_map, &addr, size, prot, maxprot,
-	    flags, handle_type, handle, pos);
-	td->td_fpop = NULL;
+	error = vm_mmap_shared(&vms->vm_map, &addr, size, prot, maxprot, flags,
+	    object, pos, writecounted, td);
+	if (error != 0 && object != NULL)
+		vm_object_deallocate(object);
 #ifdef HWPMC_HOOKS
 	/* inform hwpmc(4) if an executable is being mapped */
-	if (error == 0 && handle_type == OBJT_VNODE &&
+	if (error == 0 && fp != NULL && fp->f_vnode != NULL &&
 	    (prot & PROT_EXEC)) {
-		pkm.pm_file = handle;
+		pkm.pm_file = fp->f_vnode;
 		pkm.pm_address = (uintptr_t) addr;
 		PMC_CALL_HOOK(td, PMC_FN_MMAP, (void *) &pkm);
 	}
@@ -456,6 +387,7 @@ map:
 	if (error == 0)
 		td->td_retval[0] = (register_t) (addr + pageoff);
 done:
+	td->td_fpop = NULL;
 	if (fp)
 		fdrop(fp, td);
 
@@ -1450,6 +1382,7 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 		return (ENXIO);
 	if (dsw->d_flags & D_MMAP_ANON) {
 		dev_relthread(cdev, ref);
+		*objp = NULL;
 		*maxprotp = VM_PROT_ALL;
 		*flagsp |= MAP_ANON;
 		return (0);
@@ -1500,36 +1433,6 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 }
 
 /*
- * vm_mmap_shm()
- *
- * MPSAFE
- *
- * Helper function for vm_mmap.  Perform sanity check specific for mmap
- * operations on shm file descriptors.
- */
-int
-vm_mmap_shm(struct thread *td, vm_size_t objsize,
-    vm_prot_t prot, vm_prot_t *maxprotp, int *flagsp,
-    struct shmfd *shmfd, vm_ooffset_t foff, vm_object_t *objp)
-{
-	int error;
-
-	if ((*flagsp & MAP_SHARED) != 0 &&
-	    (*maxprotp & VM_PROT_WRITE) == 0 &&
-	    (prot & PROT_WRITE) != 0)
-		return (EACCES);
-#ifdef MAC
-	error = mac_posixshm_check_mmap(td->td_ucred, shmfd, prot, *flagsp);
-	if (error != 0)
-		return (error);
-#endif
-	error = shm_mmap(shmfd, objsize, foff, objp);
-	if (error)
-		return (error);
-	return (0);
-}
-
-/*
  * vm_mmap()
  *
  * MPSAFE
@@ -1541,18 +1444,71 @@ int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	vm_prot_t maxprot, int flags,
 	objtype_t handle_type, void *handle,
-	vm_ooffset_t foff)
+        vm_ooffset_t foff)
 {
-	boolean_t fitit;
-	vm_object_t object = NULL;
 	struct thread *td = curthread;
-	int docow, error, findspace, rv;
+	vm_object_t object;
 	boolean_t writecounted;
+	int error;
 
+	/* XXX: Why? */
 	if (size == 0)
 		return (0);
 
 	size = round_page(size);
+
+	/*
+	 * We currently can only deal with page aligned file offsets.
+	 * The system call already enforces this by subtracting the
+	 * page offset from the file offset, but the kernel calls this
+	 * function internally for other mmaping operations (such as
+	 * in exec) and non-aligned offsets will cause pmap
+	 * inconsistencies.
+	 */
+	if (foff & PAGE_MASK)
+		return (EINVAL);
+
+	writecounted = FALSE;
+
+	/*
+	 * Lookup/allocate object.
+	 */
+	switch (handle_type) {
+	case OBJT_DEVICE:
+		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags,
+		    handle, &foff, &object);
+		break;
+	case OBJT_VNODE:
+		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags,
+		    handle, &foff, &object, &writecounted);
+		break;
+	case OBJT_DEFAULT:
+		if (handle == NULL) {
+			error = 0;
+			break;
+		}
+		/* FALLTHROUGH */
+	default:
+		error = EINVAL;
+		break;
+	}
+	if (error)
+		return (error);
+
+	error = vm_mmap_shared(map, addr, size, prot, maxprot, flags, object,
+	    foff, writecounted, td);
+	if (error != 0 && object != NULL)
+		vm_object_deallocate(object);
+	return (error);
+}
+
+int
+vm_mmap_shared(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
+    vm_prot_t maxprot, int flags, vm_object_t object, vm_ooffset_t foff,
+    boolean_t writecounted, struct thread *td)
+{
+	boolean_t fitit;
+	int docow, error, findspace, rv;
 
 	if (map == &td->td_proc->p_vmspace->vm_map) {
 		PROC_LOCK(td->td_proc);
@@ -1584,17 +1540,6 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		PROC_UNLOCK(td->td_proc);
 	}
 
-	/*
-	 * We currently can only deal with page aligned file offsets.
-	 * The check is here rather than in the syscall because the
-	 * kernel calls this function internally for other mmaping
-	 * operations (such as in exec) and non-aligned offsets will
-	 * cause pmap inconsistencies...so we want to be sure to
-	 * disallow this in all cases.
-	 */
-	if (foff & PAGE_MASK)
-		return (EINVAL);
-
 	if ((flags & MAP_FIXED) == 0) {
 		fitit = TRUE;
 		*addr = round_page(*addr);
@@ -1603,44 +1548,19 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			return (EINVAL);
 		fitit = FALSE;
 	}
-	writecounted = FALSE;
 
-	/*
-	 * Lookup/allocate object.
-	 */
-	switch (handle_type) {
-	case OBJT_DEVICE:
-		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags,
-		    handle, &foff, &object);
-		break;
-	case OBJT_VNODE:
-		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags,
-		    handle, &foff, &object, &writecounted);
-		break;
-	case OBJT_SWAP:
-		error = vm_mmap_shm(td, size, prot, &maxprot, &flags,
-		    handle, foff, &object);
-		break;
-	case OBJT_DEFAULT:
-		if (handle == NULL) {
-			error = 0;
-			break;
-		}
-		/* FALLTHROUGH */
-	default:
-		error = EINVAL;
-		break;
-	}
-	if (error)
-		return (error);
 	if (flags & MAP_ANON) {
-		object = NULL;
+		if (object != NULL)
+			return (EINVAL);
 		docow = 0;
+#if 0
+		/* XXX: All callers that pass MAP_ANON already use a foff of 0 */
 		/*
 		 * Unnamed anonymous regions always start at 0.
 		 */
 		if (handle == 0)
 			foff = 0;
+#endif
 	} else if (flags & MAP_PREFAULT_READ)
 		docow = MAP_PREFAULT;
 	else
