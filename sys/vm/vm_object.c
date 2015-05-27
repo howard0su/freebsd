@@ -2294,7 +2294,7 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 	char *fullpath, *freepath;
 	struct vnode *vp;
 	struct vattr va;
-	vm_object_t obj, prev;
+	vm_object_t obj;
 	vm_page_t m;
 	int count, error;
 
@@ -2318,23 +2318,20 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 	error = 0;
 
 	/*
-	 * 'prev' points to the previous object in the list.  As each
-	 * object is examined, its reference count is bumped.  This
-	 * reference is used to keep TAILQ_NEXT() stable while the
-	 * list is unlocked.  To make that work, we don't drop the
-	 * reference on each object until after we have finished
-	 * parsing the subsequent object and bumped its reference
-	 * count.
+	 * VM objects are type stable and are never removed from the
+	 * list once added.  This allows us to safely read obj->object_list
+	 * after reacquiring the VM object lock.
 	 */
-	prev = NULL;
 	mtx_lock(&vm_object_list_mtx);
 	TAILQ_FOREACH(obj, &vm_object_list, object_list) {
 		if (obj->type == OBJ_DEAD)
 			continue;
-		VM_OBJECT_WLOCK(obj);
+		VM_OBJECT_RLOCK(obj);
+		if (obj->type == OBJ_DEAD) {
+			VM_OBJECT_RUNLOCK(obj);
+			continue;
+		}
 		mtx_unlock(&vm_object_list_mtx);
-		vm_object_reference_locked(obj);
-		VM_OBJECT_LOCK_DOWNGRADE(obj);
 		kvo.kvo_size = ptoa(obj->size);
 		kvo.kvo_resident = obj->resident_page_count;
 		kvo.kvo_ref_count = obj->ref_count;
@@ -2415,16 +2412,11 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 		kvo.kvo_structsize = roundup(kvo.kvo_structsize,
 		    sizeof(uint64_t));
 		error = SYSCTL_OUT(req, &kvo, kvo.kvo_structsize);
-		if (prev != NULL)
-			vm_object_deallocate(prev);
-		prev = obj;
 		mtx_lock(&vm_object_list_mtx);
 		if (error)
 			break;
 	}
 	mtx_unlock(&vm_object_list_mtx);
-	if (prev != NULL)
-		vm_object_deallocate(prev);
 	return (error);
 }
 SYSCTL_PROC(_vm, OID_AUTO, objects, CTLTYPE_STRUCT | CTLFLAG_RW | CTLFLAG_SKIP |
