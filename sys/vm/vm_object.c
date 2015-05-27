@@ -2306,7 +2306,7 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 		mtx_lock(&vm_object_list_mtx);
 		count = 0;
 		TAILQ_FOREACH(obj, &vm_object_list, object_list) {
-			if (obj->type == OBJ_DEAD)
+			if (obj->type == OBJT_DEAD)
 				continue;
 			count++;
 		}
@@ -2324,10 +2324,10 @@ sysctl_vm_object_list(SYSCTL_HANDLER_ARGS)
 	 */
 	mtx_lock(&vm_object_list_mtx);
 	TAILQ_FOREACH(obj, &vm_object_list, object_list) {
-		if (obj->type == OBJ_DEAD)
+		if (obj->type == OBJT_DEAD)
 			continue;
 		VM_OBJECT_RLOCK(obj);
-		if (obj->type == OBJ_DEAD) {
+		if (obj->type == OBJT_DEAD) {
 			VM_OBJECT_RUNLOCK(obj);
 			continue;
 		}
