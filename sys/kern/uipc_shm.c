@@ -866,9 +866,9 @@ shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t objsize,
 	maxprot = VM_PROT_NONE;
 
 	/* FREAD should always be set. */
-	if (fp->f_flag & FREAD)
+	if ((fp->f_flag & FREAD) != 0)
 		maxprot |= VM_PROT_EXECUTE | VM_PROT_READ;
-	if (fp->f_flag & FWRITE)
+	if ((fp->f_flag & FWRITE) != 0)
 		maxprot |= VM_PROT_WRITE;
 
 	/* Don't permit shared writable mappings on read-only descriptors. */

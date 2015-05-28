@@ -2385,7 +2385,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	 * The shm_open(3) library routine turns on the FPOSIXSHM
 	 * flag to request this behavior.
 	 */
-	if (fp->f_flag & FPOSIXSHM)
+	if ((fp->f_flag & FPOSIXSHM) != 0)
 		flags |= MAP_NOSYNC;
 #endif
 	vp = fp->f_vnode;
@@ -2399,13 +2399,13 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	 * credentials do we use for determination? What if
 	 * proc does a setuid?
 	 */
-	if (vp->v_mount != NULL && vp->v_mount->mnt_flag & MNT_NOEXEC)
+	if (vp->v_mount != NULL && (vp->v_mount->mnt_flag & MNT_NOEXEC) != 0)
 		maxprot = VM_PROT_NONE;
 	else
 		maxprot = VM_PROT_EXECUTE;
-	if (fp->f_flag & FREAD)
+	if ((fp->f_flag & FREAD) != 0)
 		maxprot |= VM_PROT_READ;
-	else if (prot & PROT_READ)
+	else if ((prot & PROT_READ) != 0)
 		return (EACCES);
 
 	/*
@@ -2442,7 +2442,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 		vm_object_deallocate(object);
 #ifdef HWPMC_HOOKS
 	/* Inform hwpmc(4) if an executable is being mapped. */
-	if (error == 0 && (prot & PROT_EXEC)) {
+	if (error == 0 && (prot & PROT_EXEC) != 0) {
 		pkm.pm_file = vp;
 		pkm.pm_address = (uintptr_t) addr;
 		PMC_CALL_HOOK(td, PMC_FN_MMAP, (void *) &pkm);
