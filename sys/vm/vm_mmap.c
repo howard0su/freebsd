@@ -328,6 +328,7 @@ sys_mmap(td, uap)
 		 * length 0.  Modern binaries return an error for this
 		 * earlier.
 		 */
+		error = 0;
 	} else if (flags & MAP_ANON) {
 		/*
 		 * Mapping blank space is trivial.
