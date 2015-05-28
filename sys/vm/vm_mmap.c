@@ -321,7 +321,14 @@ sys_mmap(td, uap)
 			    lim_max(td->td_proc, RLIMIT_DATA));
 		PROC_UNLOCK(td->td_proc);
 	}
-	if (flags & MAP_ANON) {
+	if (size == 0) {
+		/*
+		 * Return success without mapping anything for old
+		 * binaries that request a page-aligned mapping of
+		 * length 0.  Modern binaries return an error for this
+		 * earlier.
+		 */
+	} else if (flags & MAP_ANON) {
 		/*
 		 * Mapping blank space is trivial.
 		 *
@@ -1415,9 +1422,8 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	int error;
 	boolean_t writecounted;
 
-	/* XXX: Why? */
 	if (size == 0)
-		return (0);
+		return (EINVAL);
 
 	size = round_page(size);
 	writecounted = FALSE;
