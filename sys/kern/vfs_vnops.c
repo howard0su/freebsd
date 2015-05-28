@@ -2362,12 +2362,19 @@ vn_fill_kinfo_vnode(struct vnode *vp, struct kinfo_file *kif)
 }
 
 int
-vn_mmap(struct file *fp, vm_size_t size, vm_prot_t prot,
-    vm_prot_t *cap_maxprot, vm_prot_t *maxprot, int *flags, vm_ooffset_t *foff,
-    vm_object_t *obj, boolean_t *writecounted, struct thread *td)
+vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
+    vm_prot_t prot, vm_prot_t cap_maxprot, int flags, vm_ooffset_t foff,
+    struct thread *td)
 {
+#ifdef HWPMC_HOOKS
+	struct pmckern_map_in pkm;
+#endif
 	struct vnode *vp;
-	
+	vm_object_t object;
+	vm_prot_t maxprot;
+	boolean_t writecounted;
+	int error;
+
 #if defined(COMPAT_FREEBSD7) || defined(COMPAT_FREEBSD6) || \
     defined(COMPAT_FREEBSD5) || defined(COMPAT_FREEBSD4)
 	/*
@@ -2379,7 +2386,7 @@ vn_mmap(struct file *fp, vm_size_t size, vm_prot_t prot,
 	 * flag to request this behavior.
 	 */
 	if (fp->f_flag & FPOSIXSHM)
-		*flags |= MAP_NOSYNC;
+		flags |= MAP_NOSYNC;
 #endif
 	vp = fp->f_vnode;
 
@@ -2393,11 +2400,11 @@ vn_mmap(struct file *fp, vm_size_t size, vm_prot_t prot,
 	 * proc does a setuid?
 	 */
 	if (vp->v_mount != NULL && vp->v_mount->mnt_flag & MNT_NOEXEC)
-		*maxprot = VM_PROT_NONE;
+		maxprot = VM_PROT_NONE;
 	else
-		*maxprot = VM_PROT_EXECUTE;
+		maxprot = VM_PROT_EXECUTE;
 	if (fp->f_flag & FREAD)
-		*maxprot |= VM_PROT_READ;
+		maxprot |= VM_PROT_READ;
 	else if (prot & PROT_READ)
 		return (EACCES);
 
@@ -2408,16 +2415,34 @@ vn_mmap(struct file *fp, vm_size_t size, vm_prot_t prot,
 	 * permission although we opened it without asking
 	 * for it, bail out.
 	 */
-	if ((*flags & MAP_SHARED) != 0) {
+	if ((flags & MAP_SHARED) != 0) {
 		if ((fp->f_flag & FWRITE) != 0)
-			*maxprot |= VM_PROT_WRITE;
+			maxprot |= VM_PROT_WRITE;
 		else if ((prot & PROT_WRITE) != 0)
 			return (EACCES);
 	} else if (vp->v_type != VCHR || (fp->f_flag & FWRITE) != 0) {
-		*maxprot |= VM_PROT_WRITE;
-		*cap_maxprot |= VM_PROT_WRITE;
+		maxprot |= VM_PROT_WRITE;
+		cap_maxprot |= VM_PROT_WRITE;
 	}
+	maxprot &= cap_maxprot;
 
-	return (vm_mmap_vnode(td, size, prot, maxprot, flags, vp, foff,
-	    obj, writecounted));
+	/* These rely on VM_PROT_* matching PROT_*. */
+	writecounted = FALSE;
+	error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp, &foff,
+	    &object, &writecounted);
+	if (error)
+		return (error);
+	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
+	    foff, writecounted, td);
+	if (error != 0)
+		vm_object_deallocate(object);
+#ifdef HWPMC_HOOKS
+	/* Inform hwpmc(4) if an executable is being mapped. */
+	if (error == 0 && (prot & PROT_EXEC)) {
+		pkm.pm_file = vp;
+		pkm.pm_address = (uintptr_t) addr;
+		PMC_CALL_HOOK(td, PMC_FN_MMAP, (void *) &pkm);
+	}
+#endif
+	return (error);
 }

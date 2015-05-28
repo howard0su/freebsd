@@ -100,8 +100,6 @@ SYSCTL_INT(_vm, OID_AUTO, old_mlock, CTLFLAG_RWTUN, &old_mlock, 0,
 #define	MAP_32BIT_MAX_ADDR	((vm_offset_t)1 << 31)
 #endif
 
-static int vm_mmap_shared(vm_map_t, vm_offset_t *, vm_size_t, vm_prot_t,
-    vm_prot_t, int, vm_object_t, vm_ooffset_t, boolean_t, struct thread *);
 static int vm_mmap_cdev(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
     int *, struct cdev *, vm_ooffset_t *, vm_object_t *);
 
@@ -195,19 +193,14 @@ sys_mmap(td, uap)
 	struct thread *td;
 	struct mmap_args *uap;
 {
-#ifdef HWPMC_HOOKS
-	struct pmckern_map_in pkm;
-#endif
 	struct file *fp;
-	vm_object_t object;
 	vm_offset_t addr;
 	vm_size_t size, pageoff;
-	vm_prot_t cap_maxprot, maxprot;
+	vm_prot_t cap_maxprot;
 	int align, error, flags, prot;
 	off_t pos;
 	struct vmspace *vms = td->td_proc->p_vmspace;
 	cap_rights_t rights;
-	boolean_t writecounted;
 
 	addr = (vm_offset_t) uap->addr;
 	size = uap->len;
@@ -331,13 +324,14 @@ sys_mmap(td, uap)
 			    lim_max(td->td_proc, RLIMIT_DATA));
 		PROC_UNLOCK(td->td_proc);
 	}
-	writecounted = FALSE;
 	if (flags & MAP_ANON) {
 		/*
 		 * Mapping blank space is trivial.
+		 *
+		 * This relies on VM_PROT_* matching PROT_*.
 		 */
-		object = NULL;
-		maxprot = VM_PROT_ALL;
+		error = vm_mmap_object(&vms->vm_map, &addr, size, prot,
+		    VM_PROT_ALL, flags, NULL, pos, FALSE, td);
 	} else {
 		/*
 		 * Mapping file, get fp for validation and don't let the
@@ -357,37 +351,22 @@ sys_mmap(td, uap)
 		error = fget_mmap(td, uap->fd, &rights, &cap_maxprot, &fp);
 		if (error != 0)
 			goto done;
-		td->td_fpop = fp;
 		if ((flags & (MAP_SHARED | MAP_PRIVATE)) == 0 &&
 		    td->td_proc->p_osrel >= P_OSREL_MAP_FSTRICT) {
 			error = EINVAL;
 			goto done;
 		}
-		error = fo_mmap(fp, size, prot, &cap_maxprot, &maxprot, &flags,
-		    &pos, &object, &writecounted, td);
+		td->td_fpop = fp;
+		error = fo_mmap(fp, &vms->vm_map, &addr, size, prot,
+		    cap_maxprot, flags, pos, td);
+		td->td_fpop = NULL;
 		if (error != 0)
 			goto done;
-		maxprot &= cap_maxprot;
 	}
 
-	/* This relies on VM_PROT_* matching PROT_*. */
-	error = vm_mmap_shared(&vms->vm_map, &addr, size, prot, maxprot, flags,
-	    object, pos, writecounted, td);
-	if (error != 0 && object != NULL)
-		vm_object_deallocate(object);
-#ifdef HWPMC_HOOKS
-	/* inform hwpmc(4) if an executable is being mapped */
-	if (error == 0 && fp != NULL && fp->f_vnode != NULL &&
-	    (prot & PROT_EXEC)) {
-		pkm.pm_file = fp->f_vnode;
-		pkm.pm_address = (uintptr_t) addr;
-		PMC_CALL_HOOK(td, PMC_FN_MMAP, (void *) &pkm);
-	}
-#endif
 	if (error == 0)
 		td->td_retval[0] = (register_t) (addr + pageoff);
 done:
-	td->td_fpop = NULL;
 	if (fp)
 		fdrop(fp, td);
 
@@ -1495,7 +1474,7 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	if (error)
 		return (error);
 
-	error = vm_mmap_shared(map, addr, size, prot, maxprot, flags, object,
+	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
 	    foff, writecounted, td);
 	if (error != 0 && object != NULL)
 		vm_object_deallocate(object);
@@ -1503,7 +1482,7 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 }
 
 int
-vm_mmap_shared(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
+vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
     vm_prot_t maxprot, int flags, vm_object_t object, vm_ooffset_t foff,
     boolean_t writecounted, struct thread *td)
 {
