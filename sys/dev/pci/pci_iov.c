@@ -701,7 +701,7 @@ pci_iov_config(struct cdev *cdev, struct pci_iov_arg *arg)
 	return (0);
 out:
 	if (iov_inited)
-		IOV_UNINIT(dev);
+		PCI_IOV_UNINIT(dev);
 
 	for (i = 0; i <= PCIR_MAX_BAR_0; i++) {
 		if (iov->iov_bar[i].res != NULL) {
