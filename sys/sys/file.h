@@ -253,7 +253,6 @@ fo_sendfile_t	vn_sendfile;
 fo_seek_t	vn_seek;
 fo_fill_kinfo_t	vn_fill_kinfo;
 int vn_fill_kinfo_vnode(struct vnode *vp, struct kinfo_file *kif);
-fo_mmap_t	vn_mmap;
 
 void finit(struct file *, u_int, short, void *, struct fileops *);
 int fgetvp(struct thread *td, int fd, cap_rights_t *rightsp,

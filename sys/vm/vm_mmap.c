@@ -361,10 +361,8 @@ sys_mmap(td, uap)
 			error = EINVAL;
 			goto done;
 		}
-		td->td_fpop = fp;
 		error = fo_mmap(fp, &vms->vm_map, &addr, size, prot,
 		    cap_maxprot, flags, pos, td);
-		td->td_fpop = NULL;
 	}
 
 	if (error == 0)

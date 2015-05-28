@@ -92,6 +92,7 @@ static fo_poll_t	vn_poll;
 static fo_kqfilter_t	vn_kqfilter;
 static fo_stat_t	vn_statfile;
 static fo_close_t	vn_closefile;
+static fo_mmap_t	vn_mmap;
 
 struct 	fileops vnops = {
 	.fo_read = vn_io_fault,
@@ -2370,6 +2371,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 #ifdef HWPMC_HOOKS
 	struct pmckern_map_in pkm;
 #endif
+	struct mount *mp;
 	struct vnode *vp;
 	vm_object_t object;
 	vm_prot_t maxprot;
@@ -2400,7 +2402,8 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	 * credentials do we use for determination? What if
 	 * proc does a setuid?
 	 */
-	if (vp->v_mount != NULL && (vp->v_mount->mnt_flag & MNT_NOEXEC) != 0)
+	mp = vp->v_mount;
+	if (mp != NULL && (mp->mnt_flag & MNT_NOEXEC) != 0)
 		maxprot = VM_PROT_NONE;
 	else
 		maxprot = VM_PROT_EXECUTE;
@@ -2410,18 +2413,16 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 		return (EACCES);
 
 	/*
-	 * If we are sharing potential changes (either via
-	 * MAP_SHARED or via the implicit sharing of character
-	 * device mappings), and we are trying to get write
-	 * permission although we opened it without asking
-	 * for it, bail out.
+	 * If we are sharing potential changes via MAP_SHARED and we
+	 * are trying to get write permission although we opened it
+	 * without asking for it, bail out.
 	 */
 	if ((flags & MAP_SHARED) != 0) {
 		if ((fp->f_flag & FWRITE) != 0)
 			maxprot |= VM_PROT_WRITE;
 		else if ((prot & PROT_WRITE) != 0)
 			return (EACCES);
-	} else if (vp->v_type != VCHR || (fp->f_flag & FWRITE) != 0) {
+	} else {
 		maxprot |= VM_PROT_WRITE;
 		cap_maxprot |= VM_PROT_WRITE;
 	}
@@ -2429,12 +2430,8 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 
 	/* These rely on VM_PROT_* matching PROT_*. */
 	writecounted = FALSE;
-	if (vp->v_type == VCHR)
-		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags,
-		    vp->v_rdev, &foff, &object);
-	else
-		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp,
-		    &foff, &object, &writecounted);
+	error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp,
+	    &foff, &object, &writecounted);
 	if (error)
 		return (error);
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
