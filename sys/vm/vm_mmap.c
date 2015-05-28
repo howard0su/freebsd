@@ -100,9 +100,6 @@ SYSCTL_INT(_vm, OID_AUTO, old_mlock, CTLFLAG_RWTUN, &old_mlock, 0,
 #define	MAP_32BIT_MAX_ADDR	((vm_offset_t)1 << 31)
 #endif
 
-static int vm_mmap_cdev(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
-    int *, struct cdev *, vm_ooffset_t *, vm_object_t *);
-
 #ifndef _SYS_SYSPROTO_H_
 struct sbrk_args {
 	int incr;
@@ -1220,9 +1217,6 @@ sys_munlock(td, uap)
  *
  * Helper function for vm_mmap.  Perform sanity check specific for mmap
  * operations on vnodes.
- *
- * For VCHR vnodes, the vnode lock is held over the call to
- * vm_mmap_cdev() to keep vp->v_rdev valid.
  */
 int
 vm_mmap_vnode(struct thread *td, vm_size_t objsize,
@@ -1269,12 +1263,6 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 			*writecounted = TRUE;
 			vnode_pager_update_writecount(obj, 0, objsize);
 		}
-	} else if (vp->v_type == VCHR) {
-		error = vm_mmap_cdev(td, objsize, prot, maxprotp, flagsp,
-		    vp->v_rdev, foffp, objp);
-		if (error == 0)
-			goto mark_atime;
-		goto done;
 	} else {
 		error = EINVAL;
 		goto done;
@@ -1323,7 +1311,6 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	*objp = obj;
 	*flagsp = flags;
 
-mark_atime:
 	vfs_mark_atime(vp, cred);
 
 done:

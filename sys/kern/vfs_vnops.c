@@ -2428,8 +2428,12 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 
 	/* These rely on VM_PROT_* matching PROT_*. */
 	writecounted = FALSE;
-	error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp, &foff,
-	    &object, &writecounted);
+	if (vp->v_type == VCHR)
+		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags,
+		    vp->v_rdev, &foff, &object);
+	else
+		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp,
+		    &foff, &object, &writecounted);
 	if (error)
 		return (error);
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
