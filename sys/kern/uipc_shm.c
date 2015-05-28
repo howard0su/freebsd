@@ -854,7 +854,7 @@ sys_shm_unlink(struct thread *td, struct shm_unlink_args *uap)
 }
 
 int
-shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
+shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t objsize,
     vm_prot_t prot, vm_prot_t cap_maxprot, int flags,
     vm_ooffset_t foff, struct thread *td)
 {
@@ -889,7 +889,7 @@ shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	 * sign errors.  It should be fixed.
 	 */
 	if (foff >= shmfd->shm_size ||
-	    foff + size > round_page(shmfd->shm_size))
+	    foff + objsize > round_page(shmfd->shm_size))
 		return (EINVAL);
 
 	mtx_lock(&shm_timestamp_lock);
@@ -898,7 +898,7 @@ shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	vm_object_reference(shmfd->shm_object);
 
 	/* This relies on VM_PROT_* matching PROT_*. */
-	error = vm_mmap_object(map, addr, size, prot, maxprot, flags,
+	error = vm_mmap_object(map, addr, objsize, prot, maxprot, flags,
 	    shmfd->shm_object, foff, FALSE, td);
 	if (error != 0)
 		vm_object_deallocate(shmfd->shm_object);

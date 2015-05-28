@@ -360,8 +360,6 @@ sys_mmap(td, uap)
 		error = fo_mmap(fp, &vms->vm_map, &addr, size, prot,
 		    cap_maxprot, flags, pos, td);
 		td->td_fpop = NULL;
-		if (error != 0)
-			goto done;
 	}
 
 	if (error == 0)
@@ -1362,6 +1360,7 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 	if (dsw->d_flags & D_MMAP_ANON) {
 		dev_relthread(cdev, ref);
 		*objp = NULL;
+		*foff = 0;
 		*maxprotp = VM_PROT_ALL;
 		*flagsp |= MAP_ANON;
 		return (0);
@@ -1423,12 +1422,12 @@ int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	vm_prot_t maxprot, int flags,
 	objtype_t handle_type, void *handle,
-        vm_ooffset_t foff)
+	vm_ooffset_t foff)
 {
-	struct thread *td = curthread;
 	vm_object_t object;
-	boolean_t writecounted;
+	struct thread *td = curthread;
 	int error;
+	boolean_t writecounted;
 
 	/* XXX: Why? */
 	if (size == 0)
@@ -1529,17 +1528,9 @@ vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	}
 
 	if (flags & MAP_ANON) {
-		if (object != NULL)
+		if (object != NULL || foff != 0)
 			return (EINVAL);
 		docow = 0;
-#if 0
-		/* XXX: All callers that pass MAP_ANON already use a foff of 0 */
-		/*
-		 * Unnamed anonymous regions always start at 0.
-		 */
-		if (handle == 0)
-			foff = 0;
-#endif
 	} else if (flags & MAP_PREFAULT_READ)
 		docow = MAP_PREFAULT;
 	else
