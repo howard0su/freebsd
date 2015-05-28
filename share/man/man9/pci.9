@@ -446,10 +446,10 @@ function is used to advertise that the given device
 supports PCI Single-Root I/O Virtualization
 .Po SR-IOV Pc .
 A driver that supports SR-IOV must implement the
-.Xr PCI_INIT_IOV 9 ,
-.Xr PCI_ADD_VF 9
+.Xr PCI_IOV_INIT 9 ,
+.Xr PCI_IOV_ADD_VF 9
 and
-.Xr PCI_UNIT_IOV 9
+.Xr PCI_IOV_UNINIT 9
 methods.
 This function should be called during the
 .Xr DEVICE_ATTACH 9

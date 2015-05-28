@@ -26,10 +26,10 @@
 .\" $FreeBSD$
 .\"
 .Dd May 24, 2014
-.Dt PCI_INIT_IOV 9
+.Dt PCI_IOV_INIT 9
 .Os
 .Sh NAME
-.Nm PCI_INIT_IOV
+.Nm PCI_IOV_INIT
 .Nd enable SR-IOV on a PF device
 .Sh SYNOPSIS
 .In sys/bus.h
@@ -38,10 +38,10 @@
 .In dev/pci/pcireg.h
 .In dev/pci/pcivar.h
 .Ft int
-.Fn PCI_INIT_IOV "device_t dev" "uint16_t num_vfs" "const nvlist_t *pf_config"
+.Fn PCI_IOV_INIT "device_t dev" "uint16_t num_vfs" "const nvlist_t *pf_config"
 .Sh DESCRIPTION
 The
-.Fn PCI_INIT_IOV
+.Fn PCI_IOV_INIT
 method is called by the PCI Single-Root I/O Virtualization (SR-IOV)
 infrastucture when the user requests that SR-IOV be enabled on a Physical
 Function (PF).
@@ -70,7 +70,7 @@ valid values specified in the schema.
 .Pp
 If this method returns successfully, then this method will not be called again
 on the same device until after a call to
-.Xr PCI_UNINIT_IOV .
+.Xr PCI_IOV_UNINIT .
 .Sh RETURN VALUES
 Returns 0 on success, otherwise an appropriate error is returned.
 If this method returns an error then the SR-IOV configuration will be aborted
@@ -79,8 +79,8 @@ and no VFs will be created.
 .Xr nv 9 ,
 .Xr pci 9 ,
 .Xr pci_iov_schema 9 ,
-.Xr PCI_ADD_VF 9 ,
-.Xr PCI_UNINIT_IOV 9
+.Xr PCI_IOV_ADD_VF 9 ,
+.Xr PCI_IOV_UNINIT 9
 .Sh AUTHORS
 This manual page was written by
 .An Ryan Stone Aq Mt rstone@FreeBSD.org .
