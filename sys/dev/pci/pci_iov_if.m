@@ -1,5 +1,5 @@
 #-
-# Copyright (c) 1998 Doug Rabson
+# Copyright (c) 2013-2015 Sandvine Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without

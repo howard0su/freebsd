@@ -53,12 +53,11 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/pci_iov.h>
 #include <dev/pci/pci_private.h>
 #include <dev/pci/pci_iov_private.h>
 #include <dev/pci/schema_private.h>
 
-#include "pci_if.h"
-#include "pci_iov_if.h"
 #include "pcib_if.h"
 
 static MALLOC_DEFINE(M_SRIOV, "sr_iov", "PCI SR-IOV allocations");
