@@ -1434,18 +1434,6 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		return (0);
 
 	size = round_page(size);
-
-	/*
-	 * We currently can only deal with page aligned file offsets.
-	 * The system call already enforces this by subtracting the
-	 * page offset from the file offset, but the kernel calls this
-	 * function internally for other mmaping operations (such as
-	 * in exec) and non-aligned offsets will cause pmap
-	 * inconsistencies.
-	 */
-	if (foff & PAGE_MASK)
-		return (EINVAL);
-
 	writecounted = FALSE;
 
 	/*
@@ -1517,6 +1505,17 @@ vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		}
 		PROC_UNLOCK(td->td_proc);
 	}
+
+	/*
+	 * We currently can only deal with page aligned file offsets.
+	 * The mmap() system call already enforces this by subtracting
+	 * the page offset from the file offset, but checking here
+	 * catches errors in device drivers (e.g. d_single_mmap()
+	 * callbacks or other internal mapping requests (such as in
+	 * exec).
+	 */
+	if (foff & PAGE_MASK)
+		return (EINVAL);
 
 	if ((flags & MAP_FIXED) == 0) {
 		fitit = TRUE;
