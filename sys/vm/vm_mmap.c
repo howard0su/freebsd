@@ -1400,10 +1400,9 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 /*
  * vm_mmap()
  *
- * MPSAFE
- *
- * Internal version of mmap.  Currently used by mmap, exec, and sys5
- * shared memory.  Handle is either a vnode pointer or NULL for MAP_ANON.
+ * Internal version of mmap used by exec, sys5 shared memory, and
+ * various device drivers.  Handle is either a vnode pointer, a
+ * character device, or NULL for MAP_ANON.
  */
 int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
@@ -1450,11 +1449,22 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
 	    foff, writecounted, td);
-	if (error != 0 && object != NULL)
+	if (error != 0 && object != NULL) {
+		/*
+		 * If this mapping was accounted for in the vnode's
+		 * writecount, then undo that now.
+		 */
+		if (writecounted)
+			vnode_pager_release_writecount(object, 0, size);
 		vm_object_deallocate(object);
+	}
 	return (error);
 }
 
+/*
+ * Internal version of mmap that maps a specific VM object into an
+ * map.  Called by mmap for MAP_ANON, vm_mmap, shm_mmap, and vn_mmap.
+ */
 int
 vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
     vm_prot_t maxprot, int flags, vm_object_t object, vm_ooffset_t foff,
@@ -1569,19 +1579,6 @@ vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			    VM_MAP_WIRE_USER | ((flags & MAP_STACK) ?
 			    VM_MAP_WIRE_HOLESOK : VM_MAP_WIRE_NOHOLES));
 		}
-	} else {
-		/*
-		 * If this mapping was accounted for in the vnode's
-		 * writecount, then undo that now.
-		 */
-		if (writecounted)
-			vnode_pager_release_writecount(object, 0, size);
-		/*
-		 * Lose the object reference.  Will destroy the
-		 * object if it's an unnamed anonymous mapping
-		 * or named anonymous without other references.
-		 */
-		vm_object_deallocate(object);
 	}
 	return (vm_mmap_to_errno(rv));
 }

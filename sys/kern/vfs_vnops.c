@@ -81,6 +81,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
+#include <vm/vnode_pager.h>
 
 static fo_rdwr_t	vn_read;
 static fo_rdwr_t	vn_write;
@@ -2438,8 +2439,15 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 		return (error);
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
 	    foff, writecounted, td);
-	if (error != 0)
+	if (error != 0) {
+		/*
+		 * If this mapping was accounted for in the vnode's
+		 * writecount, then undo that now.
+		 */
+		if (writecounted)
+			vnode_pager_release_writecount(object, 0, size);
 		vm_object_deallocate(object);
+	}
 #ifdef HWPMC_HOOKS
 	/* Inform hwpmc(4) if an executable is being mapped. */
 	if (error == 0 && (prot & PROT_EXEC) != 0) {
