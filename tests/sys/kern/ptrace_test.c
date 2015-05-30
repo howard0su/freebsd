@@ -289,6 +289,7 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
 			exit(2);
 
 		/* Debugger process. */
+		close(dpipe[0]);
 
 		ATF_REQUIRE(ptrace(PT_ATTACH, child, NULL, 0) != -1);
 
@@ -312,6 +313,7 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
 
 		exit(0);
 	}
+	close(dpipe[1]);
 
 	/* Parent process. */
 
@@ -365,10 +367,10 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
 
 	/* Signal the debugger to wait for the child. */
 	ATF_REQUIRE(write(dpipe[0], &c, sizeof(c)) == sizeof(c));
-	close(dpipe[0]);
 
 	/* Wait for the debugger. */
-	ATF_REQUIRE(read(dpipe[1], &c, sizeof(c)) == 0);
+	ATF_REQUIRE(read(dpipe[0], &c, sizeof(c)) == 0);
+	close(dpipe[0]);
 
 	/* The child process should now be ready. */
 	wpid = waitpid(child, &status, WNOHANG);
