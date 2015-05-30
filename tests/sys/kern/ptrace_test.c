@@ -401,6 +401,124 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
 	ATF_REQUIRE(WEXITSTATUS(status) == 1);
 }
 
+/*
+ * Verify that a new child process is stopped after a followed fork and
+ * that the traced parent sees the exit of the child after the debugger.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__follow_fork_both_attached);
+ATF_TC_BODY(ptrace__follow_fork_both_attached, tc)
+{
+	struct child {
+		bool fork_reported;
+		pid_t pid;
+	} children[2];
+	struct ptrace_lwpinfo pl;
+	pid_t fpid, wpid;
+	int i, status;
+
+	children[0].fork_reported = false;
+	children[1].fork_reported = false;
+	children[0].pid = -1;
+	children[1].pid = -1;
+
+	ATF_REQUIRE((fpid = fork()) != -1);
+	if (fpid == 0) {
+		/* Child process. */
+		ATF_REQUIRE(ptrace(PT_TRACE_ME, 0, NULL, 0) != -1);
+
+		/* Trigger a stop. */
+		raise(SIGSTOP);
+
+		ATF_REQUIRE((fpid = fork()) != -1);
+
+		if (fpid == 0)
+			/* Grandchild */
+			exit(2);
+
+		wpid = waitpid(fpid, &status, 0);
+		ATF_REQUIRE(wpid == fpid);
+		ATF_REQUIRE(WIFEXITED(status));
+		ATF_REQUIRE(WEXITSTATUS(status) == 2);
+
+		exit(1);
+	}
+
+	/* Parent process. */
+	children[0].pid = fpid;
+
+	/* The first wait() should report the stop from SIGSTOP. */
+	wpid = waitpid(children[0].pid, &status, 0);
+	ATF_REQUIRE(wpid == children[0].pid);
+	ATF_REQUIRE(WIFSTOPPED(status));
+	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+
+	ATF_REQUIRE(ptrace(PT_FOLLOW_FORK, children[0].pid, NULL, 1) != -1);
+
+	/* Continue the child ignoring the SIGSTOP. */
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0].pid, (caddr_t)1, 0) != -1);
+
+	/*
+	 * Four stops should now be reported, two for each process.
+	 * First, each process should report a fork event.  The direct
+	 * child should report a PL_FLAG_FORKED event, and the
+	 * grandchild should report a PL_FLAG_CHILD event.  After each
+	 * of these events, both processes are continued and should
+	 * report exit events.
+	 */
+	for (i = 0; i < 2; i++) {
+		wpid = wait(&status);
+		ATF_REQUIRE(wpid > 0);
+		ATF_REQUIRE(WIFSTOPPED(status));
+
+		ATF_REQUIRE(ptrace(PT_LWPINFO, wpid, (caddr_t)&pl,
+		    sizeof(pl)) != -1);
+		ATF_REQUIRE((pl.pl_flags & (PL_FLAG_FORKED | PL_FLAG_CHILD)) !=
+		    0);
+		ATF_REQUIRE((pl.pl_flags & (PL_FLAG_FORKED | PL_FLAG_CHILD)) !=
+		    (PL_FLAG_FORKED | PL_FLAG_CHILD));
+		if (pl.pl_flags & PL_FLAG_CHILD) {
+			ATF_REQUIRE(wpid != children[0].pid);
+			ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+			ATF_REQUIRE(!children[1].fork_reported);
+			if (children[1].pid == -1)
+				children[1].pid = wpid;
+			else
+				ATF_REQUIRE(children[1].pid == wpid);
+			children[1].fork_reported = true;
+		} else {
+			ATF_REQUIRE(wpid == children[0].pid);
+			ATF_REQUIRE(WSTOPSIG(status) == SIGTRAP);
+			ATF_REQUIRE(!children[0].fork_reported);
+			if (children[1].pid == -1)
+				children[1].pid = pl.pl_child_pid;
+			else
+				ATF_REQUIRE(children[1].pid == pl.pl_child_pid);
+			children[0].fork_reported = true;
+		}
+	}
+
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0].pid, (caddr_t)1, 0) != -1);
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[1].pid, (caddr_t)1, 0) != -1);
+
+	/*
+	 * The child can't exit until the grandchild reports status, so the
+	 * grandchild should report its exit first to the debugger.
+	 */
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[1].pid);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 2);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[0].pid);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 1);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -408,6 +526,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ptrace__parent_wait_after_attach);
 	ATF_TP_ADD_TC(tp, ptrace__parent_sees_exit_after_child_debugger);
 	ATF_TP_ADD_TC(tp, ptrace__parent_sees_exit_after_unrelated_debugger);
+	ATF_TP_ADD_TC(tp, ptrace__follow_fork_both_attached);
 
 	return (atf_no_error());
 }
