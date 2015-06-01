@@ -2431,7 +2431,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	writecounted = FALSE;
 	error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp,
 	    &foff, &object, &writecounted);
-	if (error)
+	if (error != 0)
 		return (error);
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
 	    foff, writecounted, td);

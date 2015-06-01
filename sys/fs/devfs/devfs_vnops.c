@@ -1792,9 +1792,9 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	    &object);
 	td->td_fpop = fpop;
 	dev_relthread(dev, ref);
-
-	if (error)
+	if (error != 0)
 		return (error);
+
 	error = vm_mmap_object(map, addr, size, prot, maxprot, flags, object,
 	    foff, FALSE, td);
 	if (error != 0)
