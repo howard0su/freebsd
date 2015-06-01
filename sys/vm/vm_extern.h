@@ -40,6 +40,8 @@ struct vnode;
 struct vmem;
 
 #ifdef _KERNEL
+struct cdev;
+struct cdevsw;
 
 /* These operate on kernel virtual addresses only. */
 vm_offset_t kva_alloc(vm_size_t);
@@ -90,7 +92,7 @@ int vm_mmap_object(vm_map_t, vm_offset_t *, vm_size_t, vm_prot_t,
     vm_prot_t, int, vm_object_t, vm_ooffset_t, boolean_t, struct thread *);
 int vm_mmap_to_errno(int rv);
 int vm_mmap_cdev(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *,
-    int *, struct cdev *, vm_ooffset_t *, vm_object_t *);
+    int *, struct cdev *, struct cdevsw *, vm_ooffset_t *, vm_object_t *);
 int vm_mmap_vnode(struct thread *, vm_size_t, vm_prot_t, vm_prot_t *, int *,
     struct vnode *, vm_ooffset_t *, vm_object_t *, boolean_t *);
 void vm_set_page_size(void);

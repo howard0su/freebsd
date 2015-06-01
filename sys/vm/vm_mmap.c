@@ -1337,21 +1337,16 @@ done:
  * operations on cdevs.
  */
 int
-vm_mmap_cdev(struct thread *td, vm_size_t objsize,
-    vm_prot_t prot, vm_prot_t *maxprotp, int *flagsp,
-    struct cdev *cdev, vm_ooffset_t *foff, vm_object_t *objp)
+vm_mmap_cdev(struct thread *td, vm_size_t objsize, vm_prot_t prot,
+    vm_prot_t *maxprotp, int *flagsp, struct cdev *cdev, struct cdevsw *dsw,
+    vm_ooffset_t *foff, vm_object_t *objp)
 {
 	vm_object_t obj;
-	struct cdevsw *dsw;
-	int error, flags, ref;
+	int error, flags;
 
 	flags = *flagsp;
 
-	dsw = dev_refthread(cdev, &ref);
-	if (dsw == NULL)
-		return (ENXIO);
 	if (dsw->d_flags & D_MMAP_ANON) {
-		dev_relthread(cdev, ref);
 		*objp = NULL;
 		*foff = 0;
 		*maxprotp = VM_PROT_ALL;
@@ -1362,24 +1357,18 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 	 * cdevs do not provide private mappings of any kind.
 	 */
 	if ((*maxprotp & VM_PROT_WRITE) == 0 &&
-	    (prot & PROT_WRITE) != 0) {
-		dev_relthread(cdev, ref);
+	    (prot & PROT_WRITE) != 0)
 		return (EACCES);
-	}
-	if (flags & (MAP_PRIVATE|MAP_COPY)) {
-		dev_relthread(cdev, ref);
+	if (flags & (MAP_PRIVATE|MAP_COPY))
 		return (EINVAL);
-	}
 	/*
 	 * Force device mappings to be shared.
 	 */
 	flags |= MAP_SHARED;
 #ifdef MAC_XXX
 	error = mac_cdev_check_mmap(td->td_ucred, cdev, prot);
-	if (error != 0) {
-		dev_relthread(cdev, ref);
+	if (error != 0)
 		return (error);
-	}
 #endif
 	/*
 	 * First, try d_mmap_single().  If that is not implemented
@@ -1391,7 +1380,6 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize,
 	 * XXX assumes VM_PROT_* == PROT_*
 	 */
 	error = dsw->d_mmap_single(cdev, foff, objsize, objp, (int)prot);
-	dev_relthread(cdev, ref);
 	if (error != ENODEV)
 		return (error);
 	obj = vm_pager_allocate(OBJT_DEVICE, cdev, objsize, prot, *foff,
@@ -1431,10 +1419,20 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * Lookup/allocate object.
 	 */
 	switch (handle_type) {
-	case OBJT_DEVICE:
-		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags,
-		    handle, &foff, &object);
+	case OBJT_DEVICE: {
+		struct cdevsw *dsw;
+		struct cdev *cdev;
+		int ref;
+
+		cdev = handle;
+		dsw = dev_refthread(cdev, &ref);
+		if (dsw == NULL)
+			return (ENXIO);
+		error = vm_mmap_cdev(td, size, prot, &maxprot, &flags, cdev,
+		    dsw, &foff, &object);
+		dev_relthread(cdev, ref);
 		break;
+	}
 	case OBJT_VNODE:
 		error = vm_mmap_vnode(td, size, prot, &maxprot, &flags,
 		    handle, &foff, &object, &writecounted);

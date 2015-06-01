@@ -1785,11 +1785,11 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 
 	fpop = td->td_fpop;
 	error = devfs_fp_check(fp, &dev, &dsw, &ref);
-	if (error)
+	if (error != 0)
 		return (error);
 
 	/* These rely on VM_PROT_* matching PROT_*. */
-	error = vm_mmap_cdev(td, size, prot, &maxprot, &flags, dev, &foff,
+	error = vm_mmap_cdev(td, size, prot, &maxprot, &flags, dev, dsw, &foff,
 	    &object);
 	td->td_fpop = fpop;
 	dev_relthread(dev, ref);
