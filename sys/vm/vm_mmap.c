@@ -325,8 +325,8 @@ sys_mmap(td, uap)
 		/*
 		 * Return success without mapping anything for old
 		 * binaries that request a page-aligned mapping of
-		 * length 0.  Modern binaries return an error for this
-		 * earlier.
+		 * length 0.  For modern binaries, this function
+		 * returns an error earlier.
 		 */
 		error = 0;
 	} else if (flags & MAP_ANON) {
