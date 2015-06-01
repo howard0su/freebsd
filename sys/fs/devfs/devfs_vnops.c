@@ -1770,7 +1770,7 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 		maxprot = VM_PROT_EXECUTE;
 	if ((fp->f_flag & FREAD) != 0)
 		maxprot |= VM_PROT_READ;
-	else if ((prot & PROT_READ) != 0)
+	else if ((prot & VM_PROT_READ) != 0)
 		return (EACCES);
 
 	/*
@@ -1779,7 +1779,7 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	 */
 	if ((fp->f_flag & FWRITE) != 0)
 		maxprot |= VM_PROT_WRITE;
-	else if ((prot & PROT_WRITE) != 0)
+	else if ((prot & VM_PROT_WRITE) != 0)
 		return (EACCES);
 	maxprot &= cap_maxprot;
 
@@ -1788,7 +1788,6 @@ devfs_mmap_f(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	if (error != 0)
 		return (error);
 
-	/* These rely on VM_PROT_* matching PROT_*. */
 	error = vm_mmap_cdev(td, size, prot, &maxprot, &flags, dev, dsw, &foff,
 	    &object);
 	td->td_fpop = fpop;

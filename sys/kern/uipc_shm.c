@@ -874,7 +874,7 @@ shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t objsize,
 	/* Don't permit shared writable mappings on read-only descriptors. */
 	if ((flags & MAP_SHARED) != 0 &&
 	    (maxprot & VM_PROT_WRITE) == 0 &&
-	    (prot & PROT_WRITE) != 0)
+	    (prot & VM_PROT_WRITE) != 0)
 		return (EACCES);
 	maxprot &= cap_maxprot;
 
@@ -897,7 +897,6 @@ shm_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t objsize,
 	mtx_unlock(&shm_timestamp_lock);
 	vm_object_reference(shmfd->shm_object);
 
-	/* This relies on VM_PROT_* matching PROT_*. */
 	error = vm_mmap_object(map, addr, objsize, prot, maxprot, flags,
 	    shmfd->shm_object, foff, FALSE, td);
 	if (error != 0)

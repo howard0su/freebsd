@@ -361,6 +361,8 @@ sys_mmap(td, uap)
 			error = EINVAL;
 			goto done;
 		}
+
+		/* This relies on VM_PROT_* matching PROT_*. */
 		error = fo_mmap(fp, &vms->vm_map, &addr, size, prot,
 		    cap_maxprot, flags, pos, td);
 	}
@@ -1276,13 +1278,14 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	if ((error = VOP_GETATTR(vp, &va, cred)))
 		goto done;
 #ifdef MAC
-	error = mac_vnode_check_mmap(cred, vp, prot, flags);
+	/* This relies on VM_PROT_* matching PROT_*. */
+	error = mac_vnode_check_mmap(cred, vp, (int)prot, flags);
 	if (error != 0)
 		goto done;
 #endif
 	if ((flags & MAP_SHARED) != 0) {
 		if ((va.va_flags & (SF_SNAPSHOT|IMMUTABLE|APPEND)) != 0) {
-			if (prot & PROT_WRITE) {
+			if (prot & VM_PROT_WRITE) {
 				error = EPERM;
 				goto done;
 			}
@@ -1357,7 +1360,7 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize, vm_prot_t prot,
 	 * cdevs do not provide private mappings of any kind.
 	 */
 	if ((*maxprotp & VM_PROT_WRITE) == 0 &&
-	    (prot & PROT_WRITE) != 0)
+	    (prot & VM_PROT_WRITE) != 0)
 		return (EACCES);
 	if (flags & (MAP_PRIVATE|MAP_COPY))
 		return (EINVAL);
@@ -1366,7 +1369,7 @@ vm_mmap_cdev(struct thread *td, vm_size_t objsize, vm_prot_t prot,
 	 */
 	flags |= MAP_SHARED;
 #ifdef MAC_XXX
-	error = mac_cdev_check_mmap(td->td_ucred, cdev, prot);
+	error = mac_cdev_check_mmap(td->td_ucred, cdev, (int)prot);
 	if (error != 0)
 		return (error);
 #endif

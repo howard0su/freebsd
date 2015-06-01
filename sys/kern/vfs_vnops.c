@@ -2409,7 +2409,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 		maxprot = VM_PROT_EXECUTE;
 	if ((fp->f_flag & FREAD) != 0)
 		maxprot |= VM_PROT_READ;
-	else if ((prot & PROT_READ) != 0)
+	else if ((prot & VM_PROT_READ) != 0)
 		return (EACCES);
 
 	/*
@@ -2420,7 +2420,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	if ((flags & MAP_SHARED) != 0) {
 		if ((fp->f_flag & FWRITE) != 0)
 			maxprot |= VM_PROT_WRITE;
-		else if ((prot & PROT_WRITE) != 0)
+		else if ((prot & VM_PROT_WRITE) != 0)
 			return (EACCES);
 	} else {
 		maxprot |= VM_PROT_WRITE;
@@ -2428,7 +2428,6 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	}
 	maxprot &= cap_maxprot;
 
-	/* These rely on VM_PROT_* matching PROT_*. */
 	writecounted = FALSE;
 	error = vm_mmap_vnode(td, size, prot, &maxprot, &flags, vp,
 	    &foff, &object, &writecounted);
@@ -2447,7 +2446,7 @@ vn_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 	}
 #ifdef HWPMC_HOOKS
 	/* Inform hwpmc(4) if an executable is being mapped. */
-	if (error == 0 && (prot & PROT_EXEC) != 0) {
+	if (error == 0 && (prot & VM_PROT_EXECUTE) != 0) {
 		pkm.pm_file = vp;
 		pkm.pm_address = (uintptr_t) addr;
 		PMC_CALL_HOOK(td, PMC_FN_MMAP, (void *) &pkm);
