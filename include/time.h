@@ -194,6 +194,10 @@ char *timezone(int, int);	/* XXX XSI conflict */
 void tzsetwall(void);
 time_t timelocal(struct tm * const);
 time_t timegm(struct tm * const);
+time_t timetz(void *, struct tm * const);
+void tzclose(void *);
+void *tzopen(const char *);
+struct tm *tztime(void *, const time_t *, struct tm *);
 #endif /* __BSD_VISIBLE */
 
 #if __POSIX_VISIBLE >= 200809 || defined(_XLOCALE_H_)
