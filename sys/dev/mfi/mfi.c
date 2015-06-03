@@ -709,8 +709,8 @@ mfi_attach(struct mfi_softc *sc)
 		if ((error = mfi_tbolt_alloc_cmd(sc)) != 0)
 			return error;
 		if (bus_setup_intr(sc->mfi_dev, sc->mfi_irq,
-		    INTR_MPSAFE|INTR_TYPE_BIO, NULL, mfi_intr_tbolt, sc,
-		    &sc->mfi_intr)) {
+		    INTR_MPSAFE|INTR_TYPE_BIO|INTR_ENTROPY, NULL,
+		    mfi_intr_tbolt, sc, &sc->mfi_intr)) {
 			device_printf(sc->mfi_dev, "Cannot set up interrupt\n");
 			return (EINVAL);
 		}
@@ -721,7 +721,8 @@ mfi_attach(struct mfi_softc *sc)
 			return (error);
 
 		if (bus_setup_intr(sc->mfi_dev, sc->mfi_irq,
-		    INTR_MPSAFE|INTR_TYPE_BIO, NULL, mfi_intr, sc, &sc->mfi_intr)) {
+		    INTR_MPSAFE|INTR_TYPE_BIO|INTR_ENTROPY, NULL, mfi_intr, sc,
+		    &sc->mfi_intr)) {
 			device_printf(sc->mfi_dev, "Cannot set up interrupt\n");
 			return (EINVAL);
 		}
