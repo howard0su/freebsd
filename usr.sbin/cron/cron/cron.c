@@ -43,6 +43,7 @@ static	void	usage(void),
 		sigchld_handler(int),
 #endif
 		sighup_handler(int),
+		tz_tick(cron_db *, int, tzone *),
 		parse_args(int c, char *v[]);
 
 static int	run_at_secres(cron_db *);
@@ -50,6 +51,7 @@ static int	run_at_secres(cron_db *);
 static time_t	last_time = 0;
 static int	dst_enabled = 0;
 struct pidfh *pfh;
+tzone local_tz;
 
 static void
 usage() {
@@ -148,6 +150,7 @@ main(argc, argv)
 		log_it("CRON", getpid(), "WARNING", "madvise() failed");
 
 	pidfile_write(pfh);
+	tz_init(&local_tz);
 	database.head = NULL;
 	database.tail = NULL;
 	database.mtime = (time_t) 0;
@@ -216,41 +219,56 @@ run_reboot_jobs(db)
 
 
 static void
-cron_tick(cron_db *db, int secres)
+tz_tick(cron_db *db, int secres, tzone *tz)
 {
-	static struct tm	lasttm;
-	static time_t	diff = 0, /* time difference in seconds from the last offset change */
-		difflimit = 0; /* end point for the time zone correction */
 	struct tm	otztm; /* time in the old time zone */
-	int		otzsecond, otzminute, otzhour, otzdom, otzmonth, otzdow;
- 	register struct tm	*tm = localtime(&TargetTime);
-	register int		second, minute, hour, dom, month, dow;
 	register user		*u;
 	register entry		*e;
+	struct tm *tm;
+	tzone *match;
+ 
+	tm = &tz->tm;
+	if (tz->zone == NULL) {
+		localtime_r(&TargetTime, tm);
+		match = NULL;
+	} else {
+		tztime(tz->zone, &TargetTime, tm);
+		match = tz;
+	}
 
 	/* make 0-based values out of these so we can use them as indicies
 	 */
-	second = (secres == 0) ? 0 : tm->tm_sec -FIRST_SECOND;
-	minute = tm->tm_min -FIRST_MINUTE;
-	hour = tm->tm_hour -FIRST_HOUR;
-	dom = tm->tm_mday -FIRST_DOM;
-	month = tm->tm_mon +1 /* 0..11 -> 1..12 */ -FIRST_MONTH;
-	dow = tm->tm_wday -FIRST_DOW;
+	tz->second = (secres == 0) ? 0 : tm->tm_sec -FIRST_SECOND;
+	tz->minute = tm->tm_min -FIRST_MINUTE;
+	tz->hour = tm->tm_hour -FIRST_HOUR;
+	tz->dom = tm->tm_mday -FIRST_DOM;
+	tz->month = tm->tm_mon +1 /* 0..11 -> 1..12 */ -FIRST_MONTH;
+	tz->dow = tm->tm_wday -FIRST_DOW;
 
-	Debug(DSCH, ("[%d] tick(%d,%d,%d,%d,%d,%d)\n",
-		getpid(), second, minute, hour, dom, month, dow))
+	if (tz == &local_tz) {
+		Debug(DSCH, ("[%d] tick(%d,%d,%d,%d,%d,%d)\n",
+			getpid(), tz->second, tz->minute, tz->hour, tz->dom,
+			tz->month, tz->dow))
+	} else {
+		Debug(DSCH, ("[%d] tick(%s,%d,%d,%d,%d,%d,%d)\n", getpid(),
+			tz->name, tz->second, tz->minute, tz->hour, tz->dom,
+			tz->month, tz->dow))
+	}
 
 	if (dst_enabled && last_time != 0 
 	&& TargetTime > last_time /* exclude stepping back */
-	&& tm->tm_gmtoff != lasttm.tm_gmtoff ) {
+	&& !tz->first_tick
+	&& tm->tm_gmtoff != tz->lasttm.tm_gmtoff ) {
 
-		diff = tm->tm_gmtoff - lasttm.tm_gmtoff;
+		tz->diff = tm->tm_gmtoff - tz->lasttm.tm_gmtoff;
 
-		if ( diff > 0 ) { /* ST->DST */
+		if ( tz->diff > 0 ) { /* ST->DST */
 			/* mark jobs for an earlier run */
-			difflimit = TargetTime + diff;
+			tz->difflimit = TargetTime + tz->diff;
 			for (u = db->head;  u != NULL;  u = u->next) {
 				for (e = u->crontab;  e != NULL;  e = e->next) {
+					if (e->tz != match)
+						continue;
 					e->flags &= ~NOT_UNTIL;
 					if ( e->lastrun >= TargetTime )
 						e->lastrun = 0;
@@ -263,9 +281,11 @@ cron_tick(cron_db *db, int secres)
 			}
 		} else { /* diff < 0 : DST->ST */
 			/* mark jobs for skipping */
-			difflimit = TargetTime - diff;
+			tz->difflimit = TargetTime - tz->diff;
 			for (u = db->head;  u != NULL;  u = u->next) {
 				for (e = u->crontab;  e != NULL;  e = e->next) {
+					if (e->tz != match)
+						continue;
 					e->flags |= NOT_UNTIL;
 					e->flags &= ~RUN_AT;
 				}
@@ -273,32 +293,50 @@ cron_tick(cron_db *db, int secres)
 		}
 	}
 
-	if (diff != 0) {
+	if (tz->diff != 0) {
 		/* if the time was reset of the end of special zone is reached */
-		if (last_time == 0 || TargetTime >= difflimit) {
+		if (last_time == 0 || TargetTime >= tz->difflimit) {
 			/* disable the TZ switch checks */
-			diff = 0;
-			difflimit = 0;
+			tz->diff = 0;
+			tz->difflimit = 0;
 			for (u = db->head;  u != NULL;  u = u->next) {
 				for (e = u->crontab;  e != NULL;  e = e->next) {
+					if (e->tz != match)
+						continue;
 					e->flags &= ~(RUN_AT|NOT_UNTIL);
 				}
 			}
 		} else {
 			/* get the time in the old time zone */
-			time_t difftime = TargetTime + tm->tm_gmtoff - diff;
+			time_t difftime = TargetTime + tm->tm_gmtoff - tz->diff;
 			gmtime_r(&difftime, &otztm);
 
 			/* make 0-based values out of these so we can use them as indicies
 			 */
-			otzsecond = (secres == 0) ? 0 : otztm.tm_sec -FIRST_SECOND;
-			otzminute = otztm.tm_min -FIRST_MINUTE;
-			otzhour = otztm.tm_hour -FIRST_HOUR;
-			otzdom = otztm.tm_mday -FIRST_DOM;
-			otzmonth = otztm.tm_mon +1 /* 0..11 -> 1..12 */ -FIRST_MONTH;
-			otzdow = otztm.tm_wday -FIRST_DOW;
+			tz->otzsecond = (secres == 0) ? 0 : otztm.tm_sec -FIRST_SECOND;
+			tz->otzminute = otztm.tm_min -FIRST_MINUTE;
+			tz->otzhour = otztm.tm_hour -FIRST_HOUR;
+			tz->otzdom = otztm.tm_mday -FIRST_DOM;
+			tz->otzmonth = otztm.tm_mon +1 /* 0..11 -> 1..12 */ -FIRST_MONTH;
+			tz->otzdow = otztm.tm_wday -FIRST_DOW;
 		}
 	}
+
+	tz->lasttm = *tm;
+	tz->first_tick = 0;
+}
+
+
+static void
+cron_tick(cron_db *db, int secres)
+{
+	register user		*u;
+	register entry		*e;
+	tzone *z;
+
+	tz_tick(db, secres, &local_tz);
+	for (z = zones; z != NULL; z = z->next)
+		tz_tick(db, secres, z);
 
 	/* the dom/dow situation is odd.  '* * 1,15 * Sun' will run on the
 	 * first and fifteenth AND every Sunday;  '* * * * Sun' will run *only*
@@ -312,14 +350,18 @@ cron_tick(cron_db *db, int secres)
 					  env_get("LOGNAME", e->envp),
 					  e->uid, e->gid, e->cmd))
 
-			if ( diff != 0 && (e->flags & (RUN_AT|NOT_UNTIL)) ) {
-				if (bit_test(e->second, otzsecond)
-				 && bit_test(e->minute, otzminute)
-				 && bit_test(e->hour, otzhour)
-				 && bit_test(e->month, otzmonth)
+			if ( e->tz == NULL )
+				z = &local_tz;
+			else
+				z = e->tz;
+			if ( z->diff != 0 && (e->flags & (RUN_AT|NOT_UNTIL)) ) {
+				if (bit_test(e->second, z->otzsecond)
+				 && bit_test(e->minute, z->otzminute)
+				 && bit_test(e->hour, z->otzhour)
+				 && bit_test(e->month, z->otzmonth)
 				 && ( ((e->flags & DOM_STAR) || (e->flags & DOW_STAR))
-					  ? (bit_test(e->dow,otzdow) && bit_test(e->dom,otzdom))
-					  : (bit_test(e->dow,otzdow) || bit_test(e->dom,otzdom))
+					  ? (bit_test(e->dow,z->otzdow) && bit_test(e->dom,z->otzdom))
+					  : (bit_test(e->dow,z->otzdow) || bit_test(e->dom,z->otzdom))
 					)
 				   ) {
 					if ( e->flags & RUN_AT ) {
@@ -333,13 +375,13 @@ cron_tick(cron_db *db, int secres)
 					continue;
 			}
 
-			if (bit_test(e->second, second)
-			 && bit_test(e->minute, minute)
-			 && bit_test(e->hour, hour)
-			 && bit_test(e->month, month)
+			if (bit_test(e->second, z->second)
+			 && bit_test(e->minute, z->minute)
+			 && bit_test(e->hour, z->hour)
+			 && bit_test(e->month, z->month)
 			 && ( ((e->flags & DOM_STAR) || (e->flags & DOW_STAR))
-			      ? (bit_test(e->dow,dow) && bit_test(e->dom,dom))
-			      : (bit_test(e->dow,dow) || bit_test(e->dom,dom))
+			      ? (bit_test(e->dow,z->dow) && bit_test(e->dom,z->dom))
+			      : (bit_test(e->dow,z->dow) || bit_test(e->dom,z->dom))
 			    )
 			   ) {
 				e->flags &= ~RUN_AT;
@@ -350,7 +392,6 @@ cron_tick(cron_db *db, int secres)
 	}
 
 	last_time = TargetTime;
-	lasttm = *tm;
 }
 
 

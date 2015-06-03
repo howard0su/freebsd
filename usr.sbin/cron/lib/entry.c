@@ -36,6 +36,7 @@ static const char rcsid[] =
 typedef	enum ecode {
 	e_none, e_minute, e_hour, e_dom, e_month, e_dow,
 	e_cmd, e_timespec, e_username, e_group, e_mem
+	, e_tz
 #ifdef LOGIN_CAP
 	, e_class
 #endif
@@ -59,6 +60,7 @@ static char *ecodes[] =
 		"bad username",
 		"bad group name",
 		"out of memory",
+		"bad timezone",
 #ifdef LOGIN_CAP
 		"bad class name",
 #endif
@@ -110,6 +112,7 @@ load_entry(file, error_func, pw, envp)
 	char	cmd[MAX_COMMAND];
 	char	envstr[MAX_ENVSTR];
 	char	**prev_env;
+	char	*tz;
 
 	Debug(DPARS, ("load_entry()...about to eat comments\n"))
 
@@ -418,6 +421,17 @@ load_entry(file, error_func, pw, envp)
 		goto eof;
 	}
 #endif
+
+	/* Check to see if we should use a different timezone */
+	tz = env_get("TIMEZONE", e->envp);
+	if (tz != NULL) {
+		Debug(DPARS, ("load_entry()...about to parse timezone\n"))
+		e->tz = find_tz(tz);
+		if (e->tz == NULL) {
+			ecode = e_tz;
+			goto eof;
+		}
+	}
 
 	Debug(DPARS, ("load_entry()...about to parse command\n"))
 

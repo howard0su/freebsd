@@ -2,7 +2,7 @@
 
 LIB=	cron
 INTERNALLIB=
-SRCS= entry.c env.c misc.c
+SRCS= entry.c env.c misc.c tz.c
 
 WARNS?=	3
 

@@ -561,6 +561,9 @@ replace_cmd() {
 				free(e);
 			break;
 		case TRUE:
+			if (strncmp(envstr, "TIMEZONE=", strlen("TIMEZONE=")) == 0 &&
+			    find_tz(envstr + strlen("TIMEZONE=")) == NULL)
+				check_error("bad timezone");
 			break;
 		}
 	}

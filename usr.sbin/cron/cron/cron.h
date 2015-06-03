@@ -154,6 +154,19 @@
 #define RESOURCE_RC "daemon"
 #endif
 
+typedef struct _tzone {
+	struct _tzone	*next;
+	const char	*name;
+	void		*zone;
+	struct tm	tm; /* time for current tick */
+	struct tm	lasttm; /* time from previous tick */
+	time_t		diff; /* time difference in seconds from the last offset change */
+	time_t		difflimit; /* end point for the time zone correction */
+	int		otzsecond, otzminute, otzhour, otzdom, otzmonth, otzdow;
+	int		second, minute, hour, dom, month, dow;
+	int		first_tick;
+} tzone;
+
 			/* each user's crontab will be held as a list of
 			 * the following structure.
 			 *
@@ -183,6 +196,7 @@ typedef	struct _entry {
 #define	NOT_UNTIL	0x10
 #define	SEC_RES		0x20
 	time_t	lastrun;
+	tzone		*tz;
 } entry;
 
 			/* the crontab database will be a list of the
@@ -250,6 +264,8 @@ entry		*load_entry(FILE *, void (*)(char *),
 
 FILE		*cron_popen(char *, char *, entry *);
 
+tzone		*find_tz(const char *);
+void		tz_init(tzone *);
 
 				/* in the C tradition, we only create
 				 * variables for the main program, just
@@ -281,6 +297,7 @@ int	LineNumber;
 unsigned Jitter,
 	RootJitter;
 time_t	TargetTime;
+tzone *zones = NULL;
 
 # if DEBUGGING
 int	DebugFlags;
@@ -299,6 +316,7 @@ extern	int	LineNumber;
 extern unsigned	Jitter,
 		RootJitter;
 extern	time_t	TargetTime;
+extern	tzone *zones;
 extern struct pidfh *pfh;
 # if DEBUGGING
 extern	int	DebugFlags;
