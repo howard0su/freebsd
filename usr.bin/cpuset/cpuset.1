@@ -130,6 +130,9 @@ numbers separated by '-' for ranges and commas separating individual numbers.
 A special list of
 .Dq all
 may be specified in which case the list includes all CPUs from the root set.
+If the list is prefixed with
+.Sq -
+then all CPUs not specified in the list will be applied to the target instead.
 .It Fl p Ar pid
 Specifies a pid as the target of the operation.
 .It Fl s Ar setid
@@ -186,6 +189,9 @@ Create a new cpuset that is restricted to CPUs 0 and 2 and move
 .Ar pid
 into the new set:
 .Dl cpuset -C -c -l 0,2 -p <pid>
+.Pp
+Use all CPUs except for CPU 1 in the default set:
+.Dl cpuset -l -1 -s 1
 .Sh SEE ALSO
 .Xr cpuset 2
 .Sh HISTORY

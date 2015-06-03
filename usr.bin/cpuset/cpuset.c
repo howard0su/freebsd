@@ -67,11 +67,24 @@ static void usage(void);
 static void printset(cpuset_t *mask);
 
 static void
+invertmask(cpuset_t *mask)
+{
+	cpuset_t root;
+
+	if (cpuset_getaffinity(CPU_LEVEL_ROOT, CPU_WHICH_PID, -1,
+	    sizeof(root), &root) != 0)
+		err(EXIT_FAILURE, "getaffinity");
+	CPU_NAND(&root, mask);
+	CPU_COPY(&root, mask);
+}
+
+static void
 parselist(char *list, cpuset_t *mask)
 {
 	enum { NONE, NUM, DASH } state;
 	int lastnum;
 	int curnum;
+	int invert;
 	char *l;
 
 	if (strcasecmp(list, "all") == 0) {
@@ -82,7 +95,15 @@ parselist(char *list, cpuset_t *mask)
 	}
 	state = NONE;
 	curnum = lastnum = 0;
-	for (l = list; *l != '\0';) {
+	l = list;
+	if (*l == '-') {
+		invert = 1;
+		l++;
+		if (*l == '\0')
+			goto parserr;
+	} else
+		invert = 0;
+	while (*l != '\0') {
 		if (isdigit(*l)) {
 			curnum = atoi(l);
 			if (curnum > CPU_SETSIZE)
@@ -139,6 +160,8 @@ parselist(char *list, cpuset_t *mask)
 		case DASH:
 			goto parserr;
 	}
+	if (invert)
+		invertmask(mask);
 	return;
 parserr:
 	errx(EXIT_FAILURE, "Malformed cpu-list %s", list);
