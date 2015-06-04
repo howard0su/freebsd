@@ -53,10 +53,10 @@ __FBSDID("$FreeBSD$");
 static void __dead2
 child_fail_require(const char *file, int line, const char *str)
 {
-	char *cp;
+	char buf[128];
 
-	asprintf(&cp, "%s:%d: %s\n", file, line, str);
-	write(2, cp, strlen(cp));
+	snprintf(buf, sizeof(buf), "%s:%d: %s\n", file, line, str);
+	write(2, buf, strlen(buf));
 	_exit(32);
 }
 
