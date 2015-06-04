@@ -1514,7 +1514,7 @@ vm_mmap_object(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * The mmap() system call already enforces this by subtracting
 	 * the page offset from the file offset, but checking here
 	 * catches errors in device drivers (e.g. d_single_mmap()
-	 * callbacks or other internal mapping requests (such as in
+	 * callbacks) and other internal mapping requests (such as in
 	 * exec).
 	 */
 	if (foff & PAGE_MASK)
