@@ -65,6 +65,7 @@ static db_varfcn_t db_frame;
 static db_varfcn_t db_frame_seg;
 static db_varfcn_t db_gs;
 static db_varfcn_t db_ss;
+static db_varfcn_t db_xcr;
 
 /*
  * Machine register set.
@@ -91,6 +92,7 @@ struct db_variable db_regs[] = {
 	{ "cr2",	NULL,			db_cr2 },
 	{ "cr3",	NULL,			db_cr3 },
 	{ "cr4",	NULL,			db_cr4 },
+	{ "xcr0",	0,			db_xcr },
 	{ "dr0",	NULL,			db_dr0 },
 	{ "dr1",	NULL,			db_dr1 },
 	{ "dr2",	NULL,			db_dr2 },
@@ -208,6 +210,23 @@ db_ss(struct db_variable *vp, db_expr_t *valuep, int op)
 		*valuep = (ISPL(kdb_frame->tf_cs)) ? kdb_frame->tf_ss : rss();
 	else if (ISPL(kdb_frame->tf_cs))
 		kdb_frame->tf_ss = *valuep;
+	return (1);
+}
+
+static int
+db_xcr(struct db_variable *vp, db_expr_t *valuep, int op)
+{
+	u_int reg;
+
+	reg = (db_expr_t)vp->valuep;
+	if (reg != 0)
+		return (0);
+	if ((rcr4() & CR4_XSAVE) == 0)
+		return (0);
+	if (op == DB_VAR_GET)
+		*valuep = rxcr(reg);
+	else
+		load_xcr(reg, *valuep);
 	return (1);
 }
 

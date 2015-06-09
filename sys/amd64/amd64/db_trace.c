@@ -66,6 +66,7 @@ static db_varfcn_t db_dr6;
 static db_varfcn_t db_dr7;
 static db_varfcn_t db_frame;
 static db_varfcn_t db_frame_seg;
+static db_varfcn_t db_xcr;
 
 CTASSERT(sizeof(struct dbreg) == sizeof(((struct pcpu *)NULL)->pc_dbreg));
 
@@ -102,6 +103,7 @@ struct db_variable db_regs[] = {
 	{ "cr2",	NULL,			db_cr2 },
 	{ "cr3",	NULL,			db_cr3 },
 	{ "cr4",	NULL,			db_cr4 },
+	{ "xcr0",	0,			db_xcr },
 	{ "dr0",	NULL,			db_dr0 },
 	{ "dr1",	NULL,			db_dr1 },
 	{ "dr2",	NULL,			db_dr2 },
@@ -183,6 +185,23 @@ db_frame(struct db_variable *vp, db_expr_t *valuep, int op)
 		*valuep = *reg;
 	else
 		*reg = *valuep;
+	return (1);
+}
+
+static int
+db_xcr(struct db_variable *vp, db_expr_t *valuep, int op)
+{
+	u_int reg;
+
+	reg = (db_expr_t)vp->valuep;
+	if (reg != 0)
+		return (0);
+	if ((rcr4() & CR4_XSAVE) == 0)
+		return (0);
+	if (op == DB_VAR_GET)
+		*valuep = rxcr(reg);
+	else
+		load_xcr(reg, *valuep);
 	return (1);
 }
 
