@@ -39,17 +39,6 @@ __FBSDID("$FreeBSD$");
 #include <unistd.h>
 #include <atf-c.h>
 
-static void
-trace_me(void)
-{
-
-	/* Attach the parent process as a tracer of this process. */
-	CHILD_REQUIRE(ptrace(PT_TRACE_ME, 0, NULL, 0) != -1);
-
-	/* Trigger a stop. */
-	raise(SIGSTOP);
-}
-
 /*
  * A variant of ATF_REQUIRE that is suitable for use in child
  * processes.  This only works if the parent process is tripped up by
@@ -60,6 +49,17 @@ trace_me(void)
 			child_fail_require(__FILE__, __LINE__,		\
 			    #exp " not met");				\
 	} while (0)
+
+static void
+trace_me(void)
+{
+
+	/* Attach the parent process as a tracer of this process. */
+	CHILD_REQUIRE(ptrace(PT_TRACE_ME, 0, NULL, 0) != -1);
+
+	/* Trigger a stop. */
+	raise(SIGSTOP);
+}
 
 static void __dead2
 child_fail_require(const char *file, int line, const char *str)
