@@ -52,6 +52,10 @@ __FBSDID("$FreeBSD$");
 #include <ddb/db_sym.h>
 #include <ddb/db_variables.h>
 
+static db_varfcn_t db_cr0;
+static db_varfcn_t db_cr2;
+static db_varfcn_t db_cr3;
+static db_varfcn_t db_cr4;
 static db_varfcn_t db_dr0;
 static db_varfcn_t db_dr1;
 static db_varfcn_t db_dr2;
@@ -61,6 +65,7 @@ static db_varfcn_t db_dr5;
 static db_varfcn_t db_dr6;
 static db_varfcn_t db_dr7;
 static db_varfcn_t db_frame;
+static db_varfcn_t db_frame_seg;
 
 CTASSERT(sizeof(struct dbreg) == sizeof(((struct pcpu *)NULL)->pc_dbreg));
 
@@ -69,12 +74,12 @@ CTASSERT(sizeof(struct dbreg) == sizeof(((struct pcpu *)NULL)->pc_dbreg));
  */
 #define	DB_OFFSET(x)	(db_expr_t *)offsetof(struct trapframe, x)
 struct db_variable db_regs[] = {
-	{ "cs",		DB_OFFSET(tf_cs),	db_frame },
-	{ "ds",		DB_OFFSET(tf_ds),	db_frame },
-	{ "es",		DB_OFFSET(tf_es),	db_frame },
-	{ "fs",		DB_OFFSET(tf_fs),	db_frame },
-	{ "gs",		DB_OFFSET(tf_gs),	db_frame },
-	{ "ss",		DB_OFFSET(tf_ss),	db_frame },
+	{ "cs",		DB_OFFSET(tf_cs),	db_frame_seg },
+	{ "ds",		DB_OFFSET(tf_ds),	db_frame_seg },
+	{ "es",		DB_OFFSET(tf_es),	db_frame_seg },
+	{ "fs",		DB_OFFSET(tf_fs),	db_frame_seg },
+	{ "gs",		DB_OFFSET(tf_gs),	db_frame_seg },
+	{ "ss",		DB_OFFSET(tf_ss),	db_frame_seg },
 	{ "rax",	DB_OFFSET(tf_rax),	db_frame },
 	{ "rcx",        DB_OFFSET(tf_rcx),	db_frame },
 	{ "rdx",	DB_OFFSET(tf_rdx),	db_frame },
@@ -102,10 +107,14 @@ struct db_variable db_regs[] = {
 	{ "dr5",	NULL,			db_dr5 },
 	{ "dr6",	NULL,			db_dr6 },
 	{ "dr7",	NULL,			db_dr7 },
+	{ "cr0",	NULL,			db_cr0 },
+	{ "cr2",	NULL,			db_cr2 },
+	{ "cr3",	NULL,			db_cr3 },
+	{ "cr4",	NULL,			db_cr4 },
 };
-struct db_variable *db_eregs = db_regs + DB_N_SHOW_REGS;
+struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
-#define DB_DRX_FUNC(reg)		\
+#define DB_RW_REG_FUNC(reg)		\
 static int				\
 db_ ## reg (vp, valuep, op)		\
 	struct db_variable *vp;		\
@@ -119,14 +128,48 @@ db_ ## reg (vp, valuep, op)		\
 	return (1);			\
 }
 
-DB_DRX_FUNC(dr0)
-DB_DRX_FUNC(dr1)
-DB_DRX_FUNC(dr2)
-DB_DRX_FUNC(dr3)
-DB_DRX_FUNC(dr4)
-DB_DRX_FUNC(dr5)
-DB_DRX_FUNC(dr6)
-DB_DRX_FUNC(dr7)
+#define DB_RO_REG_FUNC(reg)		\
+static int				\
+db_ ## reg (vp, valuep, op)		\
+	struct db_variable *vp;		\
+	db_expr_t * valuep;		\
+	int op;				\
+{					\
+	if (op == DB_VAR_GET) {		\
+		*valuep = r ## reg ();	\
+		return (1);		\
+	}				\
+	return (0);			\
+}
+
+DB_RW_REG_FUNC(cr0)
+DB_RO_REG_FUNC(cr2)
+DB_RW_REG_FUNC(cr3)
+DB_RW_REG_FUNC(cr4)
+DB_RW_REG_FUNC(dr0)
+DB_RW_REG_FUNC(dr1)
+DB_RW_REG_FUNC(dr2)
+DB_RW_REG_FUNC(dr3)
+DB_RW_REG_FUNC(dr4)
+DB_RW_REG_FUNC(dr5)
+DB_RW_REG_FUNC(dr6)
+DB_RW_REG_FUNC(dr7)
+
+static int
+db_frame_seg(struct db_variable *vp, db_expr_t *valuep, int op)
+{
+	uint16_t *reg;
+
+	if (kdb_frame == NULL)
+		return (0);
+
+	reg = (uint16_t *)((uintptr_t)kdb_frame + (db_expr_t)vp->valuep);
+	if (op == DB_VAR_GET)
+		*valuep = *reg;
+	else
+		*reg = *valuep;
+	return (1);
+}
 
 static int
 db_frame(struct db_variable *vp, db_expr_t *valuep, int op)
