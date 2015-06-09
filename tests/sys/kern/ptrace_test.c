@@ -419,16 +419,16 @@ follow_fork_child(void)
 	pid_t fpid, wpid;
 	int status;
 
-	ATF_REQUIRE((fpid = fork()) != -1);
+	CHILD_REQUIRE((fpid = fork()) != -1);
 
 	if (fpid == 0)
 		/* Grandchild */
 		exit(2);
 
 	wpid = waitpid(fpid, &status, 0);
-	ATF_REQUIRE(wpid == fpid);
-	ATF_REQUIRE(WIFEXITED(status));
-	ATF_REQUIRE(WEXITSTATUS(status) == 2);
+	CHILD_REQUIRE(wpid == fpid);
+	CHILD_REQUIRE(WIFEXITED(status));
+	CHILD_REQUIRE(WEXITSTATUS(status) == 2);
 
 	exit(1);
 }
