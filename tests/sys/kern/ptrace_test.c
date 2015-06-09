@@ -50,6 +50,16 @@ __FBSDID("$FreeBSD$");
 			    #exp " not met");				\
 	} while (0)
 
+static void __dead2
+child_fail_require(const char *file, int line, const char *str)
+{
+	char buf[128];
+
+	snprintf(buf, sizeof(buf), "%s:%d: %s\n", file, line, str);
+	write(2, buf, strlen(buf));
+	_exit(32);
+}
+
 static void
 trace_me(void)
 {
@@ -61,14 +71,31 @@ trace_me(void)
 	raise(SIGSTOP);
 }
 
-static void __dead2
-child_fail_require(const char *file, int line, const char *str)
+static void
+wait_for_zombie(pid_t pid)
 {
-	char buf[128];
 
-	snprintf(buf, sizeof(buf), "%s:%d: %s\n", file, line, str);
-	write(2, buf, strlen(buf));
-	_exit(32);
+	/*
+	 * Wait for a process to exit.  This is kind of gross, but
+	 * there is not a better way.
+	 */
+	for (;;) {
+		struct kinfo_proc kp;
+		size_t len;
+		int mib[4];
+
+		mib[0] = CTL_KERN;
+		mib[1] = KERN_PROC;
+		mib[2] = KERN_PROC_PID;
+		mib[3] = pid;
+		len = sizeof(kp);
+		if (sysctl(mib, nitems(mib), &kp, &len, NULL, 0) == -1) {
+			/* The KERN_PROC_PID sysctl fails for zombies. */
+			ATF_REQUIRE(errno == ESRCH);
+			break;
+		}
+		usleep(5000);
+	}
 }
 
 /*
@@ -231,27 +258,7 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_child_debugger, tc)
 	ATF_REQUIRE(read(cpipe[0], &c, sizeof(c)) == 0);
 	close(cpipe[0]);
 
-	/*
-	 * Wait for the child to exit.  This is kind of gross, but
-	 * there is not a better way.
-	 */
-	for (;;) {
-		struct kinfo_proc kp;
-		size_t len;
-		int mib[4];
-
-		mib[0] = CTL_KERN;
-		mib[1] = KERN_PROC;
-		mib[2] = KERN_PROC_PID;
-		mib[3] = child;
-		len = sizeof(kp);
-		if (sysctl(mib, nitems(mib), &kp, &len, NULL, 0) == -1) {
-			/* The KERN_PROC_PID sysctl fails for zombies. */
-			ATF_REQUIRE(errno == ESRCH);
-			break;
-		}
-		usleep(5000);
-	}
+	wait_for_zombie(child);
 
 	/*
 	 * This wait should return a pid of 0 to indicate no status to
@@ -365,27 +372,7 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
 	ATF_REQUIRE(read(cpipe[0], &c, sizeof(c)) == 0);
 	close(cpipe[0]);
 
-	/*
-	 * Wait for the child to exit.  This is kind of gross, but
-	 * there is not a better way.
-	 */
-	for (;;) {
-		struct kinfo_proc kp;
-		size_t len;
-		int mib[4];
-
-		mib[0] = CTL_KERN;
-		mib[1] = KERN_PROC;
-		mib[2] = KERN_PROC_PID;
-		mib[3] = child;
-		len = sizeof(kp);
-		if (sysctl(mib, nitems(mib), &kp, &len, NULL, 0) == -1) {
-			/* The KERN_PROC_PID sysctl fails for zombies. */
-			ATF_REQUIRE(errno == ESRCH);
-			break;
-		}
-		usleep(5000);
-	}
+	wait_for_zombie(child);
 
 	/*
 	 * This wait should return a pid of 0 to indicate no status to
