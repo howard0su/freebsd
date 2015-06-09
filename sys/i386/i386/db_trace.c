@@ -87,7 +87,10 @@ struct db_variable db_regs[] = {
 	{ "edi",	DB_OFFSET(tf_edi),	db_frame },
 	{ "eip",	DB_OFFSET(tf_eip),	db_frame },
 	{ "efl",	DB_OFFSET(tf_eflags),	db_frame },
-#define	DB_N_SHOW_REGS	15	/* Don't show registers after here. */
+	{ "cr0",	NULL,			db_cr0 },
+	{ "cr2",	NULL,			db_cr2 },
+	{ "cr3",	NULL,			db_cr3 },
+	{ "cr4",	NULL,			db_cr4 },
 	{ "dr0",	NULL,			db_dr0 },
 	{ "dr1",	NULL,			db_dr1 },
 	{ "dr2",	NULL,			db_dr2 },
@@ -96,10 +99,6 @@ struct db_variable db_regs[] = {
 	{ "dr5",	NULL,			db_dr5 },
 	{ "dr6",	NULL,			db_dr6 },
 	{ "dr7",	NULL,			db_dr7 },
-	{ "cr0",	NULL,			db_cr0 },
-	{ "cr2",	NULL,			db_cr2 },
-	{ "cr3",	NULL,			db_cr3 },
-	{ "cr4",	NULL,			db_cr4 },
 };
 struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
