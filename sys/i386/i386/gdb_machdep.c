@@ -59,7 +59,6 @@ gdb_cpu_getreg(int regnum, size_t *regsz)
 		case 9: return (&kdb_frame->tf_eflags);
 		case 10: return (&kdb_frame->tf_cs);
 		case 12: return (&kdb_frame->tf_ds);
-		/* The trapframe contains es/fs but they appear to be garbage. */
 		case 13: return (&kdb_frame->tf_es);
 		case 14: return (&kdb_frame->tf_fs);
 		}

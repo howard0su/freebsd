@@ -54,6 +54,10 @@ kdb_cpu_sync_icache(unsigned char *addr, size_t size)
 static __inline void
 kdb_cpu_trap(int type, int code)
 {
+	kdb_frame->tf_cs &= 0xffff;
+	kdb_frame->tf_ds &= 0xffff;
+	kdb_frame->tf_es &= 0xffff;
+	kdb_frame->tf_fs &= 0xffff;
 }
 
 #endif /* _MACHINE_KDB_H_ */
