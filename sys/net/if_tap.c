@@ -107,7 +107,6 @@ static struct if_clone *vmnet_cloner;
 
 /* character device */
 static d_open_t		tapopen;
-static d_close_t	tapclose;
 static d_read_t		tapread;
 static d_write_t	tapwrite;
 static d_ioctl_t	tapioctl;
@@ -137,7 +136,6 @@ static struct cdevsw	tap_cdevsw = {
 	.d_version =	D_VERSION,
 	.d_flags =	D_NEEDMINOR,
 	.d_open =	tapopen,
-	.d_close =	tapclose,
 	.d_read =	tapread,
 	.d_write =	tapwrite,
 	.d_ioctl =	tapioctl,
@@ -156,9 +154,11 @@ static int			tapdebug = 0;        /* debug flag   */
 static int			tapuopen = 0;        /* allow user open() */
 static int			tapuponopen = 0;    /* IFF_UP on open() */
 static int			tapdclone = 1;	/* enable devfs cloning */
-static int			tapclonereuse = 0;   /* reuse closed taps */
 static SLIST_HEAD(, tap_softc)	taphead;             /* first device */
 static struct clonedevs 	*tapclones;
+static struct cdev		*tapcdev;
+static struct cdev		*vmnetcdev;
+static bool			tapunloading = false;
 
 MALLOC_DECLARE(M_TAP);
 MALLOC_DEFINE(M_TAP, CDEV_NAME, "Ethernet tunnel interface");
@@ -174,8 +174,6 @@ SYSCTL_INT(_net_link_tap, OID_AUTO, up_on_open, CTLFLAG_RW, &tapuponopen, 0,
 SYSCTL_INT(_net_link_tap, OID_AUTO, devfs_cloning, CTLFLAG_RWTUN, &tapdclone, 0,
 	"Enably legacy devfs interface creation");
 SYSCTL_INT(_net_link_tap, OID_AUTO, debug, CTLFLAG_RW, &tapdebug, 0, "");
-SYSCTL_INT(_net_link_tap, OID_AUTO, clone_reuse_closed, CTLFLAG_RWTUN,
-    &tapclonereuse, 0, "Re-use closed interfaces in devfs cloning");
 
 DEV_MODULE(if_tap, tapmodevent, NULL);
 
@@ -265,7 +263,7 @@ tapmodevent(module_t mod, int type, void *data)
 	switch (type) {
 	case MOD_LOAD:
 
-		/* intitialize device */
+		/* initialize device */
 
 		mtx_init(&tapmtx, "tapmtx", NULL, MTX_DEF);
 		SLIST_INIT(&taphead);
@@ -281,25 +279,28 @@ tapmodevent(module_t mod, int type, void *data)
 		    tap_clone_destroy, 0);
 		vmnet_cloner = if_clone_simple(vmnetname, vmnet_clone_create,
 		    vmnet_clone_destroy, 0);
+		tapcdev = make_dev(&tap_cdevsw, 0, UID_ROOT, GID_WHEEL, 0600,
+		    "%s", tapname);
+		vmnetcdev = make_dev(&tap_cdevsw, VMNET_DEV_MASK, UID_ROOT,
+		    GID_WHEEL, 0600, "%s", vmnetname);
 		return (0);
 
 	case MOD_UNLOAD:
-		/*
-		 * The EBUSY algorithm here can't quite atomically
-		 * guarantee that this is race-free since we have to
-		 * release the tap mtx to deregister the clone handler.
-		 */
 		mtx_lock(&tapmtx);
+		tapunloading = true;
 		SLIST_FOREACH(tp, &taphead, tap_next) {
 			mtx_lock(&tp->tap_mtx);
 			if (tp->tap_flags & TAP_OPEN) {
 				mtx_unlock(&tp->tap_mtx);
+				tapunloading = false;
 				mtx_unlock(&tapmtx);
 				return (EBUSY);
 			}
 			mtx_unlock(&tp->tap_mtx);
 		}
 		mtx_unlock(&tapmtx);
+		destroy_dev(tapcdev);
+		destroy_dev(vmnetcdev);
 
 		EVENTHANDLER_DEREGISTER(dev_clone, eh_tag);
 		if_clone_detach(tap_cloner);
@@ -341,71 +342,30 @@ tapmodevent(module_t mod, int type, void *data)
 static void
 tapclone(void *arg, struct ucred *cred, char *name, int namelen, struct cdev **dev)
 {
-	struct tap_softc *tp;
-	char		devname[SPECNAMELEN + 1];
-	int		i, unit, append_unit;
+	int		i, unit;
 	int		extra;
 
 	if (*dev != NULL)
 		return;
 
-	if (!tapdclone ||
+	if (!tapdclone || tapunloading ||
 	    (!tapuopen && priv_check_cred(cred, PRIV_NET_IFCREATE, 0) != 0))
 		return;
 
-	unit = 0;
-	append_unit = 0;
-	extra = 0;
-
 	/* We're interested in only tap/vmnet devices. */
-	if (strcmp(name, tapname) == 0) {
-		unit = -1;
-	} else if (strcmp(name, vmnetname) == 0) {
-		unit = -1;
+	if (dev_stdclone(name, NULL, tapname, &unit) == 1)
+		extra = 0;
+	else if (dev_stdclone(name, NULL, vmnetname, &unit) == 1)
 		extra = VMNET_DEV_MASK;
-	} else if (dev_stdclone(name, NULL, tapname, &unit) != 1) {
-		if (dev_stdclone(name, NULL, vmnetname, &unit) != 1) {
-			return;
-		} else {
-			extra = VMNET_DEV_MASK;
-		}
-	}
-
-	if (unit == -1 && tapclonereuse) {
-		mtx_lock(&tapmtx);
-		SLIST_FOREACH(tp, &taphead, tap_next) {
-			mtx_lock(&tp->tap_mtx);
-			if (!(tp->tap_flags & TAP_OPEN)) {
-				dev_ref(tp->tap_dev);
-				*dev = tp->tap_dev;
-				mtx_unlock(&tp->tap_mtx);
-				mtx_unlock(&tapmtx);
-				return;
-			}
-			mtx_unlock(&tp->tap_mtx);
-		}
-		mtx_unlock(&tapmtx);
-	}
-	if (unit == -1)
-		append_unit = 1;
+	else
+		return;
 
 	CURVNET_SET(CRED_TO_VNET(cred));
 	/* find any existing device, or allocate new unit number */
 	i = clone_create(&tapclones, &tap_cdevsw, &unit, dev, extra);
-	if (i) {
-		if (append_unit) {
-			/*
-			 * We were passed 'tun' or 'tap', with no unit specified
-			 * so we'll need to append it now.
-			 */
-			namelen = snprintf(devname, sizeof(devname), "%s%d", name,
-			    unit);
-			name = devname;
-		}
-
+	if (i)
 		*dev = make_dev_credf(MAKEDEV_REF, &tap_cdevsw, unit | extra,
 		     cred, UID_ROOT, GID_WHEEL, 0600, "%s", name);
-	}
 
 	if_clone_create(name, namelen, NULL);
 	CURVNET_RESTORE();
@@ -485,65 +445,20 @@ tapcreate(struct cdev *dev)
 		ifp->if_xname, dev2unit(dev));
 } /* tapcreate */
 
-
 /*
- * tapopen
- *
- * to open tunnel. must be superuser
- */
-static int
-tapopen(struct cdev *dev, int flag, int mode, struct thread *td)
-{
-	struct tap_softc	*tp = NULL;
-	struct ifnet		*ifp = NULL;
-	int			 error;
-
-	if (tapuopen == 0) {
-		error = priv_check(td, PRIV_NET_TAP);
-		if (error)
-			return (error);
-	}
-
-	if ((dev2unit(dev) & CLONE_UNITMASK) > TAPMAXUNIT)
-		return (ENXIO);
-
-	tp = dev->si_drv1;
-
-	mtx_lock(&tp->tap_mtx);
-	if (tp->tap_flags & TAP_OPEN) {
-		mtx_unlock(&tp->tap_mtx);
-		return (EBUSY);
-	}
-
-	bcopy(IF_LLADDR(tp->tap_ifp), tp->ether_addr, sizeof(tp->ether_addr));
-	tp->tap_pid = td->td_proc->p_pid;
-	tp->tap_flags |= TAP_OPEN;
-	ifp = tp->tap_ifp;
-
-	ifp->if_drv_flags |= IFF_DRV_RUNNING;
-	ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
-	if (tapuponopen)
-		ifp->if_flags |= IFF_UP;
-	if_link_state_change(ifp, LINK_STATE_UP);
-	mtx_unlock(&tp->tap_mtx);
-
-	TAPDEBUG("%s is open. minor = %#x\n", ifp->if_xname, dev2unit(dev));
-
-	return (0);
-} /* tapopen */
-
-
-/*
- * tapclose
+ * tap_dtor
  *
  * close the device - mark i/f down & delete routing info
  */
-static int
-tapclose(struct cdev *dev, int foo, int bar, struct thread *td)
+static void
+tap_dtor(void *data)
 {
 	struct ifaddr		*ifa;
-	struct tap_softc	*tp = dev->si_drv1;
-	struct ifnet		*ifp = tp->tap_ifp;
+	struct ifnet		*ifp;
+	struct tap_softc	*tp;
+
+	tp = data;
+	ifp = tp->tap_ifp;
 
 	/* junk all pending output */
 	mtx_lock(&tp->tap_mtx);
@@ -582,10 +497,117 @@ tapclose(struct cdev *dev, int foo, int bar, struct thread *td)
 	mtx_unlock(&tp->tap_mtx);
 
 	TAPDEBUG("%s is closed. minor = %#x\n", 
-		ifp->if_xname, dev2unit(dev));
+		ifp->if_xname, dev2unit(tp->tap_dev));
+
+	dev_rel(tp->tap_dev);
+}
+
+static struct tap_softc *
+tap_open_clone(struct cdev *dev)
+{
+	struct tap_softc	*tp;
+	struct cdev		*new;
+	int			 extra, i, unit;
+
+	extra = dev2unit(dev);
+
+restart:
+	/* First, try to find an existing closed interface. */
+	mtx_lock(&tapmtx);
+	if (tapunloading)
+		return (NULL);
+	SLIST_FOREACH(tp, &taphead, tap_next) {
+		mtx_lock(&tp->tap_mtx);
+		if ((tp->tap_flags & TAP_OPEN) ||
+		    (extra == 0 && tp->tap_flags & TAP_VMNET) ||
+		    (extra == VMNET_DEV_MASK && !(tp->tap_flags & TAP_VMNET))) {
+			mtx_unlock(&tp->tap_mtx);
+			continue;
+		}
+		mtx_unlock(&tapmtx);
+		dev_ref(tp->tap_dev);
+		return (tp);
+	}
+	mtx_unlock(&tapmtx);
+
+	/* If an existing interface wasn't found, create a new one. */
+	unit = 0;
+	i = clone_create(&tapclones, &tap_cdevsw, &unit, &new, extra);
+	if (i) {
+		new = make_dev(&tap_cdevsw, unit | extra, UID_ROOT, GID_WHEEL,
+		    0600, "%s%d", extra == 0 ? tapname : vmnetname, unit);
+	}
+	dev_ref(new);
+	tapcreate(new);
+	tp = new->si_drv1;
+	mtx_lock(&tp->tap_mtx);
+	if (tp->tap_flags & TAP_OPEN) {
+		mtx_unlock(&tp->tap_mtx);
+		dev_rel(new);
+		goto restart;
+	}
+	return (tp);
+}
+
+/*
+ * tapopen
+ *
+ * to open tunnel. must be superuser
+ */
+static int
+tapopen(struct cdev *dev, int flag, int mode, struct thread *td)
+{
+	struct tap_softc	*tp;
+	struct ifnet		*ifp;
+	int			 error;
+
+	if (tapuopen == 0) {
+		error = priv_check(td, PRIV_NET_TAP);
+		if (error)
+			return (error);
+	}
+
+	if (dev->si_drv1 == NULL) {
+		tp = tap_open_clone(dev);
+		if (tp == NULL)
+			return (ENXIO);
+	} else {
+		if ((dev2unit(dev) & CLONE_UNITMASK) > TAPMAXUNIT)
+			return (ENXIO);
+
+		tp = dev->si_drv1;
+
+		mtx_lock(&tp->tap_mtx);
+		if (tp->tap_flags & TAP_OPEN) {
+			mtx_unlock(&tp->tap_mtx);
+			return (EBUSY);
+		}
+		dev_ref(dev);
+	}
+
+	bcopy(IF_LLADDR(tp->tap_ifp), tp->ether_addr, sizeof(tp->ether_addr));
+	tp->tap_flags |= TAP_OPEN;
+	tp->tap_pid = td->td_proc->p_pid;
+	ifp = tp->tap_ifp;
+
+	ifp->if_drv_flags |= IFF_DRV_RUNNING;
+	ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+	if (tapuponopen)
+		ifp->if_flags |= IFF_UP;
+	if_link_state_change(ifp, LINK_STATE_UP);
+	mtx_unlock(&tp->tap_mtx);
+
+	error = devfs_set_cdevpriv(tp, tap_dtor);
+	if (error) {
+		tap_dtor(tp);
+		return (error);
+	}
+
+	TAPDEBUG("%s is open. minor = %#x\n", ifp->if_xname,
+	    dev2unit(tp->tap_dev));
 
 	return (0);
-} /* tapclose */
+} /* tapopen */
 
 
 /*
@@ -742,14 +764,19 @@ tapifstart(struct ifnet *ifp)
 static int
 tapioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag, struct thread *td)
 {
-	struct tap_softc	*tp = dev->si_drv1;
-	struct ifnet		*ifp = tp->tap_ifp;
+	struct tap_softc	*tp;
+	struct ifnet		*ifp;
 	struct tapinfo		*tapp = NULL;
-	int			 f;
+	int			 error, f;
 #if defined(COMPAT_FREEBSD6) || defined(COMPAT_FREEBSD5) || \
     defined(COMPAT_FREEBSD4)
 	int			 ival;
 #endif
+
+	error = devfs_get_cdevpriv((void **)&tp);
+	if (error != 0)
+		return (error);
+	ifp = tp->tap_ifp;
 
 	switch (cmd) {
 		case TAPSIFINFO:
@@ -874,10 +901,15 @@ tapioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag, struct thread *td
 static int
 tapread(struct cdev *dev, struct uio *uio, int flag)
 {
-	struct tap_softc	*tp = dev->si_drv1;
-	struct ifnet		*ifp = tp->tap_ifp;
+	struct tap_softc	*tp;
+	struct ifnet		*ifp;
 	struct mbuf		*m = NULL;
-	int			 error = 0, len;
+	int			 error, len;
+
+	error = devfs_get_cdevpriv((void **)&tp);
+	if (error != 0)
+		return (error);
+	ifp = tp->tap_ifp;
 
 	TAPDEBUG("%s reading, minor = %#x\n", ifp->if_xname, dev2unit(dev));
 
@@ -947,9 +979,15 @@ static int
 tapwrite(struct cdev *dev, struct uio *uio, int flag)
 {
 	struct ether_header	*eh;
-	struct tap_softc	*tp = dev->si_drv1;
-	struct ifnet		*ifp = tp->tap_ifp;
+	struct tap_softc	*tp;
+	struct ifnet		*ifp;
 	struct mbuf		*m;
+	int			 error;
+
+	error = devfs_get_cdevpriv((void **)&tp);
+	if (error != 0)
+		return (error);
+	ifp = tp->tap_ifp;
 
 	TAPDEBUG("%s writing, minor = %#x\n", 
 		ifp->if_xname, dev2unit(dev));
@@ -1009,9 +1047,13 @@ tapwrite(struct cdev *dev, struct uio *uio, int flag)
 static int
 tappoll(struct cdev *dev, int events, struct thread *td)
 {
-	struct tap_softc	*tp = dev->si_drv1;
-	struct ifnet		*ifp = tp->tap_ifp;
+	struct tap_softc	*tp;
+	struct ifnet		*ifp;
 	int			 revents = 0;
+
+	if (devfs_get_cdevpriv((void **)&tp) != 0)
+		return (POLLERR);
+	ifp = tp->tap_ifp;
 
 	TAPDEBUG("%s polling, minor = %#x\n", 
 		ifp->if_xname, dev2unit(dev));
@@ -1048,8 +1090,14 @@ tappoll(struct cdev *dev, int events, struct thread *td)
 static int
 tapkqfilter(struct cdev *dev, struct knote *kn)
 {
-	struct tap_softc	*tp = dev->si_drv1;
-	struct ifnet		*ifp = tp->tap_ifp;
+	struct tap_softc	*tp;
+	struct ifnet		*ifp;
+	int			 error;
+
+	error = devfs_get_cdevpriv((void **)&tp);
+	if (error != 0)
+		return (POLLERR);
+	ifp = tp->tap_ifp;
 
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
