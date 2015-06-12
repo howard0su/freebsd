@@ -156,6 +156,7 @@ static int			tapdebug = 0;        /* debug flag   */
 static int			tapuopen = 0;        /* allow user open() */
 static int			tapuponopen = 0;    /* IFF_UP on open() */
 static int			tapdclone = 1;	/* enable devfs cloning */
+static int			tapclonereuse = 0;   /* reuse closed taps */
 static SLIST_HEAD(, tap_softc)	taphead;             /* first device */
 static struct clonedevs 	*tapclones;
 
@@ -173,6 +174,8 @@ SYSCTL_INT(_net_link_tap, OID_AUTO, up_on_open, CTLFLAG_RW, &tapuponopen, 0,
 SYSCTL_INT(_net_link_tap, OID_AUTO, devfs_cloning, CTLFLAG_RWTUN, &tapdclone, 0,
 	"Enably legacy devfs interface creation");
 SYSCTL_INT(_net_link_tap, OID_AUTO, debug, CTLFLAG_RW, &tapdebug, 0, "");
+SYSCTL_INT(_net_link_tap, OID_AUTO, clone_reuse_closed, CTLFLAG_RWTUN,
+    &tapclonereuse, 0, "Re-use closed interfaces in devfs cloning");
 
 DEV_MODULE(if_tap, tapmodevent, NULL);
 
@@ -338,6 +341,7 @@ tapmodevent(module_t mod, int type, void *data)
 static void
 tapclone(void *arg, struct ucred *cred, char *name, int namelen, struct cdev **dev)
 {
+	struct tap_softc *tp;
 	char		devname[SPECNAMELEN + 1];
 	int		i, unit, append_unit;
 	int		extra;
@@ -367,6 +371,21 @@ tapclone(void *arg, struct ucred *cred, char *name, int namelen, struct cdev **d
 		}
 	}
 
+	if (unit == -1 && tapclonereuse) {
+		mtx_lock(&tapmtx);
+		SLIST_FOREACH(tp, &taphead, tap_next) {
+			mtx_lock(&tp->tap_mtx);
+			if (!(tp->tap_flags & TAP_OPEN)) {
+				dev_ref(tp->tap_dev);
+				*dev = tp->tap_dev;
+				mtx_unlock(&tp->tap_mtx);
+				mtx_unlock(&tapmtx);
+				return;
+			}
+			mtx_unlock(&tp->tap_mtx);
+		}
+		mtx_unlock(&tapmtx);
+	}
 	if (unit == -1)
 		append_unit = 1;
 
