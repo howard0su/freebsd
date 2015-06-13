@@ -50,7 +50,7 @@ __FBSDID("$FreeBSD$");
 			    #exp " not met");				\
 	} while (0)
 
-static void __dead2
+static __dead2 void
 child_fail_require(const char *file, int line, const char *str)
 {
 	char buf[128];
@@ -397,11 +397,11 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
 }
 
 /*
- * The child process should always act the same regardless of how the
+ * The parent process should always act the same regardless of how the
  * debugger is attached to it.
  */
 static __dead2 void
-follow_fork_child(void)
+follow_fork_parent(void)
 {
 	pid_t fpid, wpid;
 	int status;
@@ -409,7 +409,7 @@ follow_fork_child(void)
 	CHILD_REQUIRE((fpid = fork()) != -1);
 
 	if (fpid == 0)
-		/* Grandchild */
+		/* Child */
 		exit(2);
 
 	wpid = waitpid(fpid, &status, 0);
@@ -426,21 +426,21 @@ follow_fork_child(void)
  * child process.
  */
 static pid_t
-handle_fork_events(pid_t child)
+handle_fork_events(pid_t parent)
 {
 	struct ptrace_lwpinfo pl;
 	bool fork_reported[2];
-	pid_t new_child, wpid;
+	pid_t child, wpid;
 	int i, status;
 
 	fork_reported[0] = false;
 	fork_reported[1] = false;
-	new_child = -1;
+	child = -1;
 	
 	/*
-	 * Each process should report a fork event.  The direct child
-	 * should report a PL_FLAG_FORKED event, and the grandchild
-	 * should report a PL_FLAG_CHILD event.
+	 * Each process should report a fork event.  The parent should
+	 * report a PL_FLAG_FORKED event, and the child should report
+	 * a PL_FLAG_CHILD event.
 	 */
 	for (i = 0; i < 2; i++) {
 		wpid = wait(&status);
@@ -454,27 +454,27 @@ handle_fork_events(pid_t child)
 		ATF_REQUIRE((pl.pl_flags & (PL_FLAG_FORKED | PL_FLAG_CHILD)) !=
 		    (PL_FLAG_FORKED | PL_FLAG_CHILD));
 		if (pl.pl_flags & PL_FLAG_CHILD) {
-			ATF_REQUIRE(wpid != child);
+			ATF_REQUIRE(wpid != parent);
 			ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
 			ATF_REQUIRE(!fork_reported[1]);
-			if (new_child == -1)
-				new_child = wpid;
+			if (child == -1)
+				child = wpid;
 			else
-				ATF_REQUIRE(new_child == wpid);
+				ATF_REQUIRE(child == wpid);
 			fork_reported[1] = true;
 		} else {
-			ATF_REQUIRE(wpid == child);
+			ATF_REQUIRE(wpid == parent);
 			ATF_REQUIRE(WSTOPSIG(status) == SIGTRAP);
 			ATF_REQUIRE(!fork_reported[0]);
-			if (new_child == -1)
-				new_child = pl.pl_child_pid;
+			if (child == -1)
+				child = pl.pl_child_pid;
 			else
-				ATF_REQUIRE(new_child == pl.pl_child_pid);
+				ATF_REQUIRE(child == pl.pl_child_pid);
 			fork_reported[0] = true;
 		}
 	}
 
-	return (new_child);
+	return (child);
 }
 
 /*
@@ -491,7 +491,7 @@ ATF_TC_BODY(ptrace__follow_fork_both_attached, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_child();
+		follow_fork_parent();
 	}
 
 	/* Parent process. */
@@ -547,7 +547,7 @@ ATF_TC_BODY(ptrace__follow_fork_child_detached, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_child();
+		follow_fork_parent();
 	}
 
 	/* Parent process. */
@@ -598,7 +598,7 @@ ATF_TC_BODY(ptrace__follow_fork_parent_detached, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_child();
+		follow_fork_parent();
 	}
 
 	/* Parent process. */
@@ -644,6 +644,100 @@ ATF_TC_BODY(ptrace__follow_fork_parent_detached, tc)
 	ATF_REQUIRE(errno == ECHILD);
 }
 
+static void
+attach_fork_parent(int cpipe[2])
+{
+	pid_t fpid;
+
+	close(cpipe[0]);
+
+	/* Double-fork to disassociate from the debugger. */
+	CHILD_REQUIRE((fpid = fork()) != -1);
+	if (fpid != 0)
+		exit(3);
+	
+	/* Send the pid of the disassociated child to the debugger. */
+	fpid = getpid();
+	CHILD_REQUIRE(write(cpipe[1], &fpid, sizeof(fpid)) == sizeof(fpid));
+
+	/* Wait for the debugger to attach. */
+	CHILD_REQUIRE(read(cpipe[1], &fpid, sizeof(fpid)) == 0);
+}
+
+/*
+ * Verify that a new child process is stopped after a followed fork and
+ * that the traced parent sees the exit of the child after the debugger
+ * when both processes remain attached to the debugger.  In this test
+ * the parent that forks is not a direct child of the debugger.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__follow_fork_both_attached_unrelated_debugger);
+ATF_TC_BODY(ptrace__follow_fork_both_attached_unrelated_debugger, tc)
+{
+	pid_t children[0], fpid, wpid;
+	int cpipe[2], status;
+
+	ATF_REQUIRE(pipe(cpipe) == 0);
+	ATF_REQUIRE((fpid = fork()) != -1);
+	if (fpid == 0) {
+		attach_fork_parent(cpipe);
+		follow_fork_parent();
+	}
+
+	/* Parent process. */
+	close(cpipe[1]);
+
+	/* Wait for the direct child to exit. */
+	wpid = waitpid(fpid, &status, 0);
+	ATF_REQUIRE(wpid == fpid);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 3);
+
+	/* Read the pid of the fork parent. */
+	ATF_REQUIRE(read(cpipe[0], &children[0], sizeof(children[0])) ==
+	    sizeof(children[0]));
+
+	/* Attach to the fork parent. */
+	ATF_REQUIRE(ptrace(PT_ATTACH, children[0], NULL, 0) == 0);
+
+	/* The first wait() should report the SIGSTOP from PT_ATTACH. */
+	wpid = waitpid(children[0], &status, 0);
+	ATF_REQUIRE(wpid == children[0]);
+	ATF_REQUIRE(WIFSTOPPED(status));
+	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+
+	ATF_REQUIRE(ptrace(PT_FOLLOW_FORK, children[0], NULL, 1) != -1);
+
+	/* Continue the fork parent ignoring the SIGSTOP. */
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+
+	/* Signal the fork parent to continue. */
+	close(cpipe[0]);
+
+	children[1] = handle_fork_events(children[0]);
+	ATF_REQUIRE(children[1] > 0);
+
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[1], (caddr_t)1, 0) != -1);
+
+	/*
+	 * The fork parent can't exit until the child reports status,
+	 * so the child should report its exit first to the debugger.
+	 */
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[1]);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 2);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[0]);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 1);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -654,6 +748,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ptrace__follow_fork_both_attached);
 	ATF_TP_ADD_TC(tp, ptrace__follow_fork_child_detached);
 	ATF_TP_ADD_TC(tp, ptrace__follow_fork_parent_detached);
+	ATF_TP_ADD_TC(tp, ptrace__follow_fork_both_attached_unrelated_debugger);
 
 	return (atf_no_error());
 }
