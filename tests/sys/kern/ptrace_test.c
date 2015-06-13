@@ -72,6 +72,20 @@ trace_me(void)
 }
 
 static void
+attach_child(pid_t pid)
+{
+	pid_t wpid;
+	int status;
+
+	ATF_REQUIRE(ptrace(PT_ATTACH, pid, NULL, 0) == 0);
+
+	wpid = waitpid(pid, &status, 0);
+	ATF_REQUIRE(wpid == pid);
+	ATF_REQUIRE(WIFSTOPPED(status));
+	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+}
+
+static void
 wait_for_zombie(pid_t pid)
 {
 
@@ -166,13 +180,7 @@ ATF_TC_BODY(ptrace__parent_wait_after_attach, tc)
 	/* Parent process. */
 
 	/* Attach to the child process. */
-	ATF_REQUIRE(ptrace(PT_ATTACH, child, NULL, 0) == 0);
-
-	/* The first wait() should report the SIGSTOP from PT_ATTACH. */
-	wpid = waitpid(child, &status, 0);
-	ATF_REQUIRE(wpid == child);
-	ATF_REQUIRE(WIFSTOPPED(status));
-	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+	attach_child(child);
 
 	/* Continue the child ignoring the SIGSTOP. */
 	ATF_REQUIRE(ptrace(PT_CONTINUE, child, (caddr_t)1, 0) != -1);
@@ -697,13 +705,7 @@ ATF_TC_BODY(ptrace__follow_fork_both_attached_unrelated_debugger, tc)
 	    sizeof(children[0]));
 
 	/* Attach to the fork parent. */
-	ATF_REQUIRE(ptrace(PT_ATTACH, children[0], NULL, 0) == 0);
-
-	/* The first wait() should report the SIGSTOP from PT_ATTACH. */
-	wpid = waitpid(children[0], &status, 0);
-	ATF_REQUIRE(wpid == children[0]);
-	ATF_REQUIRE(WIFSTOPPED(status));
-	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+	attach_child(children[0]);
 
 	ATF_REQUIRE(ptrace(PT_FOLLOW_FORK, children[0], NULL, 1) != -1);
 
@@ -738,6 +740,132 @@ ATF_TC_BODY(ptrace__follow_fork_both_attached_unrelated_debugger, tc)
 	ATF_REQUIRE(errno == ECHILD);
 }
 
+/*
+ * Verify that a new child process is stopped after a followed fork
+ * and that the traced parent sees the exit of the child when the new
+ * child process is detached after it reports its fork.  In this test
+ * the parent that forks is not a direct child of the debugger.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__follow_fork_child_detached_unrelated_debugger);
+ATF_TC_BODY(ptrace__follow_fork_child_detached_unrelated_debugger, tc)
+{
+	pid_t children[0], fpid, wpid;
+	int cpipe[2], status;
+
+	ATF_REQUIRE(pipe(cpipe) == 0);
+	ATF_REQUIRE((fpid = fork()) != -1);
+	if (fpid == 0) {
+		attach_fork_parent(cpipe);
+		follow_fork_parent();
+	}
+
+	/* Parent process. */
+	close(cpipe[1]);
+
+	/* Wait for the direct child to exit. */
+	wpid = waitpid(fpid, &status, 0);
+	ATF_REQUIRE(wpid == fpid);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 3);
+
+	/* Read the pid of the fork parent. */
+	ATF_REQUIRE(read(cpipe[0], &children[0], sizeof(children[0])) ==
+	    sizeof(children[0]));
+
+	/* Attach to the fork parent. */
+	attach_child(children[0]);
+
+	ATF_REQUIRE(ptrace(PT_FOLLOW_FORK, children[0], NULL, 1) != -1);
+
+	/* Continue the fork parent ignoring the SIGSTOP. */
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+
+	/* Signal the fork parent to continue. */
+	close(cpipe[0]);
+
+	children[1] = handle_fork_events(children[0]);
+	ATF_REQUIRE(children[1] > 0);
+
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+	ATF_REQUIRE(ptrace(PT_DETACH, children[1], (caddr_t)1, 0) != -1);
+
+	/*
+	 * Should not see any status from the child now, only the fork
+	 * parent.
+	 */
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[0]);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 1);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+}
+
+/*
+ * Verify that a new child process is stopped after a followed fork
+ * and that the traced parent sees the exit of the child when the
+ * traced parent is detached after the fork.  In this test the parent
+ * that forks is not a direct child of the debugger.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__follow_fork_parent_detached_unrelated_debugger);
+ATF_TC_BODY(ptrace__follow_fork_parent_detached_unrelated_debugger, tc)
+{
+	pid_t children[0], fpid, wpid;
+	int cpipe[2], status;
+
+	ATF_REQUIRE(pipe(cpipe) == 0);
+	ATF_REQUIRE((fpid = fork()) != -1);
+	if (fpid == 0) {
+		attach_fork_parent(cpipe);
+		follow_fork_parent();
+	}
+
+	/* Parent process. */
+	close(cpipe[1]);
+
+	/* Wait for the direct child to exit. */
+	wpid = waitpid(fpid, &status, 0);
+	ATF_REQUIRE(wpid == fpid);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 3);
+
+	/* Read the pid of the fork parent. */
+	ATF_REQUIRE(read(cpipe[0], &children[0], sizeof(children[0])) ==
+	    sizeof(children[0]));
+
+	/* Attach to the fork parent. */
+	attach_child(children[0]);
+
+	ATF_REQUIRE(ptrace(PT_FOLLOW_FORK, children[0], NULL, 1) != -1);
+
+	/* Continue the fork parent ignoring the SIGSTOP. */
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+
+	/* Signal the fork parent to continue. */
+	close(cpipe[0]);
+
+	children[1] = handle_fork_events(children[0]);
+	ATF_REQUIRE(children[1] > 0);
+
+	ATF_REQUIRE(ptrace(PT_DETACH, children[0], (caddr_t)1, 0) != -1);
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[1], (caddr_t)1, 0) != -1);
+
+	/*
+	 * Should not see any status from the fork parent now, only
+	 * the child.
+	 */
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[1]);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 2);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -749,6 +877,10 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ptrace__follow_fork_child_detached);
 	ATF_TP_ADD_TC(tp, ptrace__follow_fork_parent_detached);
 	ATF_TP_ADD_TC(tp, ptrace__follow_fork_both_attached_unrelated_debugger);
+	ATF_TP_ADD_TC(tp,
+	    ptrace__follow_fork_child_detached_unrelated_debugger);
+	ATF_TP_ADD_TC(tp,
+	    ptrace__follow_fork_parent_detached_unrelated_debugger);
 
 	return (atf_no_error());
 }
