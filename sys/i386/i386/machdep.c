@@ -1582,6 +1582,24 @@ DB_SHOW_COMMAND(sysregs, db_show_sysregs)
 	db_printf("cr2\t0x%08x\n", rcr2());
 	db_printf("cr3\t0x%08x\n", rcr3());
 	db_printf("cr4\t0x%08x\n", rcr4());
+	if (rcr4() & CR4_XSAVE)
+		db_printf("xcr0\t0x%016llx\n", rxcr(0));
+	if (cpu_feature & CPUID_PAT)
+		db_printf("PAT\t0x%016llx\n", rdmsr(MSR_PAT));
+	
+}
+
+DB_SHOW_COMMAND(dbregs, db_show_dbregs)
+{
+
+	db_printf("dr0\t0x%08x\n", rdr0());
+	db_printf("dr1\t0x%08x\n", rdr1());
+	db_printf("dr2\t0x%08x\n", rdr2());
+	db_printf("dr3\t0x%08x\n", rdr3());
+	db_printf("dr4\t0x%08x\n", rdr4());
+	db_printf("dr5\t0x%08x\n", rdr5());
+	db_printf("dr6\t0x%08x\n", rdr6());
+	db_printf("dr7\t0x%08x\n", rdr7());	
 }
 #endif
 

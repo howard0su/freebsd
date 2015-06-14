@@ -48,24 +48,11 @@ __FBSDID("$FreeBSD$");
 #include <ddb/db_sym.h>
 #include <ddb/db_variables.h>
 
-static db_varfcn_t db_cr0;
-static db_varfcn_t db_cr2;
-static db_varfcn_t db_cr3;
-static db_varfcn_t db_cr4;
-static db_varfcn_t db_dr0;
-static db_varfcn_t db_dr1;
-static db_varfcn_t db_dr2;
-static db_varfcn_t db_dr3;
-static db_varfcn_t db_dr4;
-static db_varfcn_t db_dr5;
-static db_varfcn_t db_dr6;
-static db_varfcn_t db_dr7;
 static db_varfcn_t db_esp;
 static db_varfcn_t db_frame;
 static db_varfcn_t db_frame_seg;
 static db_varfcn_t db_gs;
 static db_varfcn_t db_ss;
-static db_varfcn_t db_xcr;
 
 /*
  * Machine register set.
@@ -88,19 +75,6 @@ struct db_variable db_regs[] = {
 	{ "edi",	DB_OFFSET(tf_edi),	db_frame },
 	{ "eip",	DB_OFFSET(tf_eip),	db_frame },
 	{ "efl",	DB_OFFSET(tf_eflags),	db_frame },
-	{ "cr0",	NULL,			db_cr0 },
-	{ "cr2",	NULL,			db_cr2 },
-	{ "cr3",	NULL,			db_cr3 },
-	{ "cr4",	NULL,			db_cr4 },
-	{ "xcr0",	0,			db_xcr },
-	{ "dr0",	NULL,			db_dr0 },
-	{ "dr1",	NULL,			db_dr1 },
-	{ "dr2",	NULL,			db_dr2 },
-	{ "dr3",	NULL,			db_dr3 },
-	{ "dr4",	NULL,			db_dr4 },
-	{ "dr5",	NULL,			db_dr5 },
-	{ "dr6",	NULL,			db_dr6 },
-	{ "dr7",	NULL,			db_dr7 },
 };
 struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
@@ -118,32 +92,6 @@ db_ ## reg (vp, valuep, op)		\
 	return (1);			\
 }
 
-#define DB_RO_REG_FUNC(reg)		\
-static int				\
-db_ ## reg (vp, valuep, op)		\
-	struct db_variable *vp;		\
-	db_expr_t * valuep;		\
-	int op;				\
-{					\
-	if (op == DB_VAR_GET) {		\
-		*valuep = r ## reg ();	\
-		return (1);		\
-	}				\
-	return (0);			\
-}
-
-DB_RW_REG_FUNC(cr0)
-DB_RO_REG_FUNC(cr2)
-DB_RW_REG_FUNC(cr3)
-DB_RW_REG_FUNC(cr4)
-DB_RW_REG_FUNC(dr0)
-DB_RW_REG_FUNC(dr1)
-DB_RW_REG_FUNC(dr2)
-DB_RW_REG_FUNC(dr3)
-DB_RW_REG_FUNC(dr4)
-DB_RW_REG_FUNC(dr5)
-DB_RW_REG_FUNC(dr6)
-DB_RW_REG_FUNC(dr7)
 DB_RW_REG_FUNC(gs)
 
 static __inline int
@@ -210,23 +158,6 @@ db_ss(struct db_variable *vp, db_expr_t *valuep, int op)
 		*valuep = (ISPL(kdb_frame->tf_cs)) ? kdb_frame->tf_ss : rss();
 	else if (ISPL(kdb_frame->tf_cs))
 		kdb_frame->tf_ss = *valuep;
-	return (1);
-}
-
-static int
-db_xcr(struct db_variable *vp, db_expr_t *valuep, int op)
-{
-	u_int reg;
-
-	reg = (db_expr_t)vp->valuep;
-	if (reg != 0)
-		return (0);
-	if ((rcr4() & CR4_XSAVE) == 0)
-		return (0);
-	if (op == DB_VAR_GET)
-		*valuep = rxcr(reg);
-	else
-		load_xcr(reg, *valuep);
 	return (1);
 }
 
