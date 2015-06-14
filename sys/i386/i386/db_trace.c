@@ -78,22 +78,6 @@ struct db_variable db_regs[] = {
 };
 struct db_variable *db_eregs = db_regs + nitems(db_regs);
 
-#define DB_RW_REG_FUNC(reg)		\
-static int				\
-db_ ## reg (vp, valuep, op)		\
-	struct db_variable *vp;		\
-	db_expr_t * valuep;		\
-	int op;				\
-{					\
-	if (op == DB_VAR_GET)		\
-		*valuep = r ## reg ();	\
-	else				\
-		load_ ## reg (*valuep); \
-	return (1);			\
-}
-
-DB_RW_REG_FUNC(gs)
-
 static __inline int
 get_esp(struct trapframe *tf)
 {
@@ -144,6 +128,17 @@ db_esp(struct db_variable *vp, db_expr_t *valuep, int op)
 		*valuep = get_esp(kdb_frame);
 	else if (ISPL(kdb_frame->tf_cs))
 		kdb_frame->tf_esp = *valuep;
+	return (1);
+}
+
+static int
+db_gs(struct db_variable *vp, db_expr_t *valuep, int op)
+{
+
+	if (op == DB_VAR_GET)
+		*valuep = rgs();
+	else
+		load_gs(*valuep);
 	return (1);
 }
 
