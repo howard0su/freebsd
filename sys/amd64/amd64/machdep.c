@@ -881,7 +881,9 @@ DB_SHOW_COMMAND(sysregs, db_show_sysregs)
 	if (rcr4() & CR4_XSAVE)
 		db_printf("xcr0\t0x%016lx\n", rxcr(0));
 	db_printf("EFER\t%016lx\n", rdmsr(MSR_EFER));
-	db_printf("FEATURES_CTL\t%016lx\n", rdmsr(MSR_IA32_FEATURE_CONTROL));
+	if (cpu_feature2 & (CPUID2_VMX | CPUID2_SMX))
+		db_printf("FEATURES_CTL\t%016lx\n",
+		    rdmsr(MSR_IA32_FEATURE_CONTROL));
 	db_printf("DEBUG_CTL\t%016lx\n", rdmsr(MSR_DEBUGCTLMSR));
 	db_printf("PAT\t%016lx\n", rdmsr(MSR_PAT));
 	db_printf("GSBASE\t%016lx\n", rdmsr(MSR_GSBASE));
