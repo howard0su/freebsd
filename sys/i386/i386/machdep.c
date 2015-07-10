@@ -1596,8 +1596,6 @@ DB_SHOW_COMMAND(dbregs, db_show_dbregs)
 	db_printf("dr1\t0x%08x\n", rdr1());
 	db_printf("dr2\t0x%08x\n", rdr2());
 	db_printf("dr3\t0x%08x\n", rdr3());
-	db_printf("dr4\t0x%08x\n", rdr4());
-	db_printf("dr5\t0x%08x\n", rdr5());
 	db_printf("dr6\t0x%08x\n", rdr6());
 	db_printf("dr7\t0x%08x\n", rdr7());	
 }
