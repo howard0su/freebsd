@@ -880,13 +880,13 @@ DB_SHOW_COMMAND(sysregs, db_show_sysregs)
 	db_printf("cr4\t0x%016lx\n", rcr4());
 	if (rcr4() & CR4_XSAVE)
 		db_printf("xcr0\t0x%016lx\n", rxcr(0));
-	db_printf("EFER\t%016lx\n", rdmsr(MSR_EFER));
+	db_printf("EFER\t0x%016lx\n", rdmsr(MSR_EFER));
 	if (cpu_feature2 & (CPUID2_VMX | CPUID2_SMX))
 		db_printf("FEATURES_CTL\t%016lx\n",
 		    rdmsr(MSR_IA32_FEATURE_CONTROL));
-	db_printf("DEBUG_CTL\t%016lx\n", rdmsr(MSR_DEBUGCTLMSR));
-	db_printf("PAT\t%016lx\n", rdmsr(MSR_PAT));
-	db_printf("GSBASE\t%016lx\n", rdmsr(MSR_GSBASE));
+	db_printf("DEBUG_CTL\t0x%016lx\n", rdmsr(MSR_DEBUGCTLMSR));
+	db_printf("PAT\t0x%016lx\n", rdmsr(MSR_PAT));
+	db_printf("GSBASE\t0x%016lx\n", rdmsr(MSR_GSBASE));
 }
 
 DB_SHOW_COMMAND(dbregs, db_show_dbregs)
