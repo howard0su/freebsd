@@ -46,6 +46,8 @@ __FBSDID("$FreeBSD$");
 #include "kvm_private.h"
 #include "kvm_i386.h"
 
+#define	i386_round_page(x)	roundup2((kvaddr_t)(x), I386_PAGE_SIZE)
+
 struct hpte {
 	struct hpte *next;
 	uint64_t pa;
@@ -165,7 +167,7 @@ _i386_minidump_initvtop(kvm_t *kd)
 	}
 
 	/* Skip header and msgbuf */
-	off = I386_PAGE_SIZE + round_page(vmst->hdr.msgbufsize);
+	off = I386_PAGE_SIZE + i386_round_page(vmst->hdr.msgbufsize);
 
 	vmst->bitmap = _kvm_malloc(kd, vmst->hdr.bitmapsize);
 	if (vmst->bitmap == NULL) {
@@ -177,7 +179,7 @@ _i386_minidump_initvtop(kvm_t *kd)
 		_kvm_err(kd, kd->program, "cannot read %d bytes for page bitmap", vmst->hdr.bitmapsize);
 		return (-1);
 	}
-	off += round_page(vmst->hdr.bitmapsize);
+	off += i386_round_page(vmst->hdr.bitmapsize);
 
 	vmst->ptemap = _kvm_malloc(kd, vmst->hdr.ptesize);
 	if (vmst->ptemap == NULL) {
