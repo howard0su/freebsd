@@ -36,6 +36,11 @@
 #ifndef __KVM_I386_H__
 #define	__KVM_I386_H__
 
+#ifdef __i386__
+#include <vm/vm.h>
+#include <vm/pmap.h>
+#endif
+
 typedef uint32_t	i386_physaddr_t;
 typedef uint32_t	i386_pte_t;
 typedef uint32_t	i386_pde_t;

@@ -47,11 +47,16 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 
 #include <sys/param.h>
 #include <sys/endian.h>
+#include <gelf.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <gelf.h>
 #include <kvm.h>
+
+#ifdef __i386__
+#include <machine/vmparam.h>		/* For KERNBASE. */
+#endif
 
 #include <limits.h>
 
@@ -368,7 +373,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		return (I386_PAGE_SIZE - offset);
 
 invalid:
-	_kvm_err(kd, 0, "invalid address (0x%lx)", va);
+	_kvm_err(kd, 0, "invalid address (0x%jx)", (uintmax_t)va);
 	return (0);
 }
 
@@ -459,7 +464,7 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 		return (I386_PAGE_SIZE - offset);
 
 invalid:
-	_kvm_err(kd, 0, "invalid address (0x%lx)", va);
+	_kvm_err(kd, 0, "invalid address (0x%jx)", (uintmax_t)va);
 	return (0);
 }
 

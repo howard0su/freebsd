@@ -93,7 +93,7 @@ struct __kvm {
 	kvaddr_t	dpcpu_start;	/* start of kernel's dpcpu region */
 	kvaddr_t	dpcpu_stop;	/* stop of kernel's dpcpu region */
 	u_int		dpcpu_maxcpus;	/* size of base array */
-	kvaddr_t	*dpcpu_off;	/* base array, indexed by CPU ID */
+	uintptr_t	*dpcpu_off;	/* base array, indexed by CPU ID */
 	u_int		dpcpu_curcpu;	/* CPU we're currently working with */
 	kvaddr_t	dpcpu_curoff;	/* dpcpu base of current CPU */
 };
