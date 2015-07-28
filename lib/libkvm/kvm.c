@@ -79,18 +79,32 @@ SET_DECLARE(kvm_arch, struct kvm_arch);
 int __fdnlist(int, struct nlist *);
 
 static int
-kvm_fdnlist(kvm_t *kd, struct nlist *list)
+kvm_fdnlist(kvm_t *kd, struct kvm_nlist *list)
 {
 	kvaddr_t addr;
 	int error, nfail;
 
-	if (kd->arch->ka_native)
-		return (__fdnlist(kd->nlfd, list));
+	if (kd->arch->ka_native) {
+		struct nlist *nl;
+		int count, i;
+
+		for (count = 0; list[count].n_name != NULL &&
+		     list[count].n_name[0] != '\0'; count++)
+			;
+		nl = calloc(count + 1, sizeof(*nl));
+		for (i = 0; i < count; i++)
+			nl[i].n_name = list[i].n_name;
+		nfail = __fdnlist(kd->nlfd, nl);
+		for (i = 0; i < count; i++) {
+			list[i].n_type = nl[i].n_type;
+			list[i].n_value = nl[i].n_value;
+		}
+		free(nl);
+		return (nfail);
+	}
 
 	nfail = 0;
 	while (list->n_name != NULL && list->n_name[0] != '\0') {
-		list->n_other = 0;
-		list->n_desc = 0;
 		error = kd->resolve_symbol(list->n_name, &addr);
 		if (error != 0) {
 			nfail++;
@@ -348,10 +362,10 @@ kvm_close(kvm_t *kd)
  * symbol names, try again, and merge back what we could resolve.
  */
 static int
-kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
-    uintptr_t (*validate_fn)(kvm_t *, uintptr_t))
+kvm_fdnlist_prefix(kvm_t *kd, struct kvm_nlist *nl, int missing,
+    const char *prefix, kvaddr_t (*validate_fn)(kvm_t *, kvaddr_t))
 {
-	struct nlist *n, *np, *p;
+	struct kvm_nlist *n, *np, *p;
 	char *cp, *ce;
 	const char *ccp;
 	size_t len;
@@ -367,14 +381,14 @@ kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
 	for (p = nl; p->n_name && p->n_name[0]; ++p) {
 		if (p->n_type != N_UNDF)
 			continue;
-		len += sizeof(struct nlist) + strlen(prefix) +
+		len += sizeof(struct kvm_nlist) + strlen(prefix) +
 		    2 * (strlen(p->n_name) + 1);
 		unresolved++;
 	}
 	if (unresolved == 0)
 		return (unresolved);
 	/* Add space for the terminating nlist entry. */
-	len += sizeof(struct nlist);
+	len += sizeof(struct kvm_nlist);
 	unresolved++;
 
 	/* Alloc one chunk for (nlist, [names]) and setup pointers. */
@@ -383,7 +397,7 @@ kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
 	if (n == NULL)
 		return (missing);
 	cp = ce = (char *)np;
-	cp += unresolved * sizeof(struct nlist);
+	cp += unresolved * sizeof(struct kvm_nlist);
 	ce += len;
 
 	/* Generate shortened nlist with special prefix. */
@@ -391,7 +405,7 @@ kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
 	for (p = nl; p->n_name && p->n_name[0]; ++p) {
 		if (p->n_type != N_UNDF)
 			continue;
-		bcopy(p, np, sizeof(struct nlist));
+		*np = *p;
 		/* Save the new\0orig. name so we can later match it again. */
 		slen = snprintf(cp, ce - cp, "%s%s%c%s", prefix,
 		    (prefix[0] != '\0' && p->n_name[0] == '_') ?
@@ -428,8 +442,6 @@ kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
 				continue;
 			/* Update nlist with new, translated results. */
 			p->n_type = np->n_type;
-			p->n_other = np->n_other;
-			p->n_desc = np->n_desc;
 			if (validate_fn)
 				p->n_value = (*validate_fn)(kd, np->n_value);
 			else
@@ -448,9 +460,9 @@ kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
 }
 
 int
-_kvm_nlist(kvm_t *kd, struct nlist *nl, int initialize)
+_kvm_nlist(kvm_t *kd, struct kvm_nlist *nl, int initialize)
 {
-	struct nlist *p;
+	struct kvm_nlist *p;
 	int nvalid;
 	struct kld_sym_lookup lookup;
 	int error;
@@ -505,8 +517,6 @@ again:
 
 		if (kldsym(0, KLDSYM_LOOKUP, &lookup) != -1) {
 			p->n_type = N_TEXT;
-			p->n_other = 0;
-			p->n_desc = 0;
 			if (_kvm_vnet_initialized(kd, initialize) &&
 			    strcmp(prefix, VNET_SYMPREFIX) == 0)
 				p->n_value =
@@ -549,7 +559,7 @@ again:
 }
 
 int
-kvm_nlist(kvm_t *kd, struct nlist *nl)
+kvm_nlist2(kvm_t *kd, struct kvm_nlist *nl)
 {
 
 	/*
@@ -557,6 +567,39 @@ kvm_nlist(kvm_t *kd, struct nlist *nl)
 	 * further virtualized modules on demand.
 	 */
 	return (_kvm_nlist(kd, nl, 1));
+}
+
+int
+kvm_nlist(kvm_t *kd, struct nlist *nl)
+{
+	struct kvm_nlist *kl;
+	int count, i, nfail;
+
+	/*
+	 * Avoid reporting truncated addresses by failing for non-native
+	 * cores.
+	 */
+	if (!ISALIVE(kd) && !kd->arch->ka_native) {
+		_kvm_err(kd, kd->program, "kvm_nlist of non-native vmcore");
+		return (-1);
+	}
+
+	for (count = 0; nl[count].n_name != NULL && nl[count].n_name[0] != '\0';
+	     count++)
+		;
+	if (count == 0)
+		return (0);
+	kl = calloc(count + 1, sizeof(*kl));
+	for (i = 0; i < count; i++)
+		kl[i].n_name = nl[i].n_name;
+	nfail = kvm_nlist2(kd, kl);
+	for (i = 0; i < count; i++) {
+		nl[i].n_type = kl[i].n_type;
+		nl[i].n_other = 0;
+		nl[i].n_desc = 0;
+		nl[i].n_value = kl[i].n_value;
+	}
+	return (nfail);
 }
 
 ssize_t

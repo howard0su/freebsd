@@ -53,6 +53,12 @@ typedef	__ssize_t	ssize_t;
 
 typedef	uint64_t kvaddr_t;		/* An address in a target image. */
 
+struct kvm_nlist {
+	const char *n_name;
+	unsigned char n_type;
+	kvaddr_t n_value;
+};
+
 typedef struct __kvm kvm_t;
 
 struct kinfo_proc;
@@ -87,6 +93,7 @@ struct kinfo_proc *
 int	  kvm_getswapinfo(kvm_t *, struct kvm_swap *, int, int);
 int	  kvm_native(kvm_t *);
 int	  kvm_nlist(kvm_t *, struct nlist *);
+int	  kvm_nlist2(kvm_t *, struct kvm_nlist *);
 kvm_t	 *kvm_open
 	    (const char *, const char *, const char *, int, const char *);
 kvm_t	 *kvm_openfiles

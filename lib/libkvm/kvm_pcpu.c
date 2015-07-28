@@ -48,7 +48,7 @@ __FBSDID("$FreeBSD$");
 
 #include "kvm_private.h"
 
-static struct nlist kvm_pcpu_nl[] = {
+static struct kvm_nlist kvm_pcpu_nl[] = {
 	{ .n_name = "_cpuid_to_pcpu" },
 	{ .n_name = "_mp_maxcpus" },
 	{ .n_name = "_mp_ncpus" },
@@ -77,7 +77,7 @@ _kvm_pcpu_init(kvm_t *kd)
 	int max;
 	void *data;
 
-	if (kvm_nlist(kd, kvm_pcpu_nl) < 0)
+	if (kvm_nlist2(kd, kvm_pcpu_nl) < 0)
 		return (-1);
 	if (kvm_pcpu_nl[NL_CPUID_TO_PCPU].n_value == 0) {
 		_kvm_err(kd, kd->program, "unable to find cpuid_to_pcpu");
@@ -216,7 +216,7 @@ _kvm_dpcpu_setcpu(kvm_t *kd, u_int cpu, int report_error)
 static int
 _kvm_dpcpu_init(kvm_t *kd)
 {
-	struct nlist nl[] = {
+	struct kvm_nlist nl[] = {
 #define	NLIST_START_SET_PCPU	0
 		{ .n_name = "___start_" DPCPU_SETNAME },
 #define	NLIST_STOP_SET_PCPU	1
@@ -279,8 +279,8 @@ _kvm_dpcpu_initialized(kvm_t *kd, int intialize)
  * Check whether the value is within the dpcpu symbol range and only if so
  * adjust the offset relative to the current offset.
  */
-uintptr_t
-_kvm_dpcpu_validaddr(kvm_t *kd, uintptr_t value)
+kvaddr_t
+_kvm_dpcpu_validaddr(kvm_t *kd, kvaddr_t value)
 {
 
 	if (value == 0)
