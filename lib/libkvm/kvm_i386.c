@@ -169,6 +169,8 @@ _i386_probe(kvm_t *kd, int want_minidump)
 	char minihdr[8];
 
 	/* First check the kernel to ensure it is an i386 image. */
+	if (elf_version(EV_CURRENT) == EV_NONE)
+		return (0);
 	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
 	if (elf == NULL)
 		return (0);
