@@ -253,7 +253,7 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 	if (strncmp(mf, _PATH_FWMEM, strlen(_PATH_FWMEM)) == 0)
 		kd->rawdump = 1;
 	SET_FOREACH(parch, kvm_arch) {
-		if ((*parch)->ka_probe(kd) == 0) {
+		if ((*parch)->ka_probe(kd)) {
 			kd->arch = *parch;
 			break;
 		}
