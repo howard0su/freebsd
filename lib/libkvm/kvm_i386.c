@@ -341,7 +341,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		s = _kvm_pa2off(kd, va, pa);
 		if (s == 0) {
 			_kvm_err(kd, kd->program,
-			    "_kvm_vatop: bootstrap data not in dump");
+			    "_i386_vatop: bootstrap data not in dump");
 			goto invalid;
 		} else
 			return (I386_PAGE_SIZE - offset);
@@ -350,7 +350,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	pdeindex = va >> I386_PDRSHIFT;
 	pde = le32toh(PTD[pdeindex]);
 	if ((pde & I386_PG_V) == 0) {
-		_kvm_err(kd, kd->program, "_kvm_vatop: pde not valid");
+		_kvm_err(kd, kd->program, "_i386_vatop: pde not valid");
 		goto invalid;
 	}
 
@@ -365,7 +365,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		s = _kvm_pa2off(kd, a, pa);
 		if (s == 0) {
 			_kvm_err(kd, kd->program,
-			    "_kvm_vatop: 4MB page address not in dump");
+			    "_i386_vatop: 4MB page address not in dump");
 			goto invalid;
 		}
 		return (I386_NBPDR - offset);
@@ -376,17 +376,13 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 
 	s = _kvm_pa2off(kd, pte_pa, &ofs);
 	if (s < sizeof(pte)) {
-		_kvm_err(kd, kd->program, "_kvm_vatop: pte_pa not found");
+		_kvm_err(kd, kd->program, "_i386_vatop: pte_pa not found");
 		goto invalid;
 	}
 
 	/* XXX This has to be a physical address read, kvm_read is virtual */
-	if (lseek(kd->pmfd, ofs, 0) == -1) {
-		_kvm_syserr(kd, kd->program, "_kvm_vatop: lseek");
-		goto invalid;
-	}
-	if (read(kd->pmfd, &pte, sizeof(pte)) != sizeof(pte)) {
-		_kvm_syserr(kd, kd->program, "_kvm_vatop: read");
+	if (pread(kd->pmfd, &pte, sizeof(pte), ofs) != sizeof(pte)) {
+		_kvm_syserr(kd, kd->program, "_i386_vatop: pread");
 		goto invalid;
 	}
 	pte = le32toh(pte);
@@ -398,7 +394,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	a = (pte & I386_PG_FRAME) + offset;
 	s = _kvm_pa2off(kd, a, pa);
 	if (s == 0) {
-		_kvm_err(kd, kd->program, "_kvm_vatop: address not in dump");
+		_kvm_err(kd, kd->program, "_i386_vatop: address not in dump");
 		goto invalid;
 	} else
 		return (I386_PAGE_SIZE - offset);
@@ -435,7 +431,7 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 		s = _kvm_pa2off(kd, va, pa);
 		if (s == 0) {
 			_kvm_err(kd, kd->program,
-			    "_kvm_vatop_pae: bootstrap data not in dump");
+			    "_i386_vatop_pae: bootstrap data not in dump");
 			goto invalid;
 		} else
 			return (I386_PAGE_SIZE - offset);
@@ -459,7 +455,7 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 		s = _kvm_pa2off(kd, a, pa);
 		if (s == 0) {
 			_kvm_err(kd, kd->program,
-			    "_kvm_vatop: 2MB page address not in dump");
+			    "_i386_vatop: 2MB page address not in dump");
 			goto invalid;
 		}
 		return (I386_NBPDR_PAE - offset);
@@ -469,23 +465,19 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 	pte_pa = (pde & I386_PG_FRAME_PAE) + (pteindex * sizeof(pde));
 
 	s = _kvm_pa2off(kd, pte_pa, &ofs);
-	if (s < sizeof pte) {
-		_kvm_err(kd, kd->program, "_kvm_vatop_pae: pdpe_pa not found");
+	if (s < sizeof(pte)) {
+		_kvm_err(kd, kd->program, "_i386_vatop_pae: pdpe_pa not found");
 		goto invalid;
 	}
 
 	/* XXX This has to be a physical address read, kvm_read is virtual */
-	if (lseek(kd->pmfd, ofs, 0) == -1) {
-		_kvm_syserr(kd, kd->program, "_kvm_vatop_pae: lseek");
-		goto invalid;
-	}
-	if (read(kd->pmfd, &pte, sizeof(pte)) != sizeof(pte)) {
-		_kvm_syserr(kd, kd->program, "_kvm_vatop_pae: read");
+	if (pread(kd->pmfd, &pte, sizeof(pte), ofs) != sizeof(pte)) {
+		_kvm_syserr(kd, kd->program, "_i386_vatop_pae: read");
 		goto invalid;
 	}
 	pte = le64toh(pte);
 	if ((pte & I386_PG_V) == 0) {
-		_kvm_err(kd, kd->program, "_kvm_vatop_pae: pte not valid");
+		_kvm_err(kd, kd->program, "_i386_vatop_pae: pte not valid");
 		goto invalid;
 	}
 
@@ -493,7 +485,7 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 	s = _kvm_pa2off(kd, a, pa);
 	if (s == 0) {
 		_kvm_err(kd, kd->program,
-		    "_kvm_vatop_pae: address not in dump");
+		    "_i386_vatop_pae: address not in dump");
 		goto invalid;
 	} else
 		return (I386_PAGE_SIZE - offset);
