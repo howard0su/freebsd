@@ -34,7 +34,19 @@
  * $FreeBSD$
  */
 
+struct kvm_arch {
+	int	(*ka_probe)(kvm_t *);
+	int	(*ka_initvtop)(kvm_t *);
+	void	(*ka_freevtop)(kvm_t *);
+	int	(*ka_kvatop)(kvm_t *, psaddr_t, off_t *)
+	int	(*ka_uvatop)(kvm_t *, const struct proc *, psaddr_t, off_t *);
+	int	ka_native;
+};
+
+#define	KVM_ARCH(ka)	DATA_SET(kvm_arch, (ka))
+
 struct __kvm {
+	struct kvm_arch *arch;
 	/*
 	 * a string to be prepended to error messages
 	 * provided for compatibility with sun's interface
@@ -48,6 +60,7 @@ struct __kvm {
 	int	vmfd;		/* virtual memory file (-1 if crashdump) */
 	int	unused;		/* was: swap file (e.g., /dev/drum) */
 	int	nlfd;		/* namelist file (e.g., /kernel) */
+	int	(*resolve_symbol)(const char *, psaddr_t *);
 	struct kinfo_proc *procbase;
 	char	*argspc;	/* (dynamic) storage for argv strings */
 	int	arglen;		/* length of the above */
@@ -89,15 +102,19 @@ struct __kvm {
 void	 _kvm_err(kvm_t *kd, const char *program, const char *fmt, ...)
 	    __printflike(3, 4);
 void	 _kvm_freeprocs(kvm_t *kd);
+#if 0
 void	 _kvm_freevtop(kvm_t *);
 int	 _kvm_initvtop(kvm_t *);
 int	 _kvm_kvatop(kvm_t *, u_long, off_t *);
+#endif
 void	*_kvm_malloc(kvm_t *kd, size_t);
 int	 _kvm_nlist(kvm_t *, struct nlist *, int);
 void	*_kvm_realloc(kvm_t *kd, void *, size_t);
 void	 _kvm_syserr (kvm_t *kd, const char *program, const char *fmt, ...)
 	    __printflike(3, 4);
+#if 0
 int	 _kvm_uvatop(kvm_t *, const struct proc *, u_long, u_long *);
+#endif
 int	 _kvm_vnet_selectpid(kvm_t *, pid_t);
 int	 _kvm_vnet_initialized(kvm_t *, int);
 uintptr_t _kvm_vnet_validaddr(kvm_t *, uintptr_t);

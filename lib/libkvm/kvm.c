@@ -73,30 +73,26 @@ static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 
 #include "kvm_private.h"
 
-#ifndef CROSS_LIBKVM
+SET_DECLARE(kvm_arch, struct kvm_arch);
 
 /* from src/lib/libc/gen/nlist.c */
 int __fdnlist(int, struct nlist *);
 
-#define	kvm_fdnlist	__fdnlist
-
-#else
-
-#include <proc_service.h>
-
 static int
-kvm_fdnlist(int fd, struct nlist *list)
+kvm_fdnlist(kvm_t *kd, int fd, struct nlist *list)
 {
 	psaddr_t addr;
-	ps_err_e pserr;
-	int nfail;
+	int error, nfail;
+
+	if (kd->arch->ka_native)
+		return (__fdnlist(fd, list));
 
 	nfail = 0;
 	while (list->n_name != NULL && list->n_name[0] != '\0') {
 		list->n_other = 0;
 		list->n_desc = 0;
-		pserr = ps_pglobal_lookup(NULL, NULL, list->n_name, &addr);
-		if (pserr != PS_OK) {
+		error = kd->resolve_symbol(list->n_name, &addr);
+		if (error != 0) {
 			nfail++;
 			list->n_value = 0;
 			list->n_type = 0;
@@ -108,8 +104,6 @@ kvm_fdnlist(int fd, struct nlist *list)
 	}
 	return (nfail);
 }
-
-#endif /* CROSS_LIBKVM */
 
 char *
 kvm_geterr(kvm_t *kd)
@@ -178,6 +172,7 @@ _kvm_malloc(kvm_t *kd, size_t n)
 static kvm_t *
 _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 {
+	struct kvm_arch **parch;
 	struct stat st;
 
 	kd->vmfd = -1;
@@ -235,8 +230,7 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 	}
 	/*
 	 * This is a crash dump.
-	 * Initialize the virtual address translation machinery,
-	 * but first setup the namelist fd.
+	 * Open the namelist fd and determine the architecture.
 	 */
 	if ((kd->nlfd = open(uf, O_RDONLY | O_CLOEXEC, 0)) < 0) {
 		_kvm_syserr(kd, kd->program, "%s", uf);
@@ -244,7 +238,30 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 	}
 	if (strncmp(mf, _PATH_FWMEM, strlen(_PATH_FWMEM)) == 0)
 		kd->rawdump = 1;
-	if (_kvm_initvtop(kd) < 0)
+	SET_FOREACH(parch, kvm_arch) {
+		if ((*parch)->ka_probe(kd) == 0) {
+			kd->arch = *parch;
+			break;
+		}
+	}
+	if (kd->arch == NULL) {
+		_kvm_err(kd, kd->program, "unsupported architecture");
+		goto failed;
+	}
+
+	/*
+	 * Non-native kernels require a symbol resolver.
+	 */
+	if (!kd->arch->native && kd->resolve_symbol) {
+		_kvm_err(kd, kd->program,
+		    "non-native kernel requires a symbol resolver");
+		goto failed;
+	}
+
+	/*
+	 * Initialize the virtual address translation machinery.
+	 */
+	if (kd->arch->ka_initvtop(kd) < 0)
 		goto failed;
 	return (kd);
 failed:
@@ -267,7 +284,6 @@ kvm_openfiles(const char *uf, const char *mf, const char *sf __unused, int flag,
 		(void)strlcpy(errout, strerror(errno), _POSIX2_LINE_MAX);
 		return (0);
 	}
-	kd->program = 0;
 	return (_kvm_open(kd, uf, mf, flag, errout));
 }
 
@@ -287,19 +303,33 @@ kvm_open(const char *uf, const char *mf, const char *sf __unused, int flag,
 	return (_kvm_open(kd, uf, mf, flag, NULL));
 }
 
+kvm_t *
+kvm_open2(const char *uf, const char *mf, int flag, char *errout,
+    int (*resolver)(const char *, psaddr_t *))
+{
+	kvm_t *kd;
+
+	if ((kd = calloc(1, sizeof(*kd))) == NULL) {
+		(void)strlcpy(errout, strerror(errno), _POSIX2_LINE_MAX);
+		return (0);
+	}
+	kd->resolve_symbol = resolver;
+	return (_kvm_open(kd, uf, mf, flag, errout));
+}
+
 int
 kvm_close(kvm_t *kd)
 {
 	int error = 0;
 
+	if (kd->vmst != NULL)
+		kd->arch->ka_freevtop(kd);
 	if (kd->pmfd >= 0)
 		error |= close(kd->pmfd);
 	if (kd->vmfd >= 0)
 		error |= close(kd->vmfd);
 	if (kd->nlfd >= 0)
 		error |= close(kd->nlfd);
-	if (kd->vmst)
-		_kvm_freevtop(kd);
 	if (kd->procbase != 0)
 		free((void *)kd->procbase);
 	if (kd->argbuf != 0)
@@ -615,4 +645,13 @@ kvm_write(kvm_t *kd, u_long kva, const void *buf, size_t len)
 		return (-1);
 	}
 	/* NOTREACHED */
+}
+
+int
+kvm_native(kvm_t *kd)
+{
+
+	if (ISALIVE(kd))
+		return (1);
+	return (kd->arch->ka_native);
 }
