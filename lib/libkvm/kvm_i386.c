@@ -46,13 +46,10 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
  */
 
 #include <sys/param.h>
-#include <sys/user.h>
-#include <sys/proc.h>
-#include <sys/stat.h>
+#include <sys/endian.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <nlist.h>
 #include <gelf.h>
 #include <kvm.h>
 
@@ -351,7 +348,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	}
 
 	pdeindex = va >> I386_PDRSHIFT;
-	pde = PTD[pdeindex];
+	pde = le32toh(PTD[pdeindex]);
 	if ((pde & I386_PG_V) == 0) {
 		_kvm_err(kd, kd->program, "_kvm_vatop: pde not valid");
 		goto invalid;
@@ -392,6 +389,7 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		_kvm_syserr(kd, kd->program, "_kvm_vatop: read");
 		goto invalid;
 	}
+	pte = le32toh(pte);
 	if ((pte & I386_PG_V) == 0) {
 		_kvm_err(kd, kd->program, "_kvm_kvatop: pte not valid");
 		goto invalid;
@@ -444,7 +442,7 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 	}
 
 	pdeindex = va >> I386_PDRSHIFT_PAE;
-	pde = PTD[pdeindex];
+	pde = le64toh(PTD[pdeindex]);
 	if ((pde & I386_PG_V) == 0) {
 		_kvm_err(kd, kd->program, "_kvm_kvatop_pae: pde not valid");
 		goto invalid;
@@ -485,6 +483,7 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 		_kvm_syserr(kd, kd->program, "_kvm_vatop_pae: read");
 		goto invalid;
 	}
+	pte = le64toh(pte);
 	if ((pte & I386_PG_V) == 0) {
 		_kvm_err(kd, kd->program, "_kvm_vatop_pae: pte not valid");
 		goto invalid;
