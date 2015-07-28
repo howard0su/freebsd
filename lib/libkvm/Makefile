@@ -27,6 +27,8 @@ SRCS=	kvm.c kvm_cptime.c kvm_file.c kvm_getloadavg.c \
 	kvm_i386.c kvm_minidump_i386.c
 INCS=	kvm.h
 
+LIBADD=	elf
+
 MAN=	kvm.3 kvm_getcptime.3 kvm_geterr.3 kvm_getfiles.3 kvm_getloadavg.3 \
 	kvm_getpcpu.3 kvm_getprocs.3 kvm_getswapinfo.3 kvm_nlist.3 kvm_open.3 \
 	kvm_read.3
