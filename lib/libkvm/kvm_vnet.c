@@ -89,6 +89,12 @@ _kvm_vnet_selectpid(kvm_t *kd, pid_t pid)
 	lwpid_t dumptid;
 
 	/*
+	 * XXX: This only works for native kernels for now.
+	 */
+	if (!ISALIVE(kd) && !kd->arch->ka_native)
+		return (-1);
+
+	/*
 	 * Locate and cache locations of important symbols
 	 * using the internal version of _kvm_nlist, turning
 	 * off initialization to avoid recursion in case of
