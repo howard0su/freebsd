@@ -20,12 +20,6 @@ SHLIBDIR?= /lib
 SHLIB_MAJOR=	6
 CFLAGS+=-DLIBC_SCCS -I${.CURDIR}
 
-.if exists(${.CURDIR}/kvm_${KVM_XARCH}.c)
-KVM_ARCH=${KVM_XARCH}
-.else
-KVM_ARCH=${KVM_XCPUARCH}
-.endif
-
 WARNS?=	3
 
 SRCS=	kvm.c kvm_cptime.c kvm_file.c kvm_getloadavg.c \
