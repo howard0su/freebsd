@@ -56,46 +56,7 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 #include <limits.h>
 
 #include "kvm_private.h"
-
-typedef uint32_t	i386_physaddr_t;
-typedef uint32_t	i386_pte_t;
-typedef uint32_t	i386_pde_t;
-typedef uint64_t	i386_physaddr_pae_t;
-typedef	uint64_t	i386_pte_pae_t;
-typedef	uint64_t	i386_pde_pae_t;
-
-#define	I386_PAGE_SHIFT		12
-#define	I386_PAGE_SIZE		(1 << I386_PAGE_SHIFT)
-#define	I386_PAGE_MASK		(I386_PAGE_SIZE-1)
-#define	I386_PDRSHIFT		22
-#define	I386_NPTEPG		(I386_PAGE_SIZE / sizeof(i386_pte_t))
-#define	I386_NBPDR		(1 << I386_PDRSHIFT)
-#define	I386_PAGE_PS_MASK	(I386_NBPDR - 1)
-#define	I386_PDRSHIFT_PAE	21
-#define	I386_NPTEPG_PAE		(I386_PAGE_SIZE / sizeof(i386_pte_pae_t))
-#define	I386_NBPDR_PAE		(1 << I386_PDRSHIFT_PAE)
-#define	I386_PAGE_PS_MASK_PAE	(I386_NBPDR_PAE - 1)
-
-#define	I386_PG_V		0x001
-#define	I386_PG_PS		0x080
-#define	I386_PG_FRAME_PAE	(0x000ffffffffff000ull)
-#define	I386_PG_PS_FRAME_PAE	(0x000fffffffe00000ull)
-#define	I386_PG_FRAME		(0xfffff000)
-#define	I386_PG_PS_FRAME	(0xffc00000)
-
-#ifdef __i386__
-_Static_assert(PAGE_SHIFT == I386_PAGE_SHIFT, "PAGE_SHIFT mismatch");
-_Static_assert(PAGE_SIZE == I386_PAGE_SIZE, "PAGE_SIZE mismatch");
-_Static_assert(PAGE_MASK == I386_PAGE_MASK, "PAGE_MASK mismatch");
-_Static_assert(PDRSHIFT == I386_PDRSHIFT, "PDRSHIFT mismatch");
-_Static_assert(NPTEPG == I386_NPTEPG, "NPTEPG mismatch");
-_Static_assert(NBPDR == I386_NBPDR, "NBPDR mismatch");
-
-_Static_assert(PG_V == I386_PG_V, "PG_V mismatch");
-_Static_assert(PG_PS == I386_PG_PS, "PG_PS mismatch");
-_Static_assert(PG_FRAME == I386_PG_FRAME, "PG_FRAME mismatch");
-_Static_assert(PG_PS_FRAME == I386_PG_PS_FRAME, "PG_PS_FRAME mismatch");
-#endif
+#include "kvm_i386.h"
 
 struct vmstate {
 	void		*PTD;
@@ -195,8 +156,8 @@ _i386_freevtop(kvm_t *kd)
 	kd->vmst = NULL;
 }
 
-static int
-_i386_probe(kvm_t *kd)
+int
+_i386_probe(kvm_t *kd, int want_minidump)
 {
 	Elf *elf;
 	GElf_Ehdr ehdr;
@@ -219,12 +180,19 @@ _i386_probe(kvm_t *kd)
 	/* Now, check to see if this is a minidump. */
 	if (!kd->rawdump && pread(kd->pmfd, &minihdr, 8, 0) == 8 &&
 	    memcmp(&minihdr, "minidump", 8) == 0)
-		return (0);
+		return (want_minidump);
 
-	return (1);
+	return (!want_minidump);
 bad:
 	elf_end(elf);
 	return (0);
+}
+
+static int
+_i386_plain_probe(kvm_t *kd)
+{
+
+	return (_i386_probe(kd, 0));
 }
 
 static int
@@ -510,7 +478,7 @@ _i386_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 }
 
 struct kvm_arch kvm_i386 = {
-	.ka_probe = _i386_probe,
+	.ka_probe = _i386_plain_probe,
 	.ka_initvtop = _i386_initvtop,
 	.ka_freevtop = _i386_freevtop,
 	.ka_kvatop = _i386_kvatop,
