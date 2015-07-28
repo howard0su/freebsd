@@ -79,13 +79,13 @@ SET_DECLARE(kvm_arch, struct kvm_arch);
 int __fdnlist(int, struct nlist *);
 
 static int
-kvm_fdnlist(kvm_t *kd, int fd, struct nlist *list)
+kvm_fdnlist(kvm_t *kd, struct nlist *list)
 {
-	psaddr_t addr;
+	kvaddr_t addr;
 	int error, nfail;
 
 	if (kd->arch->ka_native)
-		return (__fdnlist(fd, list));
+		return (__fdnlist(kd->nlfd, list));
 
 	nfail = 0;
 	while (list->n_name != NULL && list->n_name[0] != '\0') {
@@ -252,7 +252,7 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 	/*
 	 * Non-native kernels require a symbol resolver.
 	 */
-	if (!kd->arch->native && kd->resolve_symbol) {
+	if (!kd->arch->ka_native && kd->resolve_symbol) {
 		_kvm_err(kd, kd->program,
 		    "non-native kernel requires a symbol resolver");
 		goto failed;
@@ -305,7 +305,7 @@ kvm_open(const char *uf, const char *mf, const char *sf __unused, int flag,
 
 kvm_t *
 kvm_open2(const char *uf, const char *mf, int flag, char *errout,
-    int (*resolver)(const char *, psaddr_t *))
+    int (*resolver)(const char *, kvaddr_t *))
 {
 	kvm_t *kd;
 
@@ -406,7 +406,7 @@ kvm_fdnlist_prefix(kvm_t *kd, struct nlist *nl, int missing, const char *prefix,
 
 	/* Do lookup on the reduced list. */
 	np = n;
-	unresolved = kvm_fdnlist(kd->nlfd, np);
+	unresolved = kvm_fdnlist(kd, np);
 
 	/* Check if we could resolve further symbols and update the list. */
 	if (unresolved >= 0 && unresolved < missing) {
@@ -463,7 +463,7 @@ _kvm_nlist(kvm_t *kd, struct nlist *nl, int initialize)
 	 * slow library call.
 	 */
 	if (!ISALIVE(kd)) {
-		error = kvm_fdnlist(kd->nlfd, nl);
+		error = kvm_fdnlist(kd, nl);
 		if (error <= 0)			/* Hard error or success. */
 			return (error);
 
@@ -588,7 +588,7 @@ kvm_read(kvm_t *kd, u_long kva, void *buf, size_t len)
 
 	cp = buf;
 	while (len > 0) {
-		cc = _kvm_kvatop(kd, kva, &pa);
+		cc = kd->arch->ka_kvatop(kd, kva, &pa);
 		if (cc == 0)
 			return (-1);
 		if (cc > (ssize_t)len)
@@ -604,7 +604,7 @@ kvm_read(kvm_t *kd, u_long kva, void *buf, size_t len)
 			break;
 		}
 		/*
-		 * If kvm_kvatop returns a bogus value or our core file is
+		 * If ka_kvatop returns a bogus value or our core file is
 		 * truncated, we might wind up seeking beyond the end of the
 		 * core file in which case the read will return 0 (EOF).
 		 */

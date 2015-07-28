@@ -34,12 +34,14 @@
  * $FreeBSD$
  */
 
+#include <sys/linker_set.h>
+
 struct kvm_arch {
 	int	(*ka_probe)(kvm_t *);
 	int	(*ka_initvtop)(kvm_t *);
 	void	(*ka_freevtop)(kvm_t *);
-	int	(*ka_kvatop)(kvm_t *, psaddr_t, off_t *)
-	int	(*ka_uvatop)(kvm_t *, const struct proc *, psaddr_t, off_t *);
+	int	(*ka_kvatop)(kvm_t *, kvaddr_t, off_t *);
+	int	(*ka_uvatop)(kvm_t *, const struct proc *, kvaddr_t, off_t *);
 	int	ka_native;
 };
 
@@ -60,7 +62,7 @@ struct __kvm {
 	int	vmfd;		/* virtual memory file (-1 if crashdump) */
 	int	unused;		/* was: swap file (e.g., /dev/drum) */
 	int	nlfd;		/* namelist file (e.g., /kernel) */
-	int	(*resolve_symbol)(const char *, psaddr_t *);
+	int	(*resolve_symbol)(const char *, kvaddr_t *);
 	struct kinfo_proc *procbase;
 	char	*argspc;	/* (dynamic) storage for argv strings */
 	int	arglen;		/* length of the above */
