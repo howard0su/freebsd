@@ -300,8 +300,8 @@ _i386_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	i386_physaddr_t pte_pa;
 	i386_pde_t pde;
 	i386_pte_t pte;
-	int pdeindex;
-	int pteindex;
+	kvaddr_t pdeindex;
+	kvaddr_t pteindex;
 	size_t s;
 	i386_physaddr_t a;
 	off_t ofs;
@@ -390,8 +390,8 @@ _i386_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 	i386_physaddr_pae_t pte_pa;
 	i386_pde_pae_t pde;
 	i386_pte_pae_t pte;
-	int pdeindex;
-	int pteindex;
+	kvaddr_t pdeindex;
+	kvaddr_t pteindex;
 	size_t s;
 	i386_physaddr_pae_t a;
 	off_t ofs;

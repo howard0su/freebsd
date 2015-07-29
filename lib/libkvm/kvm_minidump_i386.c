@@ -205,7 +205,7 @@ _i386_minidump_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 	struct vmstate *vm;
 	i386_physaddr_pae_t offset;
 	i386_pte_pae_t pte;
-	int pteindex;
+	kvaddr_t pteindex;
 	i386_physaddr_pae_t a;
 	off_t ofs;
 	i386_pte_pae_t *ptemap;
@@ -250,7 +250,7 @@ _i386_minidump_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	struct vmstate *vm;
 	i386_physaddr_t offset;
 	i386_pte_t pte;
-	int pteindex;
+	kvaddr_t pteindex;
 	i386_physaddr_t a;
 	off_t ofs;
 	i386_pte_t *ptemap;
