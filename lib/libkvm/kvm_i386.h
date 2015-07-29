@@ -51,12 +51,12 @@ typedef	uint64_t	i386_pde_pae_t;
 #define	I386_PAGE_SHIFT		12
 #define	I386_PAGE_SIZE		(1 << I386_PAGE_SHIFT)
 #define	I386_PAGE_MASK		(I386_PAGE_SIZE - 1)
-#define	I386_PDRSHIFT		22
 #define	I386_NPTEPG		(I386_PAGE_SIZE / sizeof(i386_pte_t))
+#define	I386_PDRSHIFT		22
 #define	I386_NBPDR		(1 << I386_PDRSHIFT)
 #define	I386_PAGE_PS_MASK	(I386_NBPDR - 1)
-#define	I386_PDRSHIFT_PAE	21
 #define	I386_NPTEPG_PAE		(I386_PAGE_SIZE / sizeof(i386_pte_pae_t))
+#define	I386_PDRSHIFT_PAE	21
 #define	I386_NBPDR_PAE		(1 << I386_PDRSHIFT_PAE)
 #define	I386_PAGE_PS_MASK_PAE	(I386_NBPDR_PAE - 1)
 
@@ -71,8 +71,8 @@ typedef	uint64_t	i386_pde_pae_t;
 _Static_assert(PAGE_SHIFT == I386_PAGE_SHIFT, "PAGE_SHIFT mismatch");
 _Static_assert(PAGE_SIZE == I386_PAGE_SIZE, "PAGE_SIZE mismatch");
 _Static_assert(PAGE_MASK == I386_PAGE_MASK, "PAGE_MASK mismatch");
-_Static_assert(PDRSHIFT == I386_PDRSHIFT, "PDRSHIFT mismatch");
 _Static_assert(NPTEPG == I386_NPTEPG, "NPTEPG mismatch");
+_Static_assert(PDRSHIFT == I386_PDRSHIFT, "PDRSHIFT mismatch");
 _Static_assert(NBPDR == I386_NBPDR, "NBPDR mismatch");
 
 _Static_assert(PG_V == I386_PG_V, "PG_V mismatch");
