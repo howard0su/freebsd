@@ -50,7 +50,7 @@ typedef	uint64_t	i386_pde_pae_t;
 
 #define	I386_PAGE_SHIFT		12
 #define	I386_PAGE_SIZE		(1 << I386_PAGE_SHIFT)
-#define	I386_PAGE_MASK		(I386_PAGE_SIZE-1)
+#define	I386_PAGE_MASK		(I386_PAGE_SIZE - 1)
 #define	I386_PDRSHIFT		22
 #define	I386_NPTEPG		(I386_PAGE_SIZE / sizeof(i386_pte_t))
 #define	I386_NBPDR		(1 << I386_PDRSHIFT)
