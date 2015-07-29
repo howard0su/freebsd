@@ -97,16 +97,15 @@ static int
 inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
 {
 	uint64_t idx;
-	uint32_t bit, bits;
+	uint32_t bits;
 	uint64_t pa;
 
 	for (idx = 0; idx < len / sizeof(*base); idx++) {
 		bits = le32toh(base[idx]);
-		while (bits) {
-			/* XXX: Don't really have an ffs32(). */
-			bit = ffs(bits) - 1;
-			bits &= ~(1ul << bit);
-			pa = (idx * sizeof(*base) * NBBY + bit) * I386_PAGE_SIZE;
+		pa = (idx * sizeof(*base) * NBBY) * I386_PAGE_SIZE;
+		for (; bits != 0; bits >>= 1, pa += I386_PAGE_SIZE) {
+			if ((bits & 1) == 0)
+				continue;
 			hpt_insert(kd, pa, off);
 			off += I386_PAGE_SIZE;
 		}
@@ -151,21 +150,21 @@ _i386_minidump_initvtop(kvm_t *kd)
 		_kvm_err(kd, kd->program, "cannot read dump header");
 		return (-1);
 	}
-	vmst->hdr.version = le32toh(vmst->hdr.version);
-	vmst->hdr.msgbufsize = le32toh(vmst->hdr.msgbufsize);
-	vmst->hdr.bitmapsize = le32toh(vmst->hdr.bitmapsize);
-	vmst->hdr.ptesize = le32toh(vmst->hdr.ptesize);
-	vmst->hdr.kernbase = le32toh(vmst->hdr.kernbase);
-	vmst->hdr.paemode = le32toh(vmst->hdr.paemode);
 	if (strncmp(MINIDUMP_MAGIC, vmst->hdr.magic, sizeof(vmst->hdr.magic)) != 0) {
 		_kvm_err(kd, kd->program, "not a minidump for this platform");
 		return (-1);
 	}
+	vmst->hdr.version = le32toh(vmst->hdr.version);
 	if (vmst->hdr.version != MINIDUMP_VERSION) {
 		_kvm_err(kd, kd->program, "wrong minidump version. expected %d got %d",
 		    MINIDUMP_VERSION, vmst->hdr.version);
 		return (-1);
 	}
+	vmst->hdr.msgbufsize = le32toh(vmst->hdr.msgbufsize);
+	vmst->hdr.bitmapsize = le32toh(vmst->hdr.bitmapsize);
+	vmst->hdr.ptesize = le32toh(vmst->hdr.ptesize);
+	vmst->hdr.kernbase = le32toh(vmst->hdr.kernbase);
+	vmst->hdr.paemode = le32toh(vmst->hdr.paemode);
 
 	/* Skip header and msgbuf */
 	off = I386_PAGE_SIZE + i386_round_page(vmst->hdr.msgbufsize);
@@ -219,19 +218,24 @@ _i386_minidump_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 		pteindex = (va - vm->hdr.kernbase) >> I386_PAGE_SHIFT;
 		pte = le64toh(ptemap[pteindex]);
 		if ((pte & I386_PG_V) == 0) {
-			_kvm_err(kd, kd->program, "_kvm_vatop: pte not valid");
+			_kvm_err(kd, kd->program,
+			    "_i386_minidump_vatop_pae: pte not valid");
 			goto invalid;
 		}
 		a = pte & I386_PG_FRAME_PAE;
 		ofs = hpt_find(kd, a);
 		if (ofs == -1) {
-			_kvm_err(kd, kd->program, "_kvm_vatop: physical address 0x%jx not in minidump", (uintmax_t)a);
+			_kvm_err(kd, kd->program,
+	    "_i386_minidump_vatop_pae: physical address 0x%jx not in minidump",
+			    (uintmax_t)a);
 			goto invalid;
 		}
 		*pa = ofs + offset;
 		return (I386_PAGE_SIZE - offset);
 	} else {
-		_kvm_err(kd, kd->program, "_kvm_vatop: virtual address 0x%jx not minidumped", (uintmax_t)va);
+		_kvm_err(kd, kd->program,
+	    "_i386_minidump_vatop_pae: virtual address 0x%jx not minidumped",
+		    (uintmax_t)va);
 		goto invalid;
 	}
 
@@ -259,19 +263,24 @@ _i386_minidump_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		pteindex = (va - vm->hdr.kernbase) >> I386_PAGE_SHIFT;
 		pte = le32toh(ptemap[pteindex]);
 		if ((pte & I386_PG_V) == 0) {
-			_kvm_err(kd, kd->program, "_kvm_vatop: pte not valid");
+			_kvm_err(kd, kd->program,
+			    "_i386_minidump_vatop: pte not valid");
 			goto invalid;
 		}
 		a = pte & I386_PG_FRAME;
 		ofs = hpt_find(kd, a);
 		if (ofs == -1) {
-			_kvm_err(kd, kd->program, "_kvm_vatop: physical address 0x%jx not in minidump", (uintmax_t)a);
+			_kvm_err(kd, kd->program,
+	    "_i386_minidump_vatop: physical address 0x%jx not in minidump",
+			    (uintmax_t)a);
 			goto invalid;
 		}
 		*pa = ofs + offset;
 		return (I386_PAGE_SIZE - offset);
 	} else {
-		_kvm_err(kd, kd->program, "_kvm_vatop: virtual address 0x%jx not minidumped", (uintmax_t)va);
+		_kvm_err(kd, kd->program,
+	    "_i386_minidump_vatop: virtual address 0x%jx not minidumped",
+		    (uintmax_t)va);
 		goto invalid;
 	}
 
@@ -285,7 +294,7 @@ _i386_minidump_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 {
 
 	if (ISALIVE(kd)) {
-		_kvm_err(kd, 0, "kvm_kvatop called in live kernel!");
+		_kvm_err(kd, 0, "_i386_minidump_kvatop called in live kernel!");
 		return (0);
 	}
 	if (kd->vmst->hdr.paemode)
