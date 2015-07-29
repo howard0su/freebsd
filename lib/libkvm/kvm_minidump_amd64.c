@@ -190,7 +190,7 @@ _amd64_minidump_initvtop(kvm_t *kd)
 		return (-1);
 	}
 	if (pread(kd->pmfd, vmst->bitmap, vmst->hdr.bitmapsize, off) !=
-	    vmst->hdr.bitmapsize) {
+	    (ssize_t)vmst->hdr.bitmapsize) {
 		_kvm_err(kd, kd->program, "cannot read %d bytes for page bitmap", vmst->hdr.bitmapsize);
 		return (-1);
 	}
@@ -202,7 +202,7 @@ _amd64_minidump_initvtop(kvm_t *kd)
 		return (-1);
 	}
 	if (pread(kd->pmfd, vmst->page_map, vmst->hdr.pmapsize, off) !=
-	    vmst->hdr.pmapsize) {
+	    (ssize_t)vmst->hdr.pmapsize) {
 		_kvm_err(kd, kd->program, "cannot read %d bytes for page_map", vmst->hdr.pmapsize);
 		return (-1);
 	}

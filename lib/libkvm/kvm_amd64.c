@@ -62,7 +62,7 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 struct vmstate {
 	size_t		phnum;
 	GElf_Phdr	*phdr;
-	pml4_entry_t	*PML4;
+	amd64_pml4e_t	*PML4;
 };
 
 /*
