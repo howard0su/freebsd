@@ -103,7 +103,8 @@ inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
 	for (idx = 0; idx < len / sizeof(*base); idx++) {
 		bits = le32toh(base[idx]);
 		while (bits) {
-			bit = ffsl(bits) - 1;
+			/* XXX: Don't really have an ffs32(). */
+			bit = ffs(bits) - 1;
 			bits &= ~(1ul << bit);
 			pa = (idx * sizeof(*base) * NBBY + bit) * I386_PAGE_SIZE;
 			hpt_insert(kd, pa, off);
