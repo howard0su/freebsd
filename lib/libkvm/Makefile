@@ -1,20 +1,7 @@
 #	@(#)Makefile	8.1 (Berkeley) 6/4/93
 # $FreeBSD$
 
-.if defined(TARGET_ARCH) && !defined(COMPAT_32BIT)
-KVM_XARCH=${TARGET_ARCH}
-KVM_XCPUARCH=${KVM_XARCH:C/mips(n32|64)?(el)?/mips/:C/arm(v6)?(eb|hf)?/arm/:C/powerpc64/powerpc/}
-.else
-KVM_XARCH=${MACHINE_ARCH}
-KVM_XCPUARCH=${MACHINE_CPUARCH}
-.endif
-
-.if ${KVM_XARCH} != ${MACHINE_ARCH}
-LIB=   kvm-${KVM_XARCH}
-CFLAGS+=-DCROSS_LIBKVM
-.else
 LIB=	kvm
-.endif
 
 SHLIBDIR?= /lib
 SHLIB_MAJOR=	6
@@ -24,6 +11,7 @@ WARNS?=	3
 
 SRCS=	kvm.c kvm_cptime.c kvm_file.c kvm_getloadavg.c \
 	kvm_getswapinfo.c kvm_pcpu.c kvm_proc.c kvm_vnet.c \
+	kvm_amd64.c kvm_minidump_amd64.c \
 	kvm_i386.c kvm_minidump_i386.c
 INCS=	kvm.h
 
