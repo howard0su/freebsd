@@ -266,7 +266,7 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 	/*
 	 * Non-native kernels require a symbol resolver.
 	 */
-	if (!kd->arch->ka_native && kd->resolve_symbol) {
+	if (!kd->arch->ka_native && kd->resolve_symbol == NULL) {
 		_kvm_err(kd, kd->program,
 		    "non-native kernel requires a symbol resolver");
 		goto failed;
