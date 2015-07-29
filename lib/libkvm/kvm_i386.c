@@ -136,7 +136,7 @@ _kvm_pa2off(kvm_t *kd, uint64_t pa, off_t *ofs)
 
 	if (kd->rawdump) {
 		*ofs = pa;
-		return (I386_PAGE_SIZE - ((size_t)pa & I386_PAGE_MASK));
+		return (I386_PAGE_SIZE - (pa & I386_PAGE_MASK));
 	}
 
 	p = vm->phdr;
@@ -146,7 +146,7 @@ _kvm_pa2off(kvm_t *kd, uint64_t pa, off_t *ofs)
 	if (n == 0)
 		return (0);
 	*ofs = (pa - p->p_paddr) + p->p_offset;
-	return (I386_PAGE_SIZE - ((size_t)pa & I386_PAGE_MASK));
+	return (I386_PAGE_SIZE - (pa & I386_PAGE_MASK));
 }
 
 static void
@@ -247,6 +247,7 @@ _i386_initvtop(kvm_t *kd)
 			_kvm_err(kd, kd->program, "cannot read IdlePDPT");
 			return (-1);
 		}
+		pa = le32toh(pa);
 		PTD = _kvm_malloc(kd, 4 * I386_PAGE_SIZE);
 		for (i = 0; i < 4; i++) {
 			if (kvm_read(kd, pa + (i * sizeof(pa64)), &pa64,
@@ -255,6 +256,7 @@ _i386_initvtop(kvm_t *kd)
 				free(PTD);
 				return (-1);
 			}
+			pa64 = le64toh(pa64);
 			if (kvm_read(kd, pa64 & I386_PG_FRAME_PAE,
 			    PTD + (i * I386_PAGE_SIZE), I386_PAGE_SIZE) !=
 			    I386_PAGE_SIZE) {
@@ -278,6 +280,7 @@ _i386_initvtop(kvm_t *kd)
 			_kvm_err(kd, kd->program, "cannot read IdlePTD");
 			return (-1);
 		}
+		pa = le32toh(pa);
 		PTD = _kvm_malloc(kd, I386_PAGE_SIZE);
 		if (kvm_read(kd, pa, PTD, I386_PAGE_SIZE) != I386_PAGE_SIZE) {
 			_kvm_err(kd, kd->program, "cannot read PTD");
