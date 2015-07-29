@@ -54,10 +54,12 @@ static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 
 #include <net/vnet.h>
 
+#if 0
 #include <vm/vm.h>
 #include <vm/vm_param.h>
 
 #include <machine/vmparam.h>
+#endif
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -65,6 +67,7 @@ static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #include <limits.h>
 #include <nlist.h>
 #include <paths.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -605,6 +608,13 @@ kvm_nlist(kvm_t *kd, struct nlist *nl)
 ssize_t
 kvm_read(kvm_t *kd, u_long kva, void *buf, size_t len)
 {
+
+	return (kvm_read2(kd, kva, buf, len));
+}
+
+ssize_t
+kvm_read2(kvm_t *kd, kvaddr_t kva, void *buf, size_t len)
+{
 	int cc;
 	ssize_t cr;
 	off_t pa;
@@ -617,7 +627,8 @@ kvm_read(kvm_t *kd, u_long kva, void *buf, size_t len)
 		 */
 		errno = 0;
 		if (lseek(kd->vmfd, (off_t)kva, 0) == -1 && errno != 0) {
-			_kvm_err(kd, 0, "invalid address (%lx)", kva);
+			_kvm_err(kd, 0, "invalid address (0x%jx)",
+			    (uintmax_t)kva);
 			return (-1);
 		}
 		cr = read(kd->vmfd, buf, len);
