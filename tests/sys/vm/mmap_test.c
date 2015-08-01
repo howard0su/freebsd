@@ -173,11 +173,47 @@ ATF_TC_BODY(mmap__bad_arguments, tc)
 	    "MAP_SHARED of read-only /dev/zero");
 }
 
+ATF_TC_WITHOUT_HEAD(mmap__dev_zero);
+ATF_TC_BODY(mmap__dev_zero, tc)
+{
+	char *p1, *p2, *p3;
+	size_t i;
+	int fd;
+
+	ATF_REQUIRE((fd = open("/dev/zero", O_RDWR)) >= 0);
+
+	p1 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+	    0);
+	ATF_REQUIRE(p1 != MAP_FAILED);
+
+	p2 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+	    0);
+
+	for (i = 0; i < getpagesize(); i++)
+		ATF_REQUIRE_EQ_MSG(0, p1[i], "byte at p1[%zu] is %x", i, p1[i]);
+
+	ATF_REQUIRE(memcmp(p1, p2, getpagesize()) == 0);
+
+	p1[0] = 1;
+
+	ATF_REQUIRE(p2[0] == 0);
+
+	p2[0] = 2;
+
+	ATF_REQUIRE(p1[0] == 1);
+
+	p3 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+	    0);
+
+	ATF_REQUIRE(p3[0] == 0);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
 	ATF_TP_ADD_TC(tp, mmap__map_at_zero);
 	ATF_TP_ADD_TC(tp, mmap__bad_arguments);
+	ATF_TP_ADD_TC(tp, mmap__dev_zero);
 
 	return (atf_no_error());
 }
