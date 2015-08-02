@@ -197,7 +197,7 @@ static struct syscall syscalls[] = {
 	{ .name = "linux_newstat", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Ptr | OUT, 1 } } },
 	{ .name = "linux_access", .ret_type = 1, .nargs = 2,
-	  .args = { { Name, 0 }, { Octal, 1 }}},
+	  .args = { { Name, 0 }, { Accessmode, 1 }}},
 	{ .name = "linux_newfstat", .ret_type = 1, .nargs = 2,
 	  .args = { { Int, 0 }, { Ptr | OUT, 1 } } },
 	{ .name = "write", .ret_type = 1, .nargs = 3,
@@ -209,11 +209,11 @@ static struct syscall syscalls[] = {
 	{ .name = "exit", .ret_type = 0, .nargs = 1,
 	  .args = { { Hex, 0 } } },
 	{ .name = "access", .ret_type = 1, .nargs = 2,
-	  .args = { { Name | IN, 0 }, { Octal, 1 } } },
+	  .args = { { Name | IN, 0 }, { Accessmode, 1 } } },
 	{ .name = "eaccess", .ret_type = 1, .nargs = 2,
-	  .args = { { Name | IN, 0 }, { Octal, 1 } } },
+	  .args = { { Name | IN, 0 }, { Accessmode, 1 } } },
 	{ .name = "faccessat", .ret_type = 1, .nargs = 4,
-	  .args = { { Atfd, 0 }, { Name | IN, 1 }, { Octal, 2 },
+	  .args = { { Atfd, 0 }, { Name | IN, 1 }, { Accessmode, 2 },
 		    { Atflags, 3 } } },
 	{ .name = "sigaction", .ret_type = 1, .nargs = 3,
 	  .args = { { Signal, 0 }, { Sigaction | IN, 1 }, { Sigaction | OUT, 2 } } },
@@ -486,6 +486,10 @@ static struct xlat umtx_ops[] = {
 static struct xlat at_flags[] = {
 	X(AT_EACCESS) X(AT_SYMLINK_NOFOLLOW) X(AT_SYMLINK_FOLLOW)
 	X(AT_REMOVEDIR) XEND
+};
+
+static struct xlat access_modes[] = {
+	X(R_OK) X(W_OK) X(X_OK) XEND
 };
 	
 #undef X
@@ -1399,6 +1403,13 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		break;
 	case Atflags:
 		tmp = strdup(xlookup_bits(at_flags, args[sc->offset]));
+		break;
+	case Accessmode:
+		if (args[sc->offset] == F_OK)
+			tmp = strdup("F_OK");
+		else
+			tmp = strdup(xlookup_bits(access_modes,
+				args[sc->offset]));
 		break;
 	default:
 		errx(1, "Invalid argument type %d\n", sc->type & ARG_MASK);
