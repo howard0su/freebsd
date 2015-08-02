@@ -392,7 +392,10 @@ static struct xlat sigaction_flags[] = {
 
 static struct xlat fcntl_arg[] = {
 	X(F_DUPFD) X(F_GETFD) X(F_SETFD) X(F_GETFL) X(F_SETFL)
-	X(F_GETOWN) X(F_SETOWN) X(F_GETLK) X(F_SETLK) X(F_SETLKW) XEND
+	X(F_GETOWN) X(F_SETOWN) X(F_OGETLK) X(F_OSETLK) X(F_OSETLKW)
+	X(F_DUP2FD) X(F_GETLK) X(F_SETLK) X(F_SETLKW) X(F_SETLK_REMOTE)
+	X(F_READAHEAD) X(F_RDAHEAD) X(F_DUPFD_CLOEXEC) X(F_DUP2FD_CLOEXEC)
+	XEND
 };
 
 static struct xlat fcntlfd_arg[] = {
@@ -424,7 +427,8 @@ static struct xlat open_flags[] = {
 	X(O_RDONLY) X(O_WRONLY) X(O_RDWR) X(O_ACCMODE) X(O_NONBLOCK)
 	X(O_APPEND) X(O_SHLOCK) X(O_EXLOCK) X(O_ASYNC) X(O_FSYNC)
 	X(O_NOFOLLOW) X(O_CREAT) X(O_TRUNC) X(O_EXCL) X(O_NOCTTY)
-	X(O_DIRECT) X(O_DIRECTORY) X(O_EXEC) X(O_TTY_INIT) X(O_CLOEXEC) XEND
+	X(O_DIRECT) X(O_DIRECTORY) X(O_EXEC) X(O_TTY_INIT) X(O_CLOEXEC)
+	X(O_VERIFY) XEND
 };
 
 static struct xlat shutdown_arg[] = {
