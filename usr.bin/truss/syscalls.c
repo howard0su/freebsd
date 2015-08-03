@@ -56,6 +56,7 @@ static const char rcsid[] =
 #include <sys/event.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
+#include <machine/sysarch.h>
 
 #include <ctype.h>
 #include <err.h>
@@ -113,6 +114,7 @@ static struct syscall syscalls[] = {
 	{ .name = "getsid", .ret_type = 1, .nargs = 1,
 	  .args = { { Int, 0 } } },
 	{ .name = "getuid", .ret_type = 1, .nargs = 0 },
+	{ .name = "issetugid", .ret_type = 1, .nargs = 0 },
 	{ .name = "readlink", .ret_type = 1, .nargs = 3,
 	  .args = { { Name, 0 } , { Readlinkres | OUT, 1 }, { Int, 2 } } },
 	{ .name = "readlinkat", .ret_type = 1, .nargs = 4,
@@ -334,6 +336,8 @@ static struct syscall syscalls[] = {
 		    { Waitoptions, 3 }, { Rusage | OUT, 4 }, { Ptr, 5 } } },
 	{ .name = "procctl", .ret_type = 1, .nargs = 4,
 	  .args = { { Idtype, 0 }, { Int, 1 }, { Procctl, 2 }, { Ptr, 3 } } },
+	{ .name = "sysarch", .ret_type = 1, .nargs = 2,
+	  .args = { { Sysarch, 0 }, { Ptr, 2 } } },
 	{ .name = "_umtx_op", .ret_type = 1, .nargs = 5,
 	  .args = { { Ptr, 0 }, { Umtxop, 1 }, { LongHex, 2 }, { Ptr, 3 },
 		    { Ptr, 4 } } },
@@ -499,7 +503,17 @@ static struct xlat at_flags[] = {
 static struct xlat access_modes[] = {
 	X(R_OK) X(W_OK) X(X_OK) XEND
 };
-	
+
+static struct xlat sysarch_ops[] = {
+#if defined(__i386__) || defined(__amd64__)
+	X(I386_GET_LDT) X(I386_SET_LDT) X(I386_GET_IOPERM) X(I386_SET_IOPERM)
+	X(I386_VM86) X(I386_GET_FSBASE) X(I386_SET_FSBASE) X(I386_GET_GSBASE)
+	X(I386_SET_GSBASE) X(I386_GET_XFPUSTATE) X(AMD64_GET_FSBASE)
+	X(AMD64_SET_FSBASE) X(AMD64_GET_GSBASE) X(AMD64_SET_GSBASE)
+	X(AMD64_GET_XFPUSTATE)
+#endif
+	XEND
+};
 #undef X
 #undef XEND
 
@@ -1431,6 +1445,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		else
 			tmp = strdup(xlookup_bits(access_modes,
 				args[sc->offset]));
+		break;
+	case Sysarch:
+		tmp = strdup(xlookup(sysarch_ops, args[sc->offset]));
 		break;
 	default:
 		errx(1, "Invalid argument type %d\n", sc->type & ARG_MASK);
