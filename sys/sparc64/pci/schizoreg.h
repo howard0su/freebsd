@@ -32,7 +32,6 @@
 #define	_SPARC64_PCI_SCHIZOREG_H_
 
 #define	STX_NINTR			5	/* 4 via OFW + 1 CDMA */
-#define	STX_NRANGE			4
 #define	SCZ_NREG			3
 #define	TOM_NREG			4
 

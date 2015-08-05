@@ -44,7 +44,7 @@ struct fire_softc {
 
 	struct rman			sc_pci_mem_rman;
 	struct rman			sc_pci_io_rman;
-	bus_space_handle_t		sc_pci_bh[FIRE_NRANGE];
+	bus_space_handle_t		sc_pci_bh[OFW_PCI_NUM_CS];
 	bus_space_tag_t			sc_pci_cfgt;
 	bus_space_tag_t			sc_pci_iot;
 	bus_dma_tag_t			sc_pci_dmat;

@@ -73,7 +73,6 @@
  */
 
 #define	PSYCHO_NINTR		6
-#define	PSYCHO_NRANGE		4
 
 /*
  * Psycho register offsets

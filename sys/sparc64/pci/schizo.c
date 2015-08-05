@@ -277,7 +277,7 @@ schizo_attach(device_t dev)
 	uint64_t ino_bitmap, reg;
 	phandle_t node;
 	uint32_t prop, prop_array[2];
-	int i, j, mode, rid, tsbsize;
+	int i, j, mode, nrange, rid, tsbsize;
 
 	sc = device_get_softc(dev);
 	node = ofw_bus_get_node(dev);
@@ -554,26 +554,34 @@ schizo_attach(device_t dev)
 	    rman_manage_region(&sc->sc_pci_mem_rman, 0, STX_MEM_SIZE) != 0)
 		panic("%s: failed to set up memory rman", __func__);
 
-	i = OF_getprop_alloc(node, "ranges", sizeof(*range), (void **)&range);
-	/*
-	 * Make sure that the expected ranges are present.  The
-	 * OFW_PCI_CS_MEM64 one is not currently used though.
-	 */
-	if (i != STX_NRANGE)
-		panic("%s: unsupported number of ranges", __func__);
+	nrange = OF_getprop_alloc(node, "ranges", sizeof(*range),
+	    (void **)&range);
+
 	/*
 	 * Find the addresses of the various bus spaces.
 	 * There should not be multiple ones of one kind.
 	 * The physical start addresses of the ranges are the configuration,
 	 * memory and I/O handles.
 	 */
-	for (i = 0; i < STX_NRANGE; i++) {
+	for (i = 0; i < nrange; i++) {
 		j = OFW_PCI_RANGE_CS(&range[i]);
 		if (sc->sc_pci_bh[j] != 0)
 			panic("%s: duplicate range for space %d",
 			    __func__, j);
 		sc->sc_pci_bh[j] = OFW_PCI_RANGE_PHYS(&range[i]);
 	}
+
+	/*
+	 * Make sure that the expected ranges are present.  The
+	 * OFW_PCI_CS_MEM64 one is not currently used.
+	 */
+	if (sc->sc_pci_bh[OFW_PCI_CS_CONFIG] == 0)
+		panic("%s: missing CONFIG range", __func__);
+	if (sc->sc_pci_bh[OFW_PCI_CS_IO] == 0)
+		panic("%s: missing IO range", __func__);
+	if (sc->sc_pci_bh[OFW_PCI_CS_MEM32] == 0)
+		panic("%s: missing MEM32 range", __func__);
+
 	free(range, M_OFWPROP);
 
 	/* Register the softc, this is needed for paired Schizos. */

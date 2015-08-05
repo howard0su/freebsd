@@ -74,6 +74,8 @@ typedef uint32_t ofw_pci_intr_t;
 #define	OFW_PCI_CS_MEM32	0x02
 #define	OFW_PCI_CS_MEM64	0x03
 
+#define	OFW_PCI_NUM_CS		4
+
 /* OFW device types */
 #define	OFW_TYPE_PCI		"pci"
 #define	OFW_TYPE_PCIE		"pciex"
