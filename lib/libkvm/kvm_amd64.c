@@ -47,7 +47,6 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 
 #include <sys/param.h>
 #include <sys/endian.h>
-#include <gelf.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,61 +63,6 @@ struct vmstate {
 	GElf_Phdr	*phdr;
 	amd64_pml4e_t	*PML4;
 };
-
-/*
- * Read the ELF header and save a copy of the program headers.
- */
-static int
-_amd64_readhdrs(kvm_t *kd)
-{
-	struct vmstate *vm = kd->vmst;
-	GElf_Ehdr ehdr;
-	Elf *elf;
-	size_t i;
-
-	elf = elf_begin(kd->pmfd, ELF_C_READ, NULL);
-	if (elf == NULL) {
-		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-		return (-1);
-	}
-	if (elf_kind(elf) != ELF_K_ELF) {
-		_kvm_err(kd, kd->program, "invalid core");
-		goto bad;
-	}
-	if (gelf_getehdr(elf, &ehdr) == NULL) {
-		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-		goto bad;
-	}
-	if (ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
-	    ehdr.e_machine != EM_X86_64) {
-		_kvm_err(kd, kd->program, "invalid core");
-		goto bad;
-	}
-
-	if (elf_getphdrnum(elf, &vm->phnum) == -1) {
-		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-		goto bad;
-	}
-
-	vm->phdr = calloc(vm->phnum, sizeof(*vm->phdr));
-	if (vm->phdr == NULL) {
-		_kvm_err(kd, kd->program, "failed to allocate phdrs");
-		goto bad;
-	}
-
-	for (i = 0; i < vm->phnum; i++) {
-		if (gelf_getphdr(elf, i, &vm->phdr[i]) == NULL) {
-			_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-			goto bad;
-		}
-	}
-	elf_end(elf);
-	return (0);
-
-bad:
-	elf_end(elf);
-	return (-1);
-}
 
 /*
  * Translate a physical memory address to a file-offset in the crash-dump.
@@ -157,45 +101,12 @@ _amd64_freevtop(kvm_t *kd)
 	kd->vmst = NULL;
 }
 
-int
-_amd64_probe(kvm_t *kd, int want_minidump)
-{
-	Elf *elf;
-	GElf_Ehdr ehdr;
-	char minihdr[8];
-
-	/* First check the kernel to ensure it is an amd64 image. */
-	if (elf_version(EV_CURRENT) == EV_NONE)
-		return (0);
-	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
-	if (elf == NULL)
-		return (0);
-	if (elf_kind(elf) != ELF_K_ELF)
-		goto bad;
-	if (gelf_getehdr(elf, &ehdr) == NULL)
-		goto bad;
-	if (ehdr.e_ident[EI_CLASS] != ELFCLASS64)
-		goto bad;
-	if (ehdr.e_machine != EM_X86_64)
-		goto bad;
-	elf_end(elf);
-
-	/* Now, check to see if this is a minidump. */
-	if (!kd->rawdump && pread(kd->pmfd, &minihdr, 8, 0) == 8 &&
-	    memcmp(&minihdr, "minidump", 8) == 0)
-		return (want_minidump);
-
-	return (!want_minidump);
-bad:
-	elf_end(elf);
-	return (0);
-}
-
 static int
-_amd64_plain_probe(kvm_t *kd)
+_amd64_probe(kvm_t *kd)
 {
 
-	return (_amd64_probe(kd, 0));
+	return (_kvm_probe_elf_kernel(kd, ELFCLASS64, EM_X86_64) &&
+	    !_kvm_is_minidump(kd));
 }
 
 static int
@@ -214,7 +125,8 @@ _amd64_initvtop(kvm_t *kd)
 	kd->vmst->PML4 = 0;
 
 	if (kd->rawdump == 0) {
-		if (_amd64_readhdrs(kd) == -1)
+		if (_kvm_read_core_phdrs(kd, ELFCLASS64, EM_X86_64,
+		    &kd->vmst->phnum, &kd->vmst->phdr) == -1)
 			return (-1);
 	}
 
@@ -399,7 +311,7 @@ _amd64_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 }
 
 struct kvm_arch kvm_amd64 = {
-	.ka_probe = _amd64_plain_probe,
+	.ka_probe = _amd64_probe,
 	.ka_initvtop = _amd64_initvtop,
 	.ka_freevtop = _amd64_freevtop,
 	.ka_kvatop = _amd64_kvatop,

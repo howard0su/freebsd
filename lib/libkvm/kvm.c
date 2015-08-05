@@ -186,6 +186,104 @@ _kvm_malloc(kvm_t *kd, size_t n)
 	return (p);
 }
 
+int
+_kvm_probe_elf_kernel(kvm_t *kd, int class, int machine)
+{
+	Elf *elf;
+	GElf_Ehdr ehdr;
+
+	if (elf_version(EV_CURRENT) == EV_NONE)
+		return (0);
+	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
+	if (elf == NULL)
+		return (0);
+	if (elf_kind(elf) != ELF_K_ELF)
+		goto bad;
+	if (gelf_getclass(elf) != class)
+		goto bad;
+	if (gelf_getehdr(elf, &ehdr) == NULL)
+		goto bad;
+	if (ehdr.e_machine != machine)
+		goto bad;
+	elf_end(elf);
+	return (1);
+bad:
+	elf_end(elf);
+	return (0);
+	
+}
+
+int
+_kvm_is_minidump(kvm_t *kd)
+{
+	char minihdr[8];
+
+	if (kd->rawdump)
+		return (0);
+	if (pread(kd->pmfd, &minihdr, 8, 0) == 8 &&
+	    memcmp(&minihdr, "minidump", 8) == 0)
+		return (1);
+	return (0);
+}
+
+int
+_kvm_read_core_phdrs(kvm_t *kd, int class, int machine, size_t *phnump,
+    GElf_Phdr **phdrp)
+{
+	GElf_Ehdr ehdr;
+	GElf_Phdr *phdr;
+	Elf *elf;
+	size_t i, phnum;
+
+	elf = elf_begin(kd->pmfd, ELF_C_READ, NULL);
+	if (elf == NULL) {
+		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+		return (-1);
+	}
+	if (elf_kind(elf) != ELF_K_ELF) {
+		_kvm_err(kd, kd->program, "invalid core");
+		goto bad;
+	}
+	if (gelf_getclass(elf) != class) {
+		_kvm_err(kd, kd->program, "invalid core");
+		goto bad;
+	}
+	if (gelf_getehdr(elf, &ehdr) == NULL) {
+		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+		goto bad;
+	}
+	if (ehdr.e_machine != machine) {
+		_kvm_err(kd, kd->program, "invalid core");
+		goto bad;
+	}
+
+	if (elf_getphdrnum(elf, &phnum) == -1) {
+		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+		goto bad;
+	}
+
+	phdr = calloc(phnum, sizeof(*phdr));
+	if (phdr == NULL) {
+		_kvm_err(kd, kd->program, "failed to allocate phdrs");
+		goto bad;
+	}
+
+	for (i = 0; i < phnum; i++) {
+		if (gelf_getphdr(elf, i, &phdr[i]) == NULL) {
+			_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+			goto bad;
+		}
+	}
+	elf_end(elf);
+	*phnump = phnum;
+	*phdrp = phdr;
+	return (0);
+
+bad:
+	elf_end(elf);
+	return (-1);
+}
+
 static kvm_t *
 _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 {

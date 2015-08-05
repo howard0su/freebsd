@@ -47,7 +47,6 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 
 #include <sys/param.h>
 #include <sys/endian.h>
-#include <gelf.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,60 +68,6 @@ struct vmstate {
 	size_t		phnum;
 	GElf_Phdr	*phdr;
 };
-
-/*
- * Read the ELF header and save a copy of the program headers.
- */
-static int
-_i386_readhdrs(kvm_t *kd)
-{
-	struct vmstate *vm = kd->vmst;
-	GElf_Ehdr ehdr;
-	Elf *elf;
-	size_t i;
-
-	elf = elf_begin(kd->pmfd, ELF_C_READ, NULL);
-	if (elf == NULL) {
-		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-		return (-1);
-	}
-	if (elf_kind(elf) != ELF_K_ELF) {
-		_kvm_err(kd, kd->program, "invalid core");
-		goto bad;
-	}
-	if (gelf_getehdr(elf, &ehdr) == NULL) {
-		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-		goto bad;
-	}
-	if (ehdr.e_ident[EI_CLASS] != ELFCLASS32 || ehdr.e_machine != EM_386) {
-		_kvm_err(kd, kd->program, "invalid core");
-		goto bad;
-	}
-
-	if (elf_getphdrnum(elf, &vm->phnum) == -1) {
-		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-		goto bad;
-	}
-
-	vm->phdr = calloc(vm->phnum, sizeof(*vm->phdr));
-	if (vm->phdr == NULL) {
-		_kvm_err(kd, kd->program, "failed to allocate phdrs");
-		goto bad;
-	}
-
-	for (i = 0; i < vm->phnum; i++) {
-		if (gelf_getphdr(elf, i, &vm->phdr[i]) == NULL) {
-			_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
-			goto bad;
-		}
-	}
-	elf_end(elf);
-	return (0);
-
-bad:
-	elf_end(elf);
-	return (-1);
-}
 
 /*
  * Translate a physical memory address to a file-offset in the crash-dump.
@@ -161,45 +106,12 @@ _i386_freevtop(kvm_t *kd)
 	kd->vmst = NULL;
 }
 
-int
-_i386_probe(kvm_t *kd, int want_minidump)
-{
-	Elf *elf;
-	GElf_Ehdr ehdr;
-	char minihdr[8];
-
-	/* First check the kernel to ensure it is an i386 image. */
-	if (elf_version(EV_CURRENT) == EV_NONE)
-		return (0);
-	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
-	if (elf == NULL)
-		return (0);
-	if (elf_kind(elf) != ELF_K_ELF)
-		goto bad;
-	if (gelf_getehdr(elf, &ehdr) == NULL)
-		goto bad;
-	if (ehdr.e_ident[EI_CLASS] != ELFCLASS32)
-		goto bad;
-	if (ehdr.e_machine != EM_386)
-		goto bad;
-	elf_end(elf);
-
-	/* Now, check to see if this is a minidump. */
-	if (!kd->rawdump && pread(kd->pmfd, &minihdr, 8, 0) == 8 &&
-	    memcmp(&minihdr, "minidump", 8) == 0)
-		return (want_minidump);
-
-	return (!want_minidump);
-bad:
-	elf_end(elf);
-	return (0);
-}
-
 static int
-_i386_plain_probe(kvm_t *kd)
+_i386_probe(kvm_t *kd)
 {
 
-	return (_i386_probe(kd, 0));
+	return (_kvm_probe_elf_kernel(kd, ELFCLASS32, EM_386) &&
+	    !_kvm_is_minidump(kd));
 }
 
 static int
@@ -219,7 +131,8 @@ _i386_initvtop(kvm_t *kd)
 	kd->vmst->PTD = 0;
 
 	if (kd->rawdump == 0) {
-		if (_i386_readhdrs(kd) == -1)
+		if (_kvm_read_core_phdrs(kd, ELFCLASS32, EM_386,
+		    &kd->vmst->phnum, &kd->vmst->phdr) == -1)
 			return (-1);
 	}
 
@@ -488,7 +401,7 @@ _i386_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 }
 
 struct kvm_arch kvm_i386 = {
-	.ka_probe = _i386_plain_probe,
+	.ka_probe = _i386_probe,
 	.ka_initvtop = _i386_initvtop,
 	.ka_freevtop = _i386_freevtop,
 	.ka_kvatop = _i386_kvatop,

@@ -81,6 +81,4 @@ _Static_assert(PG_FRAME == I386_PG_FRAME, "PG_FRAME mismatch");
 _Static_assert(PG_PS_FRAME == I386_PG_PS_FRAME, "PG_PS_FRAME mismatch");
 #endif
 
-int	 _i386_probe(kvm_t *, int);
-
 #endif /* !__KVM_I386_H__ */

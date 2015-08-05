@@ -117,7 +117,8 @@ static int
 _i386_minidump_probe(kvm_t *kd)
 {
 
-	return (_i386_probe(kd, 1));
+	return (_kvm_probe_elf_kernel(kd, ELFCLASS32, EM_386) &&
+	    _kvm_is_minidump(kd));
 }
 
 static void
