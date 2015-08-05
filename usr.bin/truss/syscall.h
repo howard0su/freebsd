@@ -35,7 +35,7 @@
  * $FreeBSD$
  */
 
-enum Argtype { None = 1, Hex, Octal, Int, LongHex, Name, Ptr, Stat, Ioctl, Quad,
+enum Argtype { None = 1, Hex, Octal, Int, LongHex, Long, Name, Ptr, Stat, Ioctl, Quad,
 	Signal, Sockaddr, StringArray, Timespec, Timeval, Itimerval, Pollfd,
 	Fd_set, Sigaction, Fcntl, Mprot, Mmapflags, Whence, Readlinkres,
 	Sigset, Sigprocmask, Kevent, Sockdomain, Socktype, Open,

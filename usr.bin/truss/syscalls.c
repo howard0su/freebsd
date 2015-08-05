@@ -94,7 +94,7 @@ static const char rcsid[] =
  */
 static struct syscall syscalls[] = {
 	{ .name = "fcntl", .ret_type = 1, .nargs = 3,
-	  .args = { { Int, 0 } , { Fcntl, 1 }, { Fcntlflag | OUT, 2 } } },
+	  .args = { { Int, 0 }, { Fcntl, 1 }, { Fcntlflag | OUT, 2 } } },
 	{ .name = "fork", .ret_type = 1, .nargs = 0 },
 	{ .name = "vfork", .ret_type = 1, .nargs = 0 },
 	{ .name = "rfork", .ret_type = 1, .nargs = 1,
@@ -102,9 +102,9 @@ static struct syscall syscalls[] = {
 	{ .name = "getegid", .ret_type = 1, .nargs = 0 },
 	{ .name = "geteuid", .ret_type = 1, .nargs = 0 },
 	{ .name = "linux_readlink", .ret_type = 1, .nargs = 3,
-	  .args = { { Name, 0 } , { Name | OUT, 1 }, { Int, 2 }}},
+	  .args = { { Name, 0 }, { Name | OUT, 1 }, { Int, 2 }}},
 	{ .name = "linux_socketcall", .ret_type = 1, .nargs = 2,
-	  .args = { { Int, 0 } , { LinuxSockArgs, 1 }}},
+	  .args = { { Int, 0 }, { LinuxSockArgs, 1 }}},
 	{ .name = "getgid", .ret_type = 1, .nargs = 0 },
 	{ .name = "getpid", .ret_type = 1, .nargs = 0 },
 	{ .name = "getpgid", .ret_type = 1, .nargs = 1,
@@ -116,9 +116,9 @@ static struct syscall syscalls[] = {
 	{ .name = "getuid", .ret_type = 1, .nargs = 0 },
 	{ .name = "issetugid", .ret_type = 1, .nargs = 0 },
 	{ .name = "readlink", .ret_type = 1, .nargs = 3,
-	  .args = { { Name, 0 } , { Readlinkres | OUT, 1 }, { Int, 2 } } },
+	  .args = { { Name, 0 }, { Readlinkres | OUT, 1 }, { Int, 2 } } },
 	{ .name = "readlinkat", .ret_type = 1, .nargs = 4,
-	  .args = { { Atfd, 0 }, { Name, 1 } , { Readlinkres | OUT, 2 },
+	  .args = { { Atfd, 0 }, { Name, 1 }, { Readlinkres | OUT, 2 },
 		    { Int, 3 } } },
 	{ .name = "lseek", .ret_type = 2, .nargs = 3,
 	  .args = { { Int, 0 }, { Quad, 1 + QUAD_ALIGN }, { Whence, 1 + QUAD_SLOTS + QUAD_ALIGN } } },
@@ -127,18 +127,18 @@ static struct syscall syscalls[] = {
 	{ .name = "mmap", .ret_type = 2, .nargs = 6,
 	  .args = { { Ptr, 0 }, { Int, 1 }, { Mprot, 2 }, { Mmapflags, 3 }, { Int, 4 }, { Quad, 5 + QUAD_ALIGN } } },
 	{ .name = "linux_mkdir", .ret_type = 1, .nargs = 2,
-	  .args = { { Name | IN, 0} , {Int, 1}}},
+	  .args = { { Name | IN, 0}, {Int, 1}}},
 	{ .name = "mprotect", .ret_type = 1, .nargs = 3,
 	  .args = { { Ptr, 0 }, { Int, 1 }, { Mprot, 2 } } },
 	{ .name = "open", .ret_type = 1, .nargs = 3,
-	  .args = { { Name | IN, 0 } , { Open, 1 }, { Octal, 2 } } },
+	  .args = { { Name | IN, 0 }, { Open, 1 }, { Octal, 2 } } },
 	{ .name = "openat", .ret_type = 1, .nargs = 4,
-	  .args = { { Atfd, 0 }, { Name | IN, 1 } , { Open, 2 },
+	  .args = { { Atfd, 0 }, { Name | IN, 1 }, { Open, 2 },
 		    { Octal, 3 } } },
 	{ .name = "mkdir", .ret_type = 1, .nargs = 2,
 	  .args = { { Name, 0 }, { Octal, 1 } } },
 	{ .name = "mkdirat", .ret_type = 1, .nargs = 3,
-	  .args = { { Atfd, 0 }, { Name, 1 } , { Octal, 2 } } },
+	  .args = { { Atfd, 0 }, { Name, 1 }, { Octal, 2 } } },
 	{ .name = "linux_open", .ret_type = 1, .nargs = 3,
 	  .args = { { Name, 0 }, { Hex, 1 }, { Octal, 2 } } },
 	{ .name = "close", .ret_type = 1, .nargs = 1,
@@ -188,9 +188,9 @@ static struct syscall syscalls[] = {
 	{ .name = "umount", .ret_type = 0, .nargs = 2,
 	  .args = { { Name, 0 }, { Int, 2 } } },
 	{ .name = "fstat", .ret_type = 1, .nargs = 2,
-	  .args = { { Int, 0 }, { Stat | OUT , 1 } } },
+	  .args = { { Int, 0 }, { Stat | OUT, 1 } } },
 	{ .name = "fstatat", .ret_type = 1, .nargs = 4,
-	  .args = { { Atfd, 0 }, { Name | IN, 1 }, { Stat | OUT , 2 },
+	  .args = { { Atfd, 0 }, { Name | IN, 1 }, { Stat | OUT, 2 },
 		    { Atflags, 3 } } },
 	{ .name = "stat", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Stat | OUT, 1 } } },
@@ -268,13 +268,21 @@ static struct syscall syscalls[] = {
 	{ .name = "getitimer", .ret_type = 1, .nargs = 2,
 	  .args = { { Int, 0 }, { Itimerval | OUT, 2 } } },
 	{ .name = "setitimer", .ret_type = 1, .nargs = 3,
-	  .args = { { Int, 0 }, { Itimerval, 1 } , { Itimerval | OUT, 2 } } },
+	  .args = { { Int, 0 }, { Itimerval, 1 }, { Itimerval | OUT, 2 } } },
 	{ .name = "kse_release", .ret_type = 0, .nargs = 1,
 	  .args = { { Timespec, 0 } } },
 	{ .name = "kevent", .ret_type = 0, .nargs = 6,
 	  .args = { { Int, 0 }, { Kevent, 1 }, { Int, 2 }, { Kevent | OUT, 3 }, { Int, 4 }, { Timespec, 5 } } },
+	{ .name = "sigpending", .ret_type = 0, .nargs = 1,
+	  .args = { { Sigset | OUT, 0 } } },
 	{ .name = "sigprocmask", .ret_type = 0, .nargs = 3,
 	  .args = { { Sigprocmask, 0 }, { Sigset, 1 }, { Sigset | OUT, 2 } } },
+	{ .name = "sigreturn", .ret_type = 0, .nargs = 1,
+	  .args = { { Ptr, 0 } } },
+	{ .name = "sigsuspend", .ret_type = 0, .nargs = 1,
+	  .args = { { Sigset | IN, 0 } } },
+	{ .name = "sigtimedwait", .ret_type = 1, .nargs = 3,
+	  .args = { { Sigset | IN, 0 }, { Ptr, 1 }, { Timespec | IN, 2 } } },
 	{ .name = "unmount", .ret_type = 1, .nargs = 2,
 	  .args = { { Name, 0 }, { Int, 1 } } },
 	{ .name = "socket", .ret_type = 1, .nargs = 3,
@@ -323,13 +331,13 @@ static struct syscall syscalls[] = {
 	{ .name = "read", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Int, 2 } } },
 	{ .name = "rename", .ret_type = 1, .nargs = 2,
-	  .args = { { Name , 0 } , { Name, 1 } } },
+	  .args = { { Name, 0 }, { Name, 1 } } },
 	{ .name = "renameat", .ret_type = 1, .nargs = 4,
 	  .args = { { Atfd, 0 }, { Name, 1 }, { Atfd, 2 }, { Name, 3 } } },
 	{ .name = "symlink", .ret_type = 1, .nargs = 2,
-	  .args = { { Name , 0 } , { Name, 1 } } },
+	  .args = { { Name, 0 }, { Name, 1 } } },
 	{ .name = "symlinkat", .ret_type = 1, .nargs = 3,
-	  .args = { { Name , 0 } , { Atfd, 1 }, { Name, 2 } } },
+	  .args = { { Name, 0 }, { Atfd, 1 }, { Name, 2 } } },
 	{ .name = "posix_openpt", .ret_type = 1, .nargs = 1,
 	  .args = { { Open, 0 } } },
 	{ .name = "wait4", .ret_type = 1, .nargs = 4,
@@ -345,6 +353,10 @@ static struct syscall syscalls[] = {
 	{ .name = "_umtx_op", .ret_type = 1, .nargs = 5,
 	  .args = { { Ptr, 0 }, { Umtxop, 1 }, { LongHex, 2 }, { Ptr, 3 },
 		    { Ptr, 4 } } },
+	{ .name = "thr_kill", .ret_type = 0, .nargs = 2,
+	  .args = { { Long, 0 }, { Signal, 1 } } },
+	{ .name = "thr_self", .ret_type = 0, .nargs = 1,
+	  .args = { { Ptr, 0 } } },
 	{ .name = 0 },
 };
 
@@ -716,7 +728,10 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		break;
 	case LongHex:
 		asprintf(&tmp, "0x%lx", args[sc->offset]);
-		break;		
+		break;
+	case Long:
+		asprintf(&tmp, "%ld", args[sc->offset]);
+		break;
 	case Name: {
 		/* NULL-terminated string. */
 		char *tmp2;
@@ -842,7 +857,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timespec ts;
 		if (get_struct(pid, (void *)args[sc->offset], &ts,
 		    sizeof(ts)) != -1)
-			asprintf(&tmp, "{%ld.%09ld }", (long)ts.tv_sec,
+			asprintf(&tmp, "{%ld.%09ld}", (long)ts.tv_sec,
 			    ts.tv_nsec);
 		else
 			asprintf(&tmp, "0x%lx", args[sc->offset]);
@@ -852,16 +867,17 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timespec ts[2];
 		FILE *fp;
 		size_t len;
-		char c;
+		const char *sep;
 		unsigned int i;
 
 		if (get_struct(pid, (void *)args[sc->offset], &ts, sizeof(ts))
 		    != -1) {
 			fp = open_memstream(&tmp, &len);
-			c = '{';
+			fputc('{', fp);
+			sep = "";
 			for (i = 0; i < nitems(ts); i++) {
-				fputc(c, fp);
-				c = ',';
+				fputs(sep, fp);
+				sep = ", ";
 				switch (ts[i].tv_nsec) {
 				case UTIME_NOW:
 					fprintf(fp, "UTIME_NOW");
@@ -874,7 +890,6 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 					    (long)ts[i].tv_sec, ts[i].tv_nsec);
 					break;
 				}
-				fputc(' ', fp);
 			}
 			fputc('}', fp);
 			fclose(fp);
@@ -1082,8 +1097,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 			asprintf(&tmp, "0x%lx", args[sc->offset]);
 			break;
 		}
-		tmp = malloc(sys_nsig * 8); /* 7 bytes avg per signal name */
+		tmp = malloc(sys_nsig * 8 + 2); /* 7 bytes avg per signal name */
 		used = 0;
+		tmp[used++] = '{';
 		for (i = 1; i < sys_nsig; i++) {
 			if (sigismember(&ss, i)) {
 				signame = strsig(i);
@@ -1091,10 +1107,10 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				free(signame);
 			}
 		}
-		if (used)
-			tmp[used-1] = 0;
-		else
-			strcpy(tmp, "0x0");
+		if (tmp[used - 1] == '|')
+			used--;
+		tmp[used++] = '}';
+		tmp[used++] = '\0';
 		break;
 	}
 	case Sigprocmask: {
