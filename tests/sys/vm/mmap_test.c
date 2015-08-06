@@ -180,14 +180,15 @@ ATF_TC_BODY(mmap__dev_zero, tc)
 	size_t i;
 	int fd;
 
-	ATF_REQUIRE((fd = open("/dev/zero", O_RDWR)) >= 0);
+	ATF_REQUIRE((fd = open("/dev/zero", O_RDONLY)) >= 0);
 
-	p1 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+	p1 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_PRIVATE, fd,
 	    0);
 	ATF_REQUIRE(p1 != MAP_FAILED);
 
-	p2 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+	p2 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_PRIVATE, fd,
 	    0);
+	ATF_REQUIRE(p2 != MAP_FAILED);
 
 	for (i = 0; i < getpagesize(); i++)
 		ATF_REQUIRE_EQ_MSG(0, p1[i], "byte at p1[%zu] is %x", i, p1[i]);
@@ -202,8 +203,9 @@ ATF_TC_BODY(mmap__dev_zero, tc)
 
 	ATF_REQUIRE(p1[0] == 1);
 
-	p3 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+	p3 = mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_PRIVATE, fd,
 	    0);
+	ATF_REQUIRE(p3 != MAP_FAILED);
 
 	ATF_REQUIRE(p3[0] == 0);
 }
