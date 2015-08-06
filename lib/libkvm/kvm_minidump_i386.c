@@ -32,7 +32,6 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/endian.h>
-#include <sys/fnv_hash.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,50 +47,12 @@ __FBSDID("$FreeBSD$");
 
 #define	i386_round_page(x)	roundup2((kvaddr_t)(x), I386_PAGE_SIZE)
 
-struct hpte {
-	struct hpte *next;
-	uint64_t pa;
-	int64_t off;
-};
-
-#define HPT_SIZE 1024
-
 struct vmstate {
 	struct minidumphdr hdr;
-	void *hpt_head[HPT_SIZE];
+	struct hpt hpt;
 	uint32_t *bitmap;
 	void *ptemap;
 };
-
-static void
-hpt_insert(kvm_t *kd, uint64_t pa, int64_t off)
-{
-	struct hpte *hpte;
-	uint32_t fnv = FNV1_32_INIT;
-
-	fnv = fnv_32_buf(&pa, sizeof(pa), fnv);
-	fnv &= (HPT_SIZE - 1);
-	hpte = malloc(sizeof(*hpte));
-	hpte->pa = pa;
-	hpte->off = off;
-	hpte->next = kd->vmst->hpt_head[fnv];
-	kd->vmst->hpt_head[fnv] = hpte;
-}
-
-static int64_t
-hpt_find(kvm_t *kd, uint64_t pa)
-{
-	struct hpte *hpte;
-	uint32_t fnv = FNV1_32_INIT;
-
-	fnv = fnv_32_buf(&pa, sizeof(pa), fnv);
-	fnv &= (HPT_SIZE - 1);
-	for (hpte = kd->vmst->hpt_head[fnv]; hpte != NULL; hpte = hpte->next) {
-		if (pa == hpte->pa)
-			return (hpte->off);
-	}
-	return (-1);
-}
 
 static int
 inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
@@ -106,7 +67,7 @@ inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
 		for (; bits != 0; bits >>= 1, pa += I386_PAGE_SIZE) {
 			if ((bits & 1) == 0)
 				continue;
-			hpt_insert(kd, pa, off);
+			_kvm_hpt_insert(&kd->vmst->hpt, pa, off);
 			off += I386_PAGE_SIZE;
 		}
 	}
@@ -224,7 +185,7 @@ _i386_minidump_vatop_pae(kvm_t *kd, kvaddr_t va, off_t *pa)
 			goto invalid;
 		}
 		a = pte & I386_PG_FRAME_PAE;
-		ofs = hpt_find(kd, a);
+		ofs = _kvm_hpt_find(&vm->hpt, a);
 		if (ofs == -1) {
 			_kvm_err(kd, kd->program,
 	    "_i386_minidump_vatop_pae: physical address 0x%jx not in minidump",
@@ -269,7 +230,7 @@ _i386_minidump_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 			goto invalid;
 		}
 		a = pte & I386_PG_FRAME;
-		ofs = hpt_find(kd, a);
+		ofs = _kvm_hpt_find(&vm->hpt, a);
 		if (ofs == -1) {
 			_kvm_err(kd, kd->program,
 	    "_i386_minidump_vatop: physical address 0x%jx not in minidump",

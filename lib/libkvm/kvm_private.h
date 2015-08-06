@@ -100,6 +100,22 @@ struct __kvm {
 };
 
 /*
+ * Page table hash used by minidump backends to map physical addresses
+ * to file offsets.
+ */
+struct hpte {
+	struct hpte	*next;
+	uint64_t	pa;
+	off_t		off;
+};
+
+#define HPT_SIZE 1024
+
+struct hpt {
+	struct hpte	*hpt_head[HPT_SIZE];
+};
+
+/*
  * Functions used internally by kvm, but across kvm modules.
  */
 void	 _kvm_err(kvm_t *kd, const char *program, const char *fmt, ...)
@@ -127,6 +143,8 @@ int	 _kvm_probe_elf_kernel(kvm_t *, int, int);
 int	 _kvm_is_minidump(kvm_t *);
 int	 _kvm_read_core_phdrs(kvm_t *, int, int, size_t *, GElf_Phdr **);
 unsigned char _kvm_elf_kernel_data_encoding(kvm_t *);
+void	 _kvm_hpt_insert(struct hpt *, uint64_t, off_t);
+off_t	 _kvm_hpt_find(struct hpt *, uint64_t);
 
 #if 0
 #if defined(__aarch64__) || defined(__amd64__) || defined(__arm__) || \

@@ -41,6 +41,7 @@ static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
+#include <sys/fnv_hash.h>
 
 #define	_WANT_VNET
 
@@ -298,6 +299,36 @@ _kvm_read_core_phdrs(kvm_t *kd, int class, int machine, size_t *phnump,
 
 bad:
 	elf_end(elf);
+	return (-1);
+}
+
+void
+_kvm_hpt_insert(struct hpt *hpt, uint64_t pa, off_t off)
+{
+	struct hpte *hpte;
+	uint32_t fnv = FNV1_32_INIT;
+
+	fnv = fnv_32_buf(&pa, sizeof(pa), fnv);
+	fnv &= (HPT_SIZE - 1);
+	hpte = malloc(sizeof(*hpte));
+	hpte->pa = pa;
+	hpte->off = off;
+	hpte->next = hpt->hpt_head[fnv];
+	hpt->hpt_head[fnv] = hpte;
+}
+
+off_t
+_kvm_hpt_find(struct hpt *hpt, uint64_t pa)
+{
+	struct hpte *hpte;
+	uint32_t fnv = FNV1_32_INIT;
+
+	fnv = fnv_32_buf(&pa, sizeof(pa), fnv);
+	fnv &= (HPT_SIZE - 1);
+	for (hpte = hpt->hpt_head[fnv]; hpte != NULL; hpte = hpte->next) {
+		if (pa == hpte->pa)
+			return (hpte->off);
+	}
 	return (-1);
 }
 
