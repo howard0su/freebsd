@@ -32,19 +32,10 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/endian.h>
-#if 0
-#include <sys/user.h>
-#include <sys/proc.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#if 0
-#include <nlist.h>
-#endif
 #include <kvm.h>
 
 #include "../../sys/amd64/include/minidump.h"

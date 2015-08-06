@@ -121,11 +121,6 @@ struct hpt {
 void	 _kvm_err(kvm_t *kd, const char *program, const char *fmt, ...)
 	    __printflike(3, 4);
 void	 _kvm_freeprocs(kvm_t *kd);
-#if 0
-void	 _kvm_freevtop(kvm_t *);
-int	 _kvm_initvtop(kvm_t *);
-int	 _kvm_kvatop(kvm_t *, u_long, off_t *);
-#endif
 void	*_kvm_malloc(kvm_t *kd, size_t);
 int	 _kvm_nlist(kvm_t *, struct kvm_nlist *, int);
 void	*_kvm_realloc(kvm_t *kd, void *, size_t);
@@ -145,12 +140,3 @@ int	 _kvm_read_core_phdrs(kvm_t *, int, int, size_t *, GElf_Phdr **);
 unsigned char _kvm_elf_kernel_data_encoding(kvm_t *);
 void	 _kvm_hpt_insert(struct hpt *, uint64_t, off_t);
 off_t	 _kvm_hpt_find(struct hpt *, uint64_t);
-
-#if 0
-#if defined(__aarch64__) || defined(__amd64__) || defined(__arm__) || \
-    defined(__i386__) || defined(__mips__)
-void	 _kvm_minidump_freevtop(kvm_t *);
-int	 _kvm_minidump_initvtop(kvm_t *);
-int	 _kvm_minidump_kvatop(kvm_t *, u_long, off_t *);
-#endif
-#endif
