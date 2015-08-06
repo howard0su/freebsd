@@ -50,8 +50,8 @@ typedef uint32_t	arm_pd_entry_t;
 typedef uint32_t	arm_pt_entry_t;
 
 #define	ARM_PAGE_SHIFT	12
-#define	ARM_PAGE_SIZE	(1 << PAGE_SHIFT)	/* Page size */
-#define	ARM_PAGE_MASK	(PAGE_SIZE - 1)
+#define	ARM_PAGE_SIZE	(1 << ARM_PAGE_SHIFT)	/* Page size */
+#define	ARM_PAGE_MASK	(ARM_PAGE_SIZE - 1)
 
 #define	ARM_L1_TABLE_SIZE	0x4000		/* 16K */
 

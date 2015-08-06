@@ -193,26 +193,16 @@ _arm_initvtop(kvm_t *kd)
 #define l2pte_index(v)		(((v) & ARM_L2_ADDR_BITS) >> ARM_L2_S_SHIFT)
 
 
-static arm_pd_entry_t
-_arm_read_pde(kvm_t *kd, arm_pd_entry_t pde)
+static uint32_t
+_arm32toh(kvm_t *kd, uint32_t val)
 {
 
 	if (kd->vmst->ei_data == ELFDATA2LSB)
-		return (le32toh(pde));
+		return (le32toh(val));
 	else
-		return (be32toh(pde));
+		return (be32toh(val));
 }
-
-static arm_pt_entry_t
-_arm_read_pte(kvm_t *kd, arm_pt_entry_t pte)
-{
-
-	if (kd->vmst->ei_data == ELFDATA2LSB)
-		return (le32toh(pte));
-	else
-		return (be32toh(pte));
-}
-
+	
 static int
 _arm_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 {
@@ -224,7 +214,7 @@ _arm_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 
 	if (vm->l1pt == NULL)
 		return (_kvm_pa2off(kd, va, pa, ARM_PAGE_SIZE));
-	pd = _arm_read_pde(kd, vm->l1pt[ARM_L1_IDX(va)]);
+	pd = _arm32toh(kd, vm->l1pt[ARM_L1_IDX(va)]);
 	if (!l1pte_valid(pd))
 		goto invalid;
 	if (l1pte_section_p(pd)) {
@@ -238,7 +228,7 @@ _arm_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		_kvm_syserr(kd, kd->program, "_arm_kvatop: pread");
 		goto invalid;
 	}
-	pte = _arm_read_pte(kd, pte);
+	pte = _arm32toh(kd, pte);
 	if (!l2pte_valid(pte)) {
 		goto invalid;
 	}
