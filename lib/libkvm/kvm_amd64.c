@@ -72,7 +72,7 @@ _kvm_pa2off(kvm_t *kd, uint64_t pa, off_t *ofs)
 {
 	struct vmstate *vm = kd->vmst;
 	GElf_Phdr *p;
-	int n;
+	size_t n;
 
 	if (kd->rawdump) {
 		*ofs = pa;
