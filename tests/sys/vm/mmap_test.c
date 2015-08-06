@@ -110,9 +110,8 @@ checked_mmap(int prot, int flags, int fd, int error, const char *msg)
 ATF_TC_WITHOUT_HEAD(mmap__bad_arguments);
 ATF_TC_BODY(mmap__bad_arguments, tc)
 {
-	int nullfd, shmfd, zerofd;
+	int shmfd, zerofd;
 
-	ATF_REQUIRE((nullfd = open("/dev/null", O_RDWR)) >= 0);
 	ATF_REQUIRE((shmfd = shm_open(SHM_ANON, O_RDWR, 0644)) >= 0);
 	ATF_REQUIRE(ftruncate(shmfd, getpagesize()) == 0);
 	ATF_REQUIRE((zerofd = open("/dev/zero", O_RDONLY)) >= 0);
@@ -159,18 +158,26 @@ ATF_TC_BODY(mmap__bad_arguments, tc)
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, EINVAL,
 	    "MAP_ANON with fd != -1");
 
-	/*
-	 * Most character devices other than /dev/zero should require
-	 * shared mappings.  However, there is no
-	 * universally-available character device that permits user
-	 * mappings, so this cannot be checked.
-	 */
-	checked_mmap(PROT_READ, MAP_PRIVATE, nullfd, EINVAL,
-	    "MAP_PRIVATE of /dev/null");
-
 	/* Writable MAP_SHARED should fail on read-only descriptors. */
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_SHARED, zerofd, EACCES,
 	    "MAP_SHARED of read-only /dev/zero");
+}
+
+ATF_TC_WITHOUT_HEAD(mmap__cdev_private);
+ATF_TC_BODY(mmap__cdev_private, tc)
+{
+	int fd;
+
+	fd = open("/dev/mem", O_RDONLY);
+	if (fd == -1)
+		atf_tc_skip("Could not open /dev/mem");
+
+	/*
+	 * Character devices other than /dev/zero do not support private
+	 * mappings.
+	 */
+	checked_mmap(PROT_READ, MAP_PRIVATE, fd, EINVAL,
+	    "MAP_PRIVATE of /dev/mem");
 }
 
 ATF_TC_WITHOUT_HEAD(mmap__dev_zero);
@@ -215,6 +222,7 @@ ATF_TP_ADD_TCS(tp)
 
 	ATF_TP_ADD_TC(tp, mmap__map_at_zero);
 	ATF_TP_ADD_TC(tp, mmap__bad_arguments);
+	ATF_TP_ADD_TC(tp, mmap__cdev_private);
 	ATF_TP_ADD_TC(tp, mmap__dev_zero);
 
 	return (atf_no_error());
