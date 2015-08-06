@@ -126,6 +126,7 @@ kvaddr_t _kvm_dpcpu_validaddr(kvm_t *, kvaddr_t);
 int	 _kvm_probe_elf_kernel(kvm_t *, int, int);
 int	 _kvm_is_minidump(kvm_t *);
 int	 _kvm_read_core_phdrs(kvm_t *, int, int, size_t *, GElf_Phdr **);
+unsigned char _kvm_elf_kernel_data_encoding(kvm_t *);
 
 #if 0
 #if defined(__aarch64__) || defined(__amd64__) || defined(__arm__) || \

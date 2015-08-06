@@ -213,6 +213,23 @@ bad:
 	
 }
 
+unsigned char
+_kvm_elf_kernel_data_encoding(kvm_t *kd)
+{
+	Elf *elf;
+	GElf_Ehdr ehdr;
+
+	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
+	if (elf == NULL)
+		return (ELFDATANONE);
+	if (gelf_getehdr(elf, &ehdr) == NULL) {
+		elf_end(elf);
+		return (ELFDATANONE);
+	}
+	elf_end(elf);
+	return (ehdr.e_ident[EI_DATA]);
+}
+
 int
 _kvm_is_minidump(kvm_t *kd)
 {
