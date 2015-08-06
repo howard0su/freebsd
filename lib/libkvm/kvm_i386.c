@@ -155,7 +155,7 @@ _i386_initvtop(kvm_t *kd)
 	if (kvm_nlist2(kd, nl) == 0) {
 		i386_physaddr_pae_t pa64;
 
-		if (kvm_read(kd, (nl[0].n_value - kernbase), &pa,
+		if (kvm_read2(kd, (nl[0].n_value - kernbase), &pa,
 		    sizeof(pa)) != sizeof(pa)) {
 			_kvm_err(kd, kd->program, "cannot read IdlePDPT");
 			return (-1);
@@ -163,14 +163,14 @@ _i386_initvtop(kvm_t *kd)
 		pa = le32toh(pa);
 		PTD = _kvm_malloc(kd, 4 * I386_PAGE_SIZE);
 		for (i = 0; i < 4; i++) {
-			if (kvm_read(kd, pa + (i * sizeof(pa64)), &pa64,
+			if (kvm_read2(kd, pa + (i * sizeof(pa64)), &pa64,
 			    sizeof(pa64)) != sizeof(pa64)) {
 				_kvm_err(kd, kd->program, "Cannot read PDPT");
 				free(PTD);
 				return (-1);
 			}
 			pa64 = le64toh(pa64);
-			if (kvm_read(kd, pa64 & I386_PG_FRAME_PAE,
+			if (kvm_read2(kd, pa64 & I386_PG_FRAME_PAE,
 			    PTD + (i * I386_PAGE_SIZE), I386_PAGE_SIZE) !=
 			    I386_PAGE_SIZE) {
 				_kvm_err(kd, kd->program, "cannot read PDPT");
@@ -188,14 +188,14 @@ _i386_initvtop(kvm_t *kd)
 			_kvm_err(kd, kd->program, "bad namelist");
 			return (-1);
 		}
-		if (kvm_read(kd, (nl[0].n_value - kernbase), &pa,
+		if (kvm_read2(kd, (nl[0].n_value - kernbase), &pa,
 		    sizeof(pa)) != sizeof(pa)) {
 			_kvm_err(kd, kd->program, "cannot read IdlePTD");
 			return (-1);
 		}
 		pa = le32toh(pa);
 		PTD = _kvm_malloc(kd, I386_PAGE_SIZE);
-		if (kvm_read(kd, pa, PTD, I386_PAGE_SIZE) != I386_PAGE_SIZE) {
+		if (kvm_read2(kd, pa, PTD, I386_PAGE_SIZE) != I386_PAGE_SIZE) {
 			_kvm_err(kd, kd->program, "cannot read PTD");
 			return (-1);
 		}

@@ -146,14 +146,14 @@ _amd64_initvtop(kvm_t *kd)
 		_kvm_err(kd, kd->program, "bad namelist - no KPML4phys");
 		return (-1);
 	}
-	if (kvm_read(kd, (nl[0].n_value - kernbase), &pa, sizeof(pa)) !=
+	if (kvm_read2(kd, (nl[0].n_value - kernbase), &pa, sizeof(pa)) !=
 	    sizeof(pa)) {
 		_kvm_err(kd, kd->program, "cannot read KPML4phys");
 		return (-1);
 	}
 	pa = le64toh(pa);
 	PML4 = _kvm_malloc(kd, AMD64_PAGE_SIZE);
-	if (kvm_read(kd, pa, PML4, AMD64_PAGE_SIZE) != AMD64_PAGE_SIZE) {
+	if (kvm_read2(kd, pa, PML4, AMD64_PAGE_SIZE) != AMD64_PAGE_SIZE) {
 		_kvm_err(kd, kd->program, "cannot read KPML4phys");
 		return (-1);
 	}
