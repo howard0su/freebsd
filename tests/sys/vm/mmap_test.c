@@ -110,23 +110,29 @@ checked_mmap(int prot, int flags, int fd, int error, const char *msg)
 ATF_TC_WITHOUT_HEAD(mmap__bad_arguments);
 ATF_TC_BODY(mmap__bad_arguments, tc)
 {
-	int fd;
+	int nullfd, shmfd, zerofd;
 
-	ATF_REQUIRE((fd = shm_open(SHM_ANON, O_RDWR, 0644)) >= 0);
-	ATF_REQUIRE(ftruncate(fd, getpagesize()) == 0);
+	ATF_REQUIRE((nullfd = open("/dev/null", O_RDWR)) >= 0);
+	ATF_REQUIRE((shmfd = shm_open(SHM_ANON, O_RDWR, 0644)) >= 0);
+	ATF_REQUIRE(ftruncate(shmfd, getpagesize()) == 0);
+	ATF_REQUIRE((zerofd = open("/dev/zero", O_RDONLY)) >= 0);
 
 	/* These should work. */
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_ANON, -1, 0,
 	    "simple MAP_ANON");
-	checked_mmap(PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0,
+	checked_mmap(PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0,
 	    "simple shm fd shared");
-	checked_mmap(PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0,
+	checked_mmap(PROT_READ | PROT_WRITE, MAP_PRIVATE, shmfd, 0,
 	    "simple shm fd private");
+	checked_mmap(PROT_READ, MAP_SHARED, zerofd, 0,
+	    "simple /dev/zero shared");
+	checked_mmap(PROT_READ | PROT_WRITE, MAP_PRIVATE, zerofd, 0,
+	    "simple /dev/zero private");
 
 	/* Extra PROT flags. */
 	checked_mmap(PROT_READ | PROT_WRITE | 0x100000, MAP_ANON, -1, EINVAL,
 	    "MAP_ANON with extra PROT flags");
-	checked_mmap(0xffff, MAP_SHARED, fd, EINVAL,
+	checked_mmap(0xffff, MAP_SHARED, shmfd, EINVAL,
 	    "shm fd with garbage PROT");
 
 	/* Undefined flag. */
@@ -136,11 +142,11 @@ ATF_TC_BODY(mmap__bad_arguments, tc)
 	/* Both MAP_SHARED and MAP_PRIVATE */
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE |
 	    MAP_SHARED, -1, EINVAL, "MAP_ANON with both SHARED and PRIVATE");
-	checked_mmap(PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_SHARED, fd,
+	checked_mmap(PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_SHARED, shmfd,
 	    EINVAL, "shm fd with both SHARED and PRIVATE");
 
 	/* At least one of MAP_SHARED or MAP_PRIVATE without ANON */
-	checked_mmap(PROT_READ | PROT_WRITE, 0, fd, EINVAL,
+	checked_mmap(PROT_READ | PROT_WRITE, 0, shmfd, EINVAL,
 	    "shm fd without sharing flag");
 
 	/* MAP_ANON with either sharing flag (impacts fork). */
@@ -152,6 +158,19 @@ ATF_TC_BODY(mmap__bad_arguments, tc)
 	/* MAP_ANON should require an fd of -1. */
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, 0, EINVAL,
 	    "MAP_ANON with fd != -1");
+
+	/*
+	 * Most character devices other than /dev/zero should require
+	 * shared mappings.  However, there is no
+	 * universally-available character device that permits user
+	 * mappings, so this cannot be checked.
+	 */
+	checked_mmap(PROT_READ, MAP_PRIVATE, nullfd, EINVAL,
+	    "MAP_PRIVATE of /dev/null");
+
+	/* Writable MAP_SHARED should fail on read-only descriptors. */
+	checked_mmap(PROT_READ | PROT_WRITE, MAP_SHARED, zerofd, EACCES,
+	    "MAP_SHARED of read-only /dev/zero");
 }
 
 ATF_TP_ADD_TCS(tp)
