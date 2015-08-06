@@ -140,3 +140,4 @@ int	 _kvm_read_core_phdrs(kvm_t *, int, int, size_t *, GElf_Phdr **);
 unsigned char _kvm_elf_kernel_data_encoding(kvm_t *);
 void	 _kvm_hpt_insert(struct hpt *, uint64_t, off_t);
 off_t	 _kvm_hpt_find(struct hpt *, uint64_t);
+void	 _kvm_hpt_free(struct hpt *);

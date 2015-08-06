@@ -87,6 +87,7 @@ _amd64_minidump_freevtop(kvm_t *kd)
 {
 	struct vmstate *vm = kd->vmst;
 
+	_kvm_hpt_free(&vm->hpt);
 	if (vm->bitmap)
 		free(vm->bitmap);
 	if (vm->page_map)

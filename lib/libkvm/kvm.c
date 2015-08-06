@@ -332,6 +332,20 @@ _kvm_hpt_find(struct hpt *hpt, uint64_t pa)
 	return (-1);
 }
 
+void
+_kvm_hpt_free(struct hpt *hpt)
+{
+	struct hpte *hpte, *next;
+	int i;
+
+	for (i = 0; i < HPT_SIZE; i++) {
+		for (hpte = hpt->hpt_head[i]; hpte != NULL; hpte = next) {
+			next = hpte->next;
+			free(hpte);
+		}
+	}
+}
+
 static kvm_t *
 _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 {
