@@ -35,16 +35,6 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/endian.h>
 #include <sys/param.h>
-#if 0
-#ifndef CROSS_LIBKVM
-#include <sys/user.h>
-#endif
-#include <sys/proc.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <sys/fnv_hash.h>
-#include <nlist.h>
-#endif
 #include <kvm.h>
 #include <limits.h>
 #include <stdint.h>
