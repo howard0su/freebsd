@@ -91,7 +91,7 @@ _kvm_vnet_selectpid(kvm_t *kd, pid_t pid)
 	/*
 	 * XXX: This only works for native kernels for now.
 	 */
-	if (!ISALIVE(kd) && !kd->arch->ka_native)
+	if (!kvm_native(kd))
 		return (-1);
 
 	/*

@@ -87,7 +87,7 @@ kvm_fdnlist(kvm_t *kd, struct kvm_nlist *list)
 	kvaddr_t addr;
 	int error, nfail;
 
-	if (kd->arch->ka_native) {
+	if (kd->arch->ka_native(kd)) {
 		struct nlist *nl;
 		int count, i;
 
@@ -384,7 +384,7 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 	/*
 	 * Non-native kernels require a symbol resolver.
 	 */
-	if (!kd->arch->ka_native && kd->resolve_symbol == NULL) {
+	if (!kd->arch->ka_native(kd) && kd->resolve_symbol == NULL) {
 		_kvm_err(kd, kd->program,
 		    "non-native kernel requires a symbol resolver");
 		goto failed;
@@ -697,7 +697,7 @@ kvm_nlist(kvm_t *kd, struct nlist *nl)
 	 * Avoid reporting truncated addresses by failing for non-native
 	 * cores.
 	 */
-	if (!ISALIVE(kd) && !kd->arch->ka_native) {
+	if (!kvm_native(kd)) {
 		_kvm_err(kd, kd->program, "kvm_nlist of non-native vmcore");
 		return (-1);
 	}
@@ -822,5 +822,5 @@ kvm_native(kvm_t *kd)
 
 	if (ISALIVE(kd))
 		return (1);
-	return (kd->arch->ka_native);
+	return (kd->arch->ka_native(kd));
 }

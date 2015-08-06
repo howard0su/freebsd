@@ -234,7 +234,7 @@ _kvm_dpcpu_init(kvm_t *kd)
 	/*
 	 * XXX: This only works for native kernels for now.
 	 */
-	if (!ISALIVE(kd) && !kd->arch->ka_native)
+	if (!kvm_native(kd))
 		return (-1);
 
 	/*

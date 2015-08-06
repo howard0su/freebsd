@@ -43,7 +43,7 @@ struct kvm_arch {
 	void	(*ka_freevtop)(kvm_t *);
 	int	(*ka_kvatop)(kvm_t *, kvaddr_t, off_t *);
 	int	(*ka_uvatop)(kvm_t *, const struct proc *, kvaddr_t, off_t *);
-	int	ka_native;
+	int	(*ka_native)(kvm_t *);
 };
 
 #define	KVM_ARCH(ka)	DATA_SET(kvm_arch, ka)

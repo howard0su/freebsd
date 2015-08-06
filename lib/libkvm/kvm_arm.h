@@ -115,4 +115,6 @@ _Static_assert(L2_TYPE_MASK == ARM_L2_TYPE_MASK, "L2_TYPE_MASK mismatch");
 _Static_assert(L2_ADDR_BITS == ARM_L2_ADDR_BITS, "L2_ADDR_BITS mismatch");
 #endif
 
+int	_arm_native(kvm_t *);
+
 #endif /* !__KVM_ARM_H__ */

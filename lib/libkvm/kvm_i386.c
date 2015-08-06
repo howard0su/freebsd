@@ -400,14 +400,23 @@ _i386_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		return (_i386_vatop(kd, va, pa));
 }
 
+int
+_i386_native(kvm_t *kd)
+{
+
+#ifdef __i386__
+	return (1);
+#else
+	return (0);
+#endif
+}
+
 struct kvm_arch kvm_i386 = {
 	.ka_probe = _i386_probe,
 	.ka_initvtop = _i386_initvtop,
 	.ka_freevtop = _i386_freevtop,
 	.ka_kvatop = _i386_kvatop,
-#ifdef __i386__
-	.ka_native = 1,
-#endif
+	.ka_native = _i386_native,
 };
 
 KVM_ARCH(kvm_i386);

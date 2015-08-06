@@ -309,9 +309,7 @@ struct kvm_arch kvm_i386_minidump = {
 	.ka_initvtop = _i386_minidump_initvtop,
 	.ka_freevtop = _i386_minidump_freevtop,
 	.ka_kvatop = _i386_minidump_kvatop,
-#ifdef __i386__
-	.ka_native = 1,
-#endif
+	.ka_native = _i386_native,
 };
 
 KVM_ARCH(kvm_i386_minidump);

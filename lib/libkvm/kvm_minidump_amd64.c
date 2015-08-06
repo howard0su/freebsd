@@ -379,9 +379,7 @@ struct kvm_arch kvm_amd64_minidump = {
 	.ka_initvtop = _amd64_minidump_initvtop,
 	.ka_freevtop = _amd64_minidump_freevtop,
 	.ka_kvatop = _amd64_minidump_kvatop,
-#ifdef __amd64__
-	.ka_native = 1,
-#endif
+	.ka_native = _amd64_native,
 };
 
 KVM_ARCH(kvm_amd64_minidump);

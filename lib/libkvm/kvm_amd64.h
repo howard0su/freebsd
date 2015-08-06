@@ -90,4 +90,6 @@ _Static_assert(PG_FRAME == AMD64_PG_FRAME, "PG_FRAME mismatch");
 _Static_assert(PG_PS_FRAME == AMD64_PG_PS_FRAME, "PG_PS_FRAME mismatch");
 #endif
 
+int	_amd64_native(kvm_t *);
+
 #endif /* !__KVM_AMD64_H__ */

@@ -271,14 +271,33 @@ _kvm_mdopen(kvm_t *kd)
 }
 #endif
 
+int
+_arm_native(kvm_t *kd)
+{
+
+#ifdef __arm__
+	unsigned char ei_data;
+
+	if (kd->vmst != NULL)
+		ei_data = kd->vmst->ei_data;
+	else
+		ei_data = _kvm_elf_kernel_data_encoding(kd);
+#if _BYTE_ORDER == _LITTLE_ENDIAN
+	return (ei_data == ELFDATA2LSB);
+#else
+	return (ei_data == ELFDATA2MSB);
+#endif
+#else
+	return (0);
+#endif
+}
+
 struct kvm_arch kvm_arm = {
 	.ka_probe = _arm_probe,
 	.ka_initvtop = _arm_initvtop,
 	.ka_freevtop = _arm_freevtop,
 	.ka_kvatop = _arm_kvatop,
-#ifdef __arm__
-	.ka_native = 1,
-#endif
+	.ka_native = _arm_native,
 };
 
 KVM_ARCH(kvm_arm);
