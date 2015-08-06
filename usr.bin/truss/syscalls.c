@@ -127,7 +127,7 @@ static struct syscall syscalls[] = {
 	{ .name = "mmap", .ret_type = 2, .nargs = 6,
 	  .args = { { Ptr, 0 }, { Int, 1 }, { Mprot, 2 }, { Mmapflags, 3 }, { Int, 4 }, { Quad, 5 + QUAD_ALIGN } } },
 	{ .name = "linux_mkdir", .ret_type = 1, .nargs = 2,
-	  .args = { { Name | IN, 0}, {Int, 1}}},
+	  .args = { { Name | IN, 0}, { Int, 1}}},
 	{ .name = "mprotect", .ret_type = 1, .nargs = 3,
 	  .args = { { Ptr, 0 }, { Int, 1 }, { Mprot, 2 } } },
 	{ .name = "open", .ret_type = 1, .nargs = 3,
@@ -869,7 +869,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timespec ts;
 		if (get_struct(pid, (void *)args[sc->offset], &ts,
 		    sizeof(ts)) != -1)
-			asprintf(&tmp, "{%ld.%09ld}", (long)ts.tv_sec,
+			asprintf(&tmp, "{ %ld.%09ld }", (long)ts.tv_sec,
 			    ts.tv_nsec);
 		else
 			asprintf(&tmp, "0x%lx", args[sc->offset]);
@@ -885,7 +885,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		if (get_struct(pid, (void *)args[sc->offset], &ts, sizeof(ts))
 		    != -1) {
 			fp = open_memstream(&tmp, &len);
-			fputc('{', fp);
+			fputs("{ ", fp);
 			sep = "";
 			for (i = 0; i < nitems(ts); i++) {
 				fputs(sep, fp);
@@ -903,7 +903,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 					break;
 				}
 			}
-			fputc('}', fp);
+			fputs(" }", fp);
 			fclose(fp);
 		} else
 			asprintf(&tmp, "0x%lx", args[sc->offset]);
@@ -913,7 +913,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timeval tv;
 		if (get_struct(pid, (void *)args[sc->offset], &tv, sizeof(tv))
 		    != -1)
-			asprintf(&tmp, "{%ld.%06ld }", (long)tv.tv_sec,
+			asprintf(&tmp, "{ %ld.%06ld }", (long)tv.tv_sec,
 			    tv.tv_usec);
 		else
 			asprintf(&tmp, "0x%lx", args[sc->offset]);
@@ -923,7 +923,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timeval tv[2];
 		if (get_struct(pid, (void *)args[sc->offset], &tv, sizeof(tv))
 		    != -1)
-			asprintf(&tmp, "{%ld.%06ld, %ld.%06ld }",
+			asprintf(&tmp, "{ %ld.%06ld, %ld.%06ld }",
 			    (long)tv[0].tv_sec, tv[0].tv_usec,
 			    (long)tv[1].tv_sec, tv[1].tv_usec);
 		else
@@ -934,7 +934,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct itimerval itv;
 		if (get_struct(pid, (void *)args[sc->offset], &itv,
 		    sizeof(itv)) != -1)
-			asprintf(&tmp, "{%ld.%06ld, %ld.%06ld }",
+			asprintf(&tmp, "{ %ld.%06ld, %ld.%06ld }",
 			    (long)itv.it_interval.tv_sec,
 			    itv.it_interval.tv_usec,
 			    (long)itv.it_value.tv_sec,
@@ -1037,6 +1037,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				    tmpsize);
 
 			tmp[used++] = '{';
+			tmp[used++] = ' ';
 			for (i = 0; i < numfds; i++) {
 
 				u = snprintf(tmp + used, per_fd, "%s%d/%s",
@@ -1045,6 +1046,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				if (u > 0)
 					used += u < per_fd ? u : per_fd;
 			}
+			tmp[used++] = ' ';
 			tmp[used++] = '}';
 			tmp[used++] = '\0';
 		} else {
@@ -1077,6 +1079,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				    "output", tmpsize);
 
 			tmp[used++] = '{';
+			tmp[used++] = ' ';
 			for (i = 0; i < numfds; i++) {
 				if (FD_ISSET(i, fds)) {
 					u = snprintf(tmp + used, per_fd, "%d ",
@@ -1085,8 +1088,6 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 						used += u < per_fd ? u : per_fd;
 				}
 			}
-			if (tmp[used-1] == ' ')
-				used--;
 			tmp[used++] = '}';
 			tmp[used++] = '\0';
 		} else
@@ -1112,6 +1113,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		tmp = malloc(sys_nsig * 8 + 2); /* 7 bytes avg per signal name */
 		used = 0;
 		tmp[used++] = '{';
+		tmp[used++] = ' ';
 		for (i = 1; i < sys_nsig; i++) {
 			if (sigismember(&ss, i)) {
 				signame = strsig(i);
@@ -1121,6 +1123,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		}
 		if (tmp[used - 1] == '|')
 			used--;
+		tmp[used++] = ' ';
 		tmp[used++] = '}';
 		tmp[used++] = '\0';
 		break;
@@ -1301,8 +1304,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		default:
 			sa = (struct sockaddr *)&ss;
 			asprintf(&tmp, "{ sa_len = %d, sa_family = %d, sa_data "
-			    "= {%n%*s } }", (int)sa->sa_len, (int)sa->sa_family,
-			    &i, 6 * (int)(sa->sa_len - ((char *)&sa->sa_data -
+			    "= { %n%*s } }", (int)sa->sa_len,
+			    (int)sa->sa_family, &i,
+			    6 * (int)(sa->sa_len - ((char *)&sa->sa_data -
 			    (char *)sa)), "");
 			if (tmp != NULL) {
 				p = tmp + i;
@@ -1368,6 +1372,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				    "output", tmpsize);
 
 			tmp[used++] = '{';
+			tmp[used++] = ' ';
 			for (i = 0; i < numevents; i++) {
 				u = snprintf(tmp + used, per_ke,
 				    "%s%p,%s,%s,%d,%p,%p",
@@ -1381,6 +1386,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				if (u > 0)
 					used += u < per_ke ? u : per_ke;
 			}
+			tmp[used++] = ' ';
 			tmp[used++] = '}';
 			tmp[used++] = '\0';
 		} else {
