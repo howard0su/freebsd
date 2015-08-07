@@ -228,6 +228,7 @@ _kvm_probe_elf_kernel(kvm_t *kd, int class, int machine)
 {
 
 	return (kd->nlehdr.e_ident[EI_CLASS] == class &&
+	    kd->nlehdr.e_type == ET_EXEC &&
 	    kd->nlehdr.e_machine == machine);
 }
 
@@ -267,6 +268,10 @@ _kvm_read_core_phdrs(kvm_t *kd, size_t *phnump, GElf_Phdr **phdrp)
 	}
 	if (gelf_getehdr(elf, &ehdr) == NULL) {
 		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+		goto bad;
+	}
+	if (ehdr.e_type != ET_CORE) {
+		_kvm_err(kd, kd->program, "invalid core");
 		goto bad;
 	}
 	if (ehdr.e_machine != kd->nlehdr.e_machine) {
