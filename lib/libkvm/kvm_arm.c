@@ -55,7 +55,6 @@ __FBSDID("$FreeBSD$");
 
 struct vmstate {
 	arm_pd_entry_t *l1pt;
-	unsigned char ei_data;
 	size_t phnum;
 	GElf_Phdr *phdr;
 };
@@ -123,15 +122,9 @@ _arm_initvtop(kvm_t *kd)
 		return (-1);
 	}
 	kd->vmst = vm;
-	vm->ei_data = _kvm_elf_kernel_data_encoding(kd);
-	if (!(vm->ei_data == ELFDATA2LSB || vm->ei_data == ELFDATA2MSB)) {
-		_kvm_err(kd, kd->program, "cannot determine endianness");
-		return (-1);
-	}
 	vm->l1pt = NULL;
 
-	if (_kvm_read_core_phdrs(kd, ELFCLASS32, EM_ARM, &vm->phnum,
-	    &vm->phdr) == -1)
+	if (_kvm_read_core_phdrs(kd, &vm->phnum, &vm->phdr) == -1)
 		return (-1);
 
 	found = 0;
@@ -193,16 +186,6 @@ _arm_initvtop(kvm_t *kd)
 #define l2pte_index(v)		(((v) & ARM_L2_ADDR_BITS) >> ARM_L2_S_SHIFT)
 
 
-static uint32_t
-_arm32toh(kvm_t *kd, uint32_t val)
-{
-
-	if (kd->vmst->ei_data == ELFDATA2LSB)
-		return (le32toh(val));
-	else
-		return (be32toh(val));
-}
-	
 static int
 _arm_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 {
@@ -214,7 +197,7 @@ _arm_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 
 	if (vm->l1pt == NULL)
 		return (_kvm_pa2off(kd, va, pa, ARM_PAGE_SIZE));
-	pd = _arm32toh(kd, vm->l1pt[ARM_L1_IDX(va)]);
+	pd = _kvm32toh(kd, vm->l1pt[ARM_L1_IDX(va)]);
 	if (!l1pte_valid(pd))
 		goto invalid;
 	if (l1pte_section_p(pd)) {
@@ -228,7 +211,7 @@ _arm_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		_kvm_syserr(kd, kd->program, "_arm_kvatop: pread");
 		goto invalid;
 	}
-	pte = _arm32toh(kd, pte);
+	pte = _kvm32toh(kd, pte);
 	if (!l2pte_valid(pte)) {
 		goto invalid;
 	}
@@ -266,16 +249,10 @@ _arm_native(kvm_t *kd)
 {
 
 #ifdef __arm__
-	unsigned char ei_data;
-
-	if (kd->vmst != NULL)
-		ei_data = kd->vmst->ei_data;
-	else
-		ei_data = _kvm_elf_kernel_data_encoding(kd);
 #if _BYTE_ORDER == _LITTLE_ENDIAN
-	return (ei_data == ELFDATA2LSB);
+	return (kd->nlehdr.e_ident[EI_DATA] == ELFDATA2LSB);
 #else
-	return (ei_data == ELFDATA2MSB);
+	return (kd->nlehdr.e_ident[EI_DATA] == ELFDATA2MSB);
 #endif
 #else
 	return (0);

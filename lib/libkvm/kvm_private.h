@@ -34,6 +34,7 @@
  * $FreeBSD$
  */
 
+#include <sys/endian.h>
 #include <sys/linker_set.h>
 #include <gelf.h>
 
@@ -61,8 +62,8 @@ struct __kvm {
 #define ISALIVE(kd) ((kd)->vmfd >= 0)
 	int	pmfd;		/* physical memory file (or crashdump) */
 	int	vmfd;		/* virtual memory file (-1 if crashdump) */
-	int	unused;		/* was: swap file (e.g., /dev/drum) */
 	int	nlfd;		/* namelist file (e.g., /kernel) */
+	GElf_Ehdr nlehdr;	/* ELF file header for namelist file */
 	int	(*resolve_symbol)(const char *, kvaddr_t *);
 	struct kinfo_proc *procbase;
 	char	*argspc;	/* (dynamic) storage for argv strings */
@@ -118,6 +119,16 @@ struct hpt {
 /*
  * Functions used internally by kvm, but across kvm modules.
  */
+static inline uint32_t
+_kvm32toh(kvm_t *kd, uint32_t val)
+{
+
+	if (kd->nlehdr.e_ident[EI_DATA] == ELFDATA2LSB)
+		return (le32toh(val));
+	else
+		return (be32toh(val));
+}
+
 void	 _kvm_err(kvm_t *kd, const char *program, const char *fmt, ...)
 	    __printflike(3, 4);
 void	 _kvm_freeprocs(kvm_t *kd);
@@ -136,8 +147,7 @@ int	 _kvm_dpcpu_initialized(kvm_t *, int);
 kvaddr_t _kvm_dpcpu_validaddr(kvm_t *, kvaddr_t);
 int	 _kvm_probe_elf_kernel(kvm_t *, int, int);
 int	 _kvm_is_minidump(kvm_t *);
-int	 _kvm_read_core_phdrs(kvm_t *, int, int, size_t *, GElf_Phdr **);
-unsigned char _kvm_elf_kernel_data_encoding(kvm_t *);
+int	 _kvm_read_core_phdrs(kvm_t *, size_t *, GElf_Phdr **);
 void	 _kvm_hpt_insert(struct hpt *, uint64_t, off_t);
 off_t	 _kvm_hpt_find(struct hpt *, uint64_t);
 void	 _kvm_hpt_free(struct hpt *);

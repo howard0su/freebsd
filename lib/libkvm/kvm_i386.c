@@ -131,8 +131,8 @@ _i386_initvtop(kvm_t *kd)
 	kd->vmst->PTD = 0;
 
 	if (kd->rawdump == 0) {
-		if (_kvm_read_core_phdrs(kd, ELFCLASS32, EM_386,
-		    &kd->vmst->phnum, &kd->vmst->phdr) == -1)
+		if (_kvm_read_core_phdrs(kd, &kd->vmst->phnum,
+		    &kd->vmst->phdr) == -1)
 			return (-1);
 	}
 

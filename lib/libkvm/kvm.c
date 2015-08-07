@@ -187,48 +187,48 @@ _kvm_malloc(kvm_t *kd, size_t n)
 	return (p);
 }
 
+static int
+_kvm_read_kernel_ehdr(kvm_t *kd)
+{
+	Elf *elf;
+
+	if (elf_version(EV_CURRENT) == EV_NONE) {
+		_kvm_err(kd, kd->program, "Unsupported libelf");
+		return (-1);
+	}
+	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
+	if (elf == NULL) {
+		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+		return (-1);
+	}
+	if (elf_kind(elf) != ELF_K_ELF) {
+		_kvm_err(kd, kd->program, "kernel is not an ELF file");
+		return (-1);
+	}
+	if (gelf_getehdr(elf, &kd->nlehdr) == NULL) {
+		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
+		elf_end(elf);
+		return (-1);
+	}
+	elf_end(elf);
+
+	switch (kd->nlehdr.e_ident[EI_DATA]) {
+	case ELFDATA2LSB:
+	case ELFDATA2MSB:
+		return (0);
+	default:
+		_kvm_err(kd, kd->program,
+		    "unsupported ELF data encoding for kernel");
+		return (-1);
+	}
+}
+
 int
 _kvm_probe_elf_kernel(kvm_t *kd, int class, int machine)
 {
-	Elf *elf;
-	GElf_Ehdr ehdr;
 
-	if (elf_version(EV_CURRENT) == EV_NONE)
-		return (0);
-	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
-	if (elf == NULL)
-		return (0);
-	if (elf_kind(elf) != ELF_K_ELF)
-		goto bad;
-	if (gelf_getclass(elf) != class)
-		goto bad;
-	if (gelf_getehdr(elf, &ehdr) == NULL)
-		goto bad;
-	if (ehdr.e_machine != machine)
-		goto bad;
-	elf_end(elf);
-	return (1);
-bad:
-	elf_end(elf);
-	return (0);
-	
-}
-
-unsigned char
-_kvm_elf_kernel_data_encoding(kvm_t *kd)
-{
-	Elf *elf;
-	GElf_Ehdr ehdr;
-
-	elf = elf_begin(kd->nlfd, ELF_C_READ, NULL);
-	if (elf == NULL)
-		return (ELFDATANONE);
-	if (gelf_getehdr(elf, &ehdr) == NULL) {
-		elf_end(elf);
-		return (ELFDATANONE);
-	}
-	elf_end(elf);
-	return (ehdr.e_ident[EI_DATA]);
+	return (kd->nlehdr.e_ident[EI_CLASS] == class &&
+	    kd->nlehdr.e_machine == machine);
 }
 
 int
@@ -245,8 +245,7 @@ _kvm_is_minidump(kvm_t *kd)
 }
 
 int
-_kvm_read_core_phdrs(kvm_t *kd, int class, int machine, size_t *phnump,
-    GElf_Phdr **phdrp)
+_kvm_read_core_phdrs(kvm_t *kd, size_t *phnump, GElf_Phdr **phdrp)
 {
 	GElf_Ehdr ehdr;
 	GElf_Phdr *phdr;
@@ -262,7 +261,7 @@ _kvm_read_core_phdrs(kvm_t *kd, int class, int machine, size_t *phnump,
 		_kvm_err(kd, kd->program, "invalid core");
 		goto bad;
 	}
-	if (gelf_getclass(elf) != class) {
+	if (gelf_getclass(elf) != kd->nlehdr.e_ident[EI_CLASS]) {
 		_kvm_err(kd, kd->program, "invalid core");
 		goto bad;
 	}
@@ -270,7 +269,7 @@ _kvm_read_core_phdrs(kvm_t *kd, int class, int machine, size_t *phnump,
 		_kvm_err(kd, kd->program, "%s", elf_errmsg(0));
 		goto bad;
 	}
-	if (ehdr.e_machine != machine) {
+	if (ehdr.e_machine != kd->nlehdr.e_machine) {
 		_kvm_err(kd, kd->program, "invalid core");
 		goto bad;
 	}
@@ -413,6 +412,8 @@ _kvm_open(kvm_t *kd, const char *uf, const char *mf, int flag, char *errout)
 		_kvm_syserr(kd, kd->program, "%s", uf);
 		goto failed;
 	}
+	if (_kvm_read_kernel_ehdr(kd) < 0)
+		goto failed;
 	if (strncmp(mf, _PATH_FWMEM, strlen(_PATH_FWMEM)) == 0)
 		kd->rawdump = 1;
 	SET_FOREACH(parch, kvm_arch) {
