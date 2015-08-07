@@ -301,7 +301,7 @@ bad:
 	return (-1);
 }
 
-void
+static void
 _kvm_hpt_insert(struct hpt *hpt, uint64_t pa, off_t off)
 {
 	struct hpte *hpte;
@@ -314,6 +314,31 @@ _kvm_hpt_insert(struct hpt *hpt, uint64_t pa, off_t off)
 	hpte->off = off;
 	hpte->next = hpt->hpt_head[fnv];
 	hpt->hpt_head[fnv] = hpte;
+}
+
+void
+_kvm_hpt_init(kvm_t *kd, struct hpt *hpt, void *base, size_t len, off_t off,
+    int page_size, int word_size)
+{
+	uint64_t bits, idx, pa;
+	uint64_t *base64;
+	uint32_t *base32;
+
+	base64 = base;
+	base32 = base;
+	for (idx = 0; idx < len / word_size; idx++) {
+		if (word_size == sizeof(uint64_t))
+			bits = _kvm64toh(kd, base64[idx]);
+		else
+			bits = _kvm32toh(kd, base32[idx]);
+		pa = idx * word_size * NBBY * page_size;
+		for (; bits != 0; bits >>= 1, pa += page_size) {
+			if ((bits & 1) == 0)
+				continue;
+			_kvm_hpt_insert(hpt, pa, off);
+			off += page_size;
+		}
+	}
 }
 
 off_t

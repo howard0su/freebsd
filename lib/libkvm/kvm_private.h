@@ -148,6 +148,6 @@ kvaddr_t _kvm_dpcpu_validaddr(kvm_t *, kvaddr_t);
 int	 _kvm_probe_elf_kernel(kvm_t *, int, int);
 int	 _kvm_is_minidump(kvm_t *);
 int	 _kvm_read_core_phdrs(kvm_t *, size_t *, GElf_Phdr **);
-void	 _kvm_hpt_insert(struct hpt *, uint64_t, off_t);
+void	 _kvm_hpt_init(kvm_t *, struct hpt *, void *, size_t, off_t, int, int);
 off_t	 _kvm_hpt_find(struct hpt *, uint64_t);
 void	 _kvm_hpt_free(struct hpt *);

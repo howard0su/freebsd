@@ -55,26 +55,6 @@ struct vmstate {
 };
 
 static int
-inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
-{
-	uint64_t idx;
-	uint32_t bits;
-	uint64_t pa;
-
-	for (idx = 0; idx < len / sizeof(*base); idx++) {
-		bits = le32toh(base[idx]);
-		pa = (idx * sizeof(*base) * NBBY) * I386_PAGE_SIZE;
-		for (; bits != 0; bits >>= 1, pa += I386_PAGE_SIZE) {
-			if ((bits & 1) == 0)
-				continue;
-			_kvm_hpt_insert(&kd->vmst->hpt, pa, off);
-			off += I386_PAGE_SIZE;
-		}
-	}
-	return (off);
-}
-
-static int
 _i386_minidump_probe(kvm_t *kd)
 {
 
@@ -157,7 +137,8 @@ _i386_minidump_initvtop(kvm_t *kd)
 	off += vmst->hdr.ptesize;
 
 	/* build physical address hash table for sparse pages */
-	inithash(kd, vmst->bitmap, vmst->hdr.bitmapsize, off);
+	_kvm_hpt_init(kd, &vmst->hpt, vmst->bitmap, vmst->hdr.bitmapsize, off,
+	    I386_PAGE_SIZE, sizeof(*vmst->bitmap));
 
 	return (0);
 }

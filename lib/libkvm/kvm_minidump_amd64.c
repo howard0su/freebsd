@@ -55,26 +55,6 @@ struct vmstate {
 };
 
 static int
-inithash(kvm_t *kd, uint64_t *base, int len, off_t off)
-{
-	uint64_t idx;
-	uint64_t bits;
-	amd64_physaddr_t pa;
-
-	for (idx = 0; idx < len / sizeof(*base); idx++) {
-		bits = le64toh(base[idx]);
-		pa = (idx * sizeof(*base) * NBBY) * AMD64_PAGE_SIZE;
-		for (; bits != 0; bits >>= 1, pa += AMD64_PAGE_SIZE) {
-			if ((bits & 1) == 0)
-				continue;
-			_kvm_hpt_insert(&kd->vmst->hpt, pa, off);
-			off += AMD64_PAGE_SIZE;
-		}
-	}
-	return (off);
-}
-
-static int
 _amd64_minidump_probe(kvm_t *kd)
 {
 
@@ -163,7 +143,8 @@ _amd64_minidump_initvtop(kvm_t *kd)
 	off += vmst->hdr.pmapsize;
 
 	/* build physical address hash table for sparse pages */
-	inithash(kd, vmst->bitmap, vmst->hdr.bitmapsize, off);
+	_kvm_hpt_init(kd, &vmst->hpt, vmst->bitmap, vmst->hdr.bitmapsize, off,
+	    AMD64_PAGE_SIZE, sizeof(*vmst->bitmap));
 
 	return (0);
 }
