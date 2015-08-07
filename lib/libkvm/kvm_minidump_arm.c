@@ -57,16 +57,6 @@ struct vmstate {
 	unsigned char	ei_data;
 };
 
-static uint32_t
-_arm32toh(kvm_t *kd, uint32_t val)
-{
-
-	if (kd->vmst->ei_data == ELFDATA2LSB)
-		return (le32toh(val));
-	else
-		return (be32toh(val));
-}
-
 static int
 inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
 {
@@ -75,7 +65,7 @@ inithash(kvm_t *kd, uint32_t *base, int len, off_t off)
 	arm_physaddr_t pa;
 
 	for (idx = 0; idx < len / sizeof(*base); idx++) {
-		bits = _arm32toh(kd, base[idx]);
+		bits = _kvm32toh(kd, base[idx]);
 		pa = (idx * sizeof(*base) * NBBY) * ARM_PAGE_SIZE;
 		for (; bits != 0; bits >>= 1, pa += ARM_PAGE_SIZE) {
 			if ((bits & 1) == 0)
@@ -122,11 +112,6 @@ _arm_minidump_initvtop(kvm_t *kd)
 	}
 
 	kd->vmst = vmst;
-	vmst->ei_data = _kvm_elf_kernel_data_encoding(kd);
-	if (!(vmst->ei_data == ELFDATA2LSB || vmst->ei_data == ELFDATA2MSB)) {
-		_kvm_err(kd, kd->program, "cannot determine endianness");
-		return (-1);
-	}
 
 	if (pread(kd->pmfd, &vmst->hdr,
 	    sizeof(vmst->hdr), 0) != sizeof(vmst->hdr)) {
@@ -139,16 +124,16 @@ _arm_minidump_initvtop(kvm_t *kd)
 		_kvm_err(kd, kd->program, "not a minidump for this platform");
 		return (-1);
 	}
-	vmst->hdr.version = _arm32toh(kd, vmst->hdr.version);
+	vmst->hdr.version = _kvm32toh(kd, vmst->hdr.version);
 	if (vmst->hdr.version != MINIDUMP_VERSION) {
 		_kvm_err(kd, kd->program, "wrong minidump version. "
 		    "Expected %d got %d", MINIDUMP_VERSION, vmst->hdr.version);
 		return (-1);
 	}
-	vmst->hdr.msgbufsize = _arm32toh(kd, vmst->hdr.msgbufsize);
-	vmst->hdr.bitmapsize = _arm32toh(kd, vmst->hdr.bitmapsize);
-	vmst->hdr.ptesize = _arm32toh(kd, vmst->hdr.ptesize);
-	vmst->hdr.kernbase = _arm32toh(kd, vmst->hdr.kernbase);
+	vmst->hdr.msgbufsize = _kvm32toh(kd, vmst->hdr.msgbufsize);
+	vmst->hdr.bitmapsize = _kvm32toh(kd, vmst->hdr.bitmapsize);
+	vmst->hdr.ptesize = _kvm32toh(kd, vmst->hdr.ptesize);
+	vmst->hdr.kernbase = _kvm32toh(kd, vmst->hdr.kernbase);
 
 	/* Skip header and msgbuf */
 	off = ARM_PAGE_SIZE + arm_round_page(vmst->hdr.msgbufsize);
@@ -210,7 +195,7 @@ _arm_minidump_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 
 	if (va >= vm->hdr.kernbase) {
 		pteindex = (va - vm->hdr.kernbase) >> ARM_PAGE_SHIFT;
-		pte = _arm32toh(kd, ptemap[pteindex]);
+		pte = _kvm32toh(kd, ptemap[pteindex]);
 		if (!pte) {
 			_kvm_err(kd, kd->program,
 			    "_arm_minidump_kvatop: pte not valid");
