@@ -129,6 +129,16 @@ _kvm32toh(kvm_t *kd, uint32_t val)
 		return (be32toh(val));
 }
 
+static inline uint64_t
+_kvm64toh(kvm_t *kd, uint64_t val)
+{
+
+	if (kd->nlehdr.e_ident[EI_DATA] == ELFDATA2LSB)
+		return (le64toh(val));
+	else
+		return (be64toh(val));
+}
+
 void	 _kvm_err(kvm_t *kd, const char *program, const char *fmt, ...)
 	    __printflike(3, 4);
 void	 _kvm_freeprocs(kvm_t *kd);

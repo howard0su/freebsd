@@ -13,7 +13,8 @@ SRCS=	kvm.c kvm_cptime.c kvm_file.c kvm_getloadavg.c \
 	kvm_getswapinfo.c kvm_pcpu.c kvm_proc.c kvm_vnet.c \
 	kvm_amd64.c kvm_minidump_amd64.c \
 	kvm_arm.c kvm_minidump_arm.c \
-	kvm_i386.c kvm_minidump_i386.c
+	kvm_i386.c kvm_minidump_i386.c \
+	kvm_minidump_mips.c
 INCS=	kvm.h
 
 LIBADD=	elf
