@@ -52,7 +52,6 @@ __FBSDID("$FreeBSD$");
 struct vmstate {
 	struct		minidumphdr hdr;
 	struct		hpt hpt;
-	uint32_t	*bitmap;
 	void		*ptemap;
 	unsigned char	ei_data;
 };
@@ -71,8 +70,6 @@ _arm_minidump_freevtop(kvm_t *kd)
 	struct vmstate *vm = kd->vmst;
 
 	_kvm_hpt_free(&vm->hpt);
-	if (vm->bitmap)
-		free(vm->bitmap);
 	if (vm->ptemap)
 		free(vm->ptemap);
 	free(vm);
@@ -83,6 +80,7 @@ static int
 _arm_minidump_initvtop(kvm_t *kd)
 {
 	struct vmstate *vmst;
+	uint32_t *bitmap;
 	off_t off;
 
 	vmst = _kvm_malloc(kd, sizeof(*vmst));
@@ -118,17 +116,18 @@ _arm_minidump_initvtop(kvm_t *kd)
 	/* Skip header and msgbuf */
 	off = ARM_PAGE_SIZE + arm_round_page(vmst->hdr.msgbufsize);
 
-	vmst->bitmap = _kvm_malloc(kd, vmst->hdr.bitmapsize);
-	if (vmst->bitmap == NULL) {
+	bitmap = _kvm_malloc(kd, vmst->hdr.bitmapsize);
+	if (bitmap == NULL) {
 		_kvm_err(kd, kd->program, "cannot allocate %d bytes for "
 		    "bitmap", vmst->hdr.bitmapsize);
 		return (-1);
 	}
 
-	if (pread(kd->pmfd, vmst->bitmap, vmst->hdr.bitmapsize, off) !=
+	if (pread(kd->pmfd, bitmap, vmst->hdr.bitmapsize, off) !=
 	    (ssize_t)vmst->hdr.bitmapsize) {
 		_kvm_err(kd, kd->program, "cannot read %d bytes for page bitmap",
 		    vmst->hdr.bitmapsize);
+		free(bitmap);
 		return (-1);
 	}
 	off += arm_round_page(vmst->hdr.bitmapsize);
@@ -137,6 +136,7 @@ _arm_minidump_initvtop(kvm_t *kd)
 	if (vmst->ptemap == NULL) {
 		_kvm_err(kd, kd->program, "cannot allocate %d bytes for "
 		    "ptemap", vmst->hdr.ptesize);
+		free(bitmap);
 		return (-1);
 	}
 
@@ -144,14 +144,16 @@ _arm_minidump_initvtop(kvm_t *kd)
 	    (ssize_t)vmst->hdr.ptesize) {
 		_kvm_err(kd, kd->program, "cannot read %d bytes for ptemap",
 		    vmst->hdr.ptesize);
+		free(bitmap);
 		return (-1);
 	}
 
 	off += vmst->hdr.ptesize;
 
 	/* Build physical address hash table for sparse pages */
-	_kvm_hpt_init(kd, &vmst->hpt, vmst->bitmap, vmst->hdr.bitmapsize, off,
-	    ARM_PAGE_SIZE, sizeof(*vmst->bitmap));
+	_kvm_hpt_init(kd, &vmst->hpt, bitmap, vmst->hdr.bitmapsize, off,
+	    ARM_PAGE_SIZE, sizeof(*bitmap));
+	free(bitmap);
 
 	return (0);
 }
