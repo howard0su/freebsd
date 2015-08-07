@@ -40,11 +40,6 @@
 #include <machine/pte.h>
 #endif
 
-/*
- * L1_ADDR_MASK
- * L2_ADDR_BITS
- */
-
 typedef uint32_t	arm_physaddr_t;
 typedef uint32_t	arm_pd_entry_t;
 typedef uint32_t	arm_pt_entry_t;
