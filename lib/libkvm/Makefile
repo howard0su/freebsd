@@ -9,7 +9,7 @@ CFLAGS+=-DLIBC_SCCS -I${.CURDIR}
 
 WARNS?=	3
 
-# XXX: Unused and to be removed: kvm_mips.c kvm_sparc.c
+# XXX: Unused and to be removed: kvm_aarch64.c kvm_mips.c kvm_sparc.c
 SRCS=	kvm.c kvm_cptime.c kvm_file.c kvm_getloadavg.c \
 	kvm_getswapinfo.c kvm_pcpu.c kvm_proc.c kvm_vnet.c \
 	kvm_amd64.c kvm_minidump_amd64.c \

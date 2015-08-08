@@ -46,33 +46,20 @@ static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #define	_WANT_VNET
 
 #include <sys/user.h>
-#include <sys/proc.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/sysctl.h>
 #include <sys/linker.h>
 #include <sys/pcpu.h>
+#include <sys/stat.h>
 
 #include <net/vnet.h>
 
-#if 0
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-
-#include <machine/vmparam.h>
-#endif
-
-#include <ctype.h>
 #include <fcntl.h>
 #include <kvm.h>
 #include <limits.h>
-#include <nlist.h>
 #include <paths.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <unistd.h>
 
 #include "kvm_private.h"
