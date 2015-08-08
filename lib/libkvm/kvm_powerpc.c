@@ -97,7 +97,7 @@ powerpc_maphdrs(kvm_t *kd)
 
 	vm = kd->vmst;
 
-	vm->mapsz = PAGE_SIZE;
+	vm->mapsz = sizeof(*vm->eh) + sizeof(struct kerneldumpheader);
 	vm->map = mmap(NULL, vm->mapsz, PROT_READ, MAP_PRIVATE, kd->pmfd, 0);
 	if (vm->map == MAP_FAILED) {
 		_kvm_err(kd, kd->program, "cannot map corefile");
@@ -127,7 +127,7 @@ powerpc_maphdrs(kvm_t *kd)
 	vm->mapsz = vm->dmphdrsz + mapsz;
 	vm->map = mmap(NULL, vm->mapsz, PROT_READ, MAP_PRIVATE, kd->pmfd, 0);
 	if (vm->map == MAP_FAILED) {
-		_kvm_err(kd, kd->program, "cannot map corefle headers");
+		_kvm_err(kd, kd->program, "cannot map corefile headers");
 		return (-1);
 	}
 	vm->eh = (void *)((uintptr_t)vm->map + vm->dmphdrsz);
@@ -135,8 +135,6 @@ powerpc_maphdrs(kvm_t *kd)
 	return (0);
 
  inval:
-	munmap(vm->map, vm->mapsz);
-	vm->map = MAP_FAILED;
 	_kvm_err(kd, kd->program, "invalid corefile");
 	return (-1);
 }
@@ -174,7 +172,8 @@ _powerpc_freevtop(kvm_t *kd)
 {
 	struct vmstate *vm = kd->vmst;
 
-	munmap(vm->eh, vm->mapsz);
+	if (vm->eh != MAP_FAILED)
+		munmap(vm->eh, vm->mapsz);
 	free(vm);
 	kd->vmst = NULL;
 }
@@ -192,15 +191,12 @@ _powerpc_initvtop(kvm_t *kd)
 {
 
 	kd->vmst = (struct vmstate *)_kvm_malloc(kd, sizeof(*kd->vmst));
-	if (kd->vmst == NULL) {
-		_kvm_err(kd, kd->program, "out of virtual memory");
+	if (kd->vmst == NULL)
 		return (-1);
-	}
-	if (powerpc_maphdrs(kd) == -1) {
-		free(kd->vmst);
-		kd->vmst = NULL;
+
+	if (powerpc_maphdrs(kd) == -1)
 		return (-1);
-	}
+
 	return (0);
 }
 
