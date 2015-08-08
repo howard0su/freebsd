@@ -43,7 +43,6 @@ struct kvm_arch {
 	int	(*ka_initvtop)(kvm_t *);
 	void	(*ka_freevtop)(kvm_t *);
 	int	(*ka_kvatop)(kvm_t *, kvaddr_t, off_t *);
-	int	(*ka_uvatop)(kvm_t *, const struct proc *, kvaddr_t, off_t *);
 	int	(*ka_native)(kvm_t *);
 };
 
@@ -147,9 +146,6 @@ int	 _kvm_nlist(kvm_t *, struct kvm_nlist *, int);
 void	*_kvm_realloc(kvm_t *kd, void *, size_t);
 void	 _kvm_syserr (kvm_t *kd, const char *program, const char *fmt, ...)
 	    __printflike(3, 4);
-#if 0
-int	 _kvm_uvatop(kvm_t *, const struct proc *, u_long, u_long *);
-#endif
 int	 _kvm_vnet_selectpid(kvm_t *, pid_t);
 int	 _kvm_vnet_initialized(kvm_t *, int);
 kvaddr_t _kvm_vnet_validaddr(kvm_t *, kvaddr_t);
