@@ -64,19 +64,23 @@ _Static_assert(PAGE_SHIFT == MIPS_PAGE_SHIFT, "PAGE_SHIFT mismatch");
 _Static_assert(PAGE_SIZE == MIPS_PAGE_SIZE, "PAGE_SIZE mismatch");
 _Static_assert(PAGE_MASK == MIPS_PAGE_MASK, "PAGE_MASK mismatch");
 #ifdef __mips_n64
-_Static_assert(MIPS_KSEG0_START == MIPS64_KSEG0_START,
+_Static_assert((uint64_t)MIPS_KSEG0_START == MIPS64_KSEG0_START,
     "MIPS_KSEG0_START mismatch");
-_Static_assert(MIPS_KSEG0_END == MIPS64_KSEG0_END, "MIPS_KSEG0_END mismatch");
-_Static_assert(MIPS_KSEG1_START == MIPS64_KSEG1_START,
+_Static_assert((uint64_t)MIPS_KSEG0_END == MIPS64_KSEG0_END,
+    "MIPS_KSEG0_END mismatch");
+_Static_assert((uint64_t)MIPS_KSEG1_START == MIPS64_KSEG1_START,
     "MIPS_KSEG1_START mismatch");
-_Static_assert(MIPS_KSEG1_END == MIPS64_KSEG1_END, "MIPS_KSEG1_END mismatch");
+_Static_assert((uint64_t)MIPS_KSEG1_END == MIPS64_KSEG1_END,
+    "MIPS_KSEG1_END mismatch");
 #else
-_Static_assert(MIPS_KSEG0_START == MIPS32_KSEG0_START,
+_Static_assert((uint32_t)MIPS_KSEG0_START == MIPS32_KSEG0_START,
     "MIPS_KSEG0_START mismatch");
-_Static_assert(MIPS_KSEG0_END == MIPS32_KSEG0_END, "MIPS_KSEG0_END mismatch");
-_Static_assert(MIPS_KSEG1_START == MIPS32_KSEG1_START,
+_Static_assert((uint32_t)MIPS_KSEG0_END == MIPS32_KSEG0_END,
+    "MIPS_KSEG0_END mismatch");
+_Static_assert((uint32_t)MIPS_KSEG1_START == MIPS32_KSEG1_START,
     "MIPS_KSEG1_START mismatch");
-_Static_assert(MIPS_KSEG1_END == MIPS32_KSEG1_END, "MIPS_KSEG1_END mismatch");
+_Static_assert((uint32_t)MIPS_KSEG1_END == MIPS32_KSEG1_END,
+    "MIPS_KSEG1_END mismatch");
 #endif
 #if defined(__mips_n64) || defined(__mips_n32)
 _Static_assert(TLBLO_PFN_MASK == MIPS64_PFN_MASK, "TLBLO_PFN_MASK mismatch");
@@ -84,7 +88,7 @@ _Static_assert(TLBLO_PFN_MASK == MIPS64_PFN_MASK, "TLBLO_PFN_MASK mismatch");
 _Static_assert(TLBLO_PFN_MASK == MIPS32_PFN_MASK, "TLBLO_PFN_MASK mismatch");
 #endif
 _Static_assert(TLBLO_PFN_SHIFT == MIPS_PFN_SHIFT, "TLBLO_PFN_SHIFT mismatch");
-_Static_assert(TLB_PAGE_SHIFT == MIPS_PAGE_MASK, "TLB_PAGE_SHIFT mismatch");
+_Static_assert(TLB_PAGE_SHIFT == MIPS_PAGE_SHIFT, "TLB_PAGE_SHIFT mismatch");
 #endif
 
 #endif /* !__KVM_MIPS_H__ */

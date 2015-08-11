@@ -131,7 +131,8 @@ powerpc_maphdrs(kvm_t *kd)
 		return (-1);
 	}
 	vm->eh = (void *)((uintptr_t)vm->map + vm->dmphdrsz);
-	vm->ph = (void *)((uintptr_t)vm->eh + be64toh(vm->eh->e_phoff));
+	vm->ph = (void *)((uintptr_t)vm->eh +
+	    (uintptr_t)be64toh(vm->eh->e_phoff));
 	return (0);
 
  inval:

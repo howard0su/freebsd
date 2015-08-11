@@ -37,8 +37,11 @@
 #define	__KVM_SPARC64_H__
 
 #ifdef __sparc64__
+#include <sys/queue.h>
 #include <machine/tlb.h>
 #include <machine/tte.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
 #endif
 
 #define	SPARC64_PAGE_SHIFT	13
@@ -49,7 +52,7 @@
 
 #define	SPARC64_DIRECT_ADDRESS_BITS	(43)
 #define	SPARC64_DIRECT_ADDRESS_MASK					\
-	((1UL << SPARC64_DIRECT_ADDRESS_BITS) - 1)
+	(((uint64_t)1 << SPARC64_DIRECT_ADDRESS_BITS) - 1)
 
 #define	SPARC64_DIRECT_TO_PHYS(va)	((va) & SPARC64_DIRECT_ADDRESS_MASK)
 
