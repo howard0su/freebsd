@@ -217,10 +217,7 @@ static int
 _powerpc_native(kvm_t *kd)
 {
 
-#ifdef __powerpc__
-#ifdef __powerpc64__
-#error XXXX need to fix this conditional
-#endif
+#if defined(__powerpc__) && !defined(__powerpc64__)
 	return (1);
 #else
 	return (0);
