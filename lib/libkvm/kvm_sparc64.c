@@ -49,6 +49,7 @@ static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 #include <sys/param.h>
 #include <kvm.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -217,6 +218,27 @@ _sparc64_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	return (rest);
 
 invalid:
-	_kvm_err(kd, 0, "invalid address (%lx)", va);
+	_kvm_err(kd, 0, "invalid address (%jx)", (uintmax_t)va);
 	return (0);
 }
+
+static int
+_sparc64_native(kvm_t *kd)
+{
+
+#ifdef __sparc64__
+	return (1);
+#else
+	return (0);
+#endif
+}
+
+struct kvm_arch kvm_sparc64 = {
+	.ka_probe = _sparc64_probe,
+	.ka_initvtop = _sparc64_initvtop,
+	.ka_freevtop = _sparc64_freevtop,
+	.ka_kvatop = _sparc64_kvatop,
+	.ka_native = _sparc64_native,
+};
+
+KVM_ARCH(kvm_sparc64);
