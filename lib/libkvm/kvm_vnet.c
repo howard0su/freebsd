@@ -209,7 +209,7 @@ _kvm_vnet_selectpid(kvm_t *kd, pid_t pid)
 
 /*
  * Check whether the vnet module has been initialized sucessfully
- * or not, intialize it if permitted.
+ * or not, initialize it if permitted.
  */
 int
 _kvm_vnet_initialized(kvm_t *kd, int intialize)

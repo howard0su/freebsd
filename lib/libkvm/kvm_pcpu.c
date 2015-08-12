@@ -48,7 +48,7 @@ __FBSDID("$FreeBSD$");
 
 #include "kvm_private.h"
 
-static struct kvm_nlist kvm_pcpu_nl[] = {
+static struct nlist kvm_pcpu_nl[] = {
 	{ .n_name = "_cpuid_to_pcpu" },
 	{ .n_name = "_mp_maxcpus" },
 	{ .n_name = "_mp_ncpus" },
@@ -77,7 +77,7 @@ _kvm_pcpu_init(kvm_t *kd)
 	int max;
 	void *data;
 
-	if (kvm_nlist2(kd, kvm_pcpu_nl) < 0)
+	if (kvm_nlist(kd, kvm_pcpu_nl) < 0)
 		return (-1);
 	if (kvm_pcpu_nl[NL_CPUID_TO_PCPU].n_value == 0) {
 		_kvm_err(kd, kd->program, "unable to find cpuid_to_pcpu");
@@ -325,6 +325,8 @@ ssize_t
 kvm_read_zpcpu(kvm_t *kd, u_long base, void *buf, size_t size, int cpu)
 {
 
+	if (!kvm_native(kd))
+		return (-1);
 	return (kvm_read(kd, (uintptr_t)(base + sizeof(struct pcpu) * cpu),
 	    buf, size));
 }
