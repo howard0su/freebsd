@@ -585,7 +585,7 @@ liveout:
 		if (!kd->arch->ka_native(kd)) {
 			_kvm_err(kd, kd->program,
 			    "cannot read procs from non-native core");
-			return (-1);
+			return (0);
 		}
 
 		if (kvm_nlist(kd, nl) != 0) {
