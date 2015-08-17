@@ -1060,6 +1060,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 			if (sigismember(&ss, i)) {
 				fprintf(fp, "%s%s", !first ? "|" : "",
 				    strsig(i));
+				first = 0;
 			}
 		}
 		if (!first)
