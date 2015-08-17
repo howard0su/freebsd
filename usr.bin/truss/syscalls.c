@@ -995,7 +995,6 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		break;
 	case Readlinkres: {
 		char *tmp2;
-
 		if (retval == -1)
 			break;
 		tmp2 = get_string(pid, (void*)args[sc->offset], retval);
