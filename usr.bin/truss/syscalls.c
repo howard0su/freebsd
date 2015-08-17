@@ -1195,7 +1195,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 				break;
 			}
 		}
-		if (ss.ss_len == 0 ||
+		if (ss.ss_len != 0 &&
 		    get_struct(pid, (void *)args[sc->offset], (void *)&ss,
 		    ss.ss_len) == -1) {
 			fprintf(fp, "0x%lx", args[sc->offset]);
@@ -1225,9 +1225,11 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 			fprintf(fp,
 			    "{ sa_len = %d, sa_family = %d, sa_data = {",
 			    (int)sa->sa_len, (int)sa->sa_family);
-			for (q = (u_char *)&sa->sa_data;
+			for (q = (u_char *)sa->sa_data;
 			     q < (u_char *)sa + sa->sa_len; q++)
-				fprintf(fp, " %#02x,", *q);
+				fprintf(fp, "%s 0x%02x",
+				    q == (u_char *)sa->sa_data ? "" : ",",
+				    *q);
 			fputs(" } }", fp);
 		}
 		break;
