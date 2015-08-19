@@ -984,7 +984,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timespec ts;
 		if (get_struct(pid, (void *)args[sc->offset], &ts,
 		    sizeof(ts)) != -1)
-			fprintf(fp, "{ %ld.%09ld }", (long)ts.tv_sec,
+			fprintf(fp, "{ %jd.%09ld }", (intmax_t)ts.tv_sec,
 			    ts.tv_nsec);
 		else
 			fprintf(fp, "0x%lx", args[sc->offset]);
@@ -1010,8 +1010,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 					fprintf(fp, "UTIME_OMIT");
 					break;
 				default:
-					fprintf(fp, "%ld.%09ld",
-					    (long)ts[i].tv_sec, ts[i].tv_nsec);
+					fprintf(fp, "%jd.%09ld",
+					    (intmax_t)ts[i].tv_sec,
+					    ts[i].tv_nsec);
 					break;
 				}
 			}
@@ -1024,7 +1025,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timeval tv;
 		if (get_struct(pid, (void *)args[sc->offset], &tv, sizeof(tv))
 		    != -1)
-			fprintf(fp, "{ %ld.%06ld }", (long)tv.tv_sec,
+			fprintf(fp, "{ %jd.%06ld }", (intmax_t)tv.tv_sec,
 			    tv.tv_usec);
 		else
 			fprintf(fp, "0x%lx", args[sc->offset]);
@@ -1034,9 +1035,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct timeval tv[2];
 		if (get_struct(pid, (void *)args[sc->offset], &tv, sizeof(tv))
 		    != -1)
-			fprintf(fp, "{ %ld.%06ld, %ld.%06ld }",
-			    (long)tv[0].tv_sec, tv[0].tv_usec,
-			    (long)tv[1].tv_sec, tv[1].tv_usec);
+			fprintf(fp, "{ %jd.%06ld, %jd.%06ld }",
+			    (intmax_t)tv[0].tv_sec, tv[0].tv_usec,
+			    (intmax_t)tv[1].tv_sec, tv[1].tv_usec);
 		else
 			fprintf(fp, "0x%lx", args[sc->offset]);
 		break;
@@ -1045,10 +1046,10 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		struct itimerval itv;
 		if (get_struct(pid, (void *)args[sc->offset], &itv,
 		    sizeof(itv)) != -1)
-			fprintf(fp, "{ %ld.%06ld, %ld.%06ld }",
-			    (long)itv.it_interval.tv_sec,
+			fprintf(fp, "{ %jd.%06ld, %jd.%06ld }",
+			    (intmax_t)itv.it_interval.tv_sec,
 			    itv.it_interval.tv_usec,
-			    (long)itv.it_value.tv_sec,
+			    (intmax_t)itv.it_value.tv_sec,
 			    itv.it_value.tv_usec);
 		else
 			fprintf(fp, "0x%lx", args[sc->offset]);
@@ -1394,9 +1395,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		if (get_struct(pid, (void *)args[sc->offset], &ru, sizeof(ru))
 		    != -1) {
 			fprintf(fp,
-			    "{ u=%ld.%06ld,s=%ld.%06ld,in=%ld,out=%ld }",
-			    (long)ru.ru_utime.tv_sec, ru.ru_utime.tv_usec,
-			    (long)ru.ru_stime.tv_sec, ru.ru_stime.tv_usec,
+			    "{ u=%jd.%06ld,s=%jd.%06ld,in=%ld,out=%ld }",
+			    (intmax_t)ru.ru_utime.tv_sec, ru.ru_utime.tv_usec,
+			    (intmax_t)ru.ru_stime.tv_sec, ru.ru_stime.tv_usec,
 			    ru.ru_inblock, ru.ru_oublock);
 		} else
 			fprintf(fp, "0x%lx", args[sc->offset]);
@@ -1498,15 +1499,15 @@ print_syscall(struct trussinfo *trussinfo, const char *name, int nargs,
 	if (trussinfo->flags & ABSOLUTETIMESTAMPS) {
 		timespecsubt(&trussinfo->curthread->after,
 		    &trussinfo->start_time, &timediff);
-		len += fprintf(trussinfo->outfile, "%ld.%09ld ",
-		    (long)timediff.tv_sec, timediff.tv_nsec);
+		len += fprintf(trussinfo->outfile, "%jd.%09ld ",
+		    (intmax_t)timediff.tv_sec, timediff.tv_nsec);
 	}
 
 	if (trussinfo->flags & RELATIVETIMESTAMPS) {
 		timespecsubt(&trussinfo->curthread->after,
 		    &trussinfo->curthread->before, &timediff);
-		len += fprintf(trussinfo->outfile, "%ld.%09ld ",
-		    (long)timediff.tv_sec, timediff.tv_nsec);
+		len += fprintf(trussinfo->outfile, "%jd.%09ld ",
+		    (intmax_t)timediff.tv_sec, timediff.tv_nsec);
 	}
 
 	len += fprintf(trussinfo->outfile, "%s(", name);
