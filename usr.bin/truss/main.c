@@ -60,8 +60,6 @@ __FBSDID("$FreeBSD$");
 #include "extern.h"
 #include "syscall.h"
 
-#define	MAXARGS	6
-
 static void
 usage(void)
 {
@@ -77,8 +75,8 @@ usage(void)
  */
 static struct ex_types {
 	const char *type;
-	void (*enter_syscall)(struct trussinfo *, int);
-	long (*exit_syscall)(struct trussinfo *, int);
+	void (*enter_syscall)(struct trussinfo *);
+	long (*exit_syscall)(struct trussinfo *);
 } ex_types[] = {
 #ifdef __arm__
 	{ "FreeBSD ELF32", arm_syscall_entry, arm_syscall_exit },
@@ -170,7 +168,7 @@ main(int ac, char **av)
 	char *signame;
 	char **command;
 	pid_t childpid;
-	int c, initial_open, status;
+	int c, initial_open, status, quit;
 
 	fname = NULL;
 	initial_open = 1;
@@ -182,7 +180,6 @@ main(int ac, char **av)
 
 	trussinfo->outfile = stderr;
 	trussinfo->strsize = 32;
-	trussinfo->pr_why = S_NONE;
 	trussinfo->curthread = NULL;
 	SLIST_INIT(&trussinfo->threadlist);
 	while ((c = getopt(ac, av, "p:o:facedDs:S")) != -1) {
@@ -282,24 +279,24 @@ START_TRACE:
 
 	clock_gettime(CLOCK_REALTIME, &trussinfo->start_time);
 
+	quit = 0;
 	do {
 		waitevent(trussinfo);
 
 		switch (trussinfo->pr_why) {
-		case S_SCE:
-			funcs->enter_syscall(trussinfo, MAXARGS);
+		case SCE:
+			funcs->enter_syscall(trussinfo);
 			clock_gettime(CLOCK_REALTIME,
 			    &trussinfo->curthread->before);
 			break;
-		case S_SCX:
+		case SCX:
 			clock_gettime(CLOCK_REALTIME,
 			    &trussinfo->curthread->after);
 
 			if (trussinfo->curthread->in_fork &&
 			    (trussinfo->flags & FOLLOWFORKS)) {
 				trussinfo->curthread->in_fork = 0;
-				childpid = funcs->exit_syscall(trussinfo,
-				    trussinfo->pr_data);
+				childpid = funcs->exit_syscall(trussinfo);
 
 				/*
 				 * Fork a new copy of ourself to trace
@@ -313,9 +310,9 @@ START_TRACE:
 				}
 				break;
 			}
-			funcs->exit_syscall(trussinfo, MAXARGS);
+			funcs->exit_syscall(trussinfo);
 			break;
-		case S_SIG:
+		case SIG:
 			if (trussinfo->flags & NOSIGS)
 				break;
 			if (trussinfo->flags & FOLLOWFORKS)
@@ -340,7 +337,9 @@ START_TRACE:
 			    "SIGNAL %u (%s)\n", trussinfo->pr_data,
 			    signame == NULL ? "?" : signame);
 			break;
-		case S_EXIT:
+		case EXIT:
+		case KILLED:
+		case CORED:
 			if (trussinfo->flags & COUNTONLY)
 				break;
 			if (trussinfo->flags & FOLLOWFORKS)
@@ -360,14 +359,23 @@ START_TRACE:
 				    (intmax_t)timediff.tv_sec,
 				    timediff.tv_nsec);
 			}
-			fprintf(trussinfo->outfile,
-			    "process exit, rval = %u\n", trussinfo->pr_data);
+			if (trussinfo->pr_why == EXIT)
+				fprintf(trussinfo->outfile,
+				    "process exit, rval = %u\n",
+				    trussinfo->pr_data);
+			else
+				fprintf(trussinfo->outfile,
+				    "process killed, signal = %u%s\n",
+				    trussinfo->pr_data,
+				    trussinfo->pr_why == CORED ?
+				    " (core dumped)" : "");
+			quit = 1;
 			break;
 		default:
+			quit = 1;
 			break;
 		}
-	} while (trussinfo->pr_why != S_EXIT &&
-	    trussinfo->pr_why != S_DETACHED);
+	} while (!quit);
 
 	if (trussinfo->flags & FOLLOWFORKS) {
 		do {

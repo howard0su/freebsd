@@ -76,7 +76,7 @@ struct linux_syscall {
 	struct syscall *sc;
 	const char *name;
 	int number;
-	unsigned long args[5];
+	unsigned long *args;
 	int nargs;	/* number of arguments -- *not* number of words! */
 	char **s_args;	/* the printable arguments */
 };
@@ -85,7 +85,7 @@ static struct linux_syscall *
 alloc_fsc(void)
 {
 
-	return (malloc(sizeof(struct linux_syscall)));
+	return (calloc(1, sizeof(struct linux_syscall)));
 }
 
 /* Clear up and free parts of the fsc structure. */
@@ -94,6 +94,7 @@ free_fsc(struct linux_syscall *fsc)
 {
 	int i;
 
+	free(fsc->args);
 	if (fsc->s_args) {
 		for (i = 0; i < fsc->nargs; i++)
 			free(fsc->s_args[i]);
@@ -102,30 +103,24 @@ free_fsc(struct linux_syscall *fsc)
 	free(fsc);
 }
 
-/*
- * Called when a process has entered a system call.  nargs is the
- * number of words, not number of arguments (a necessary distinction
- * in some cases).  Note that if the STOPEVENT() code in i386/i386/trap.c
- * is ever changed these functions need to keep up.
- */
-
+/* Called when a thread has entered a system call. */
 void
-amd64_linux32_syscall_entry(struct trussinfo *trussinfo, int nargs)
+amd64_linux32_syscall_entry(struct trussinfo *trussinfo)
 {
 	struct reg regs;
 	struct linux_syscall *fsc;
 	struct syscall *sc;
 	lwpid_t tid;
-	int i, syscall_num;
+	int i, nargs, syscall_num;
 
 	tid = trussinfo->curthread->tid;
+	nargs = trussinfo->pr_lwpinfo.pl_syscall_narg;
+	syscall_num = trussinfo->pr_lwpinfo.pl_syscall_code;
 
 	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
 		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
 		return;
 	}
-
-	syscall_num = regs.r_rax;
 
 	fsc = alloc_fsc();
 	if (fsc == NULL)
@@ -154,11 +149,21 @@ amd64_linux32_syscall_entry(struct trussinfo *trussinfo, int nargs)
 	 * that have more than five arguments?
 	 */
 
-	fsc->args[0] = regs.r_rbx;
-	fsc->args[1] = regs.r_rcx;
-	fsc->args[2] = regs.r_rdx;
-	fsc->args[3] = regs.r_rsi;
-	fsc->args[4] = regs.r_rdi;
+	fsc->args = calloc(1 + nargs, sizeof(unsigned long));
+	switch (nargs) {
+	default:
+		fsc->args[5] = regs.r_rbp;	/* Unconfirmed */
+	case 5:
+		fsc->args[4] = regs.r_rdi;
+	case 4:
+		fsc->args[3] = regs.r_rsi;
+	case 3:
+		fsc->args[2] = regs.r_rdx;
+	case 2:
+		fsc->args[1] = regs.r_rcx;
+	case 1:
+		fsc->args[0] = regs.r_rbx;
+	}
 
 	sc = get_syscall(fsc->name);
 	if (sc)
@@ -171,7 +176,7 @@ amd64_linux32_syscall_entry(struct trussinfo *trussinfo, int nargs)
 		fsc->nargs = nargs;
 	}
 
-	fsc->s_args = calloc(1, (1 + fsc->nargs) * sizeof(char *));
+	fsc->s_args = calloc(1 + fsc->nargs, sizeof(char *));
 	fsc->sc = sc;
 
 	/*
@@ -225,8 +230,7 @@ static const int bsd_to_linux_errno[] = {
 };
 
 long
-amd64_linux32_syscall_exit(struct trussinfo *trussinfo,
-    int syscall_num __unused)
+amd64_linux32_syscall_exit(struct trussinfo *trussinfo)
 {
 	struct reg regs;
 	struct linux_syscall *fsc;

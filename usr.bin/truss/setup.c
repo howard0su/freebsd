@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 
+#include <assert.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -126,22 +127,19 @@ restore_proc(int signo __unused)
 	detaching = 1;
 }
 
-static int
+static void
 detach_proc(pid_t pid)
 {
-	int waitval;
 
 	/* stop the child so that we can detach */
 	kill(pid, SIGSTOP);
-	if (waitpid(pid, &waitval, 0) < 0)
+	if (waitpid(pid, NULL, 0) < 0)
 		err(1, "Unexpected stop in waitpid");
 
 	if (ptrace(PT_DETACH, pid, (caddr_t)1, 0) < 0)
 		err(1, "Can not detach the process");
 
 	kill(pid, SIGCONT);
-
-	return (waitval);
 }
 
 /*
@@ -177,65 +175,65 @@ find_thread(struct trussinfo *info, lwpid_t lwpid)
 void
 waitevent(struct trussinfo *info)
 {
-	struct ptrace_lwpinfo lwpinfo;
-	static int pending_signal = 0;
-	int waitval;
+	siginfo_t si;
 
-	ptrace(PT_SYSCALL, info->pid, (caddr_t)1, pending_signal);
-	pending_signal = 0;
+	ptrace(PT_SYSCALL, info->pid, (caddr_t)1, info->pending_signal);
+	info->pending_signal = 0;
 
-detach:
-	if (detaching) {
-		waitval = detach_proc(info->pid);
-		info->pr_why = S_DETACHED;
-		info->pr_data = WEXITSTATUS(waitval);
-		return;
-	}
+	for (;;) {
+		if (detaching) {
+			detach_proc(info->pid);
+			info->pr_why = DETACHED;
+			return;
+		}
 
-	if (waitpid(info->pid, &waitval, 0) == -1) {
-		if (errno == EINTR)
-			goto detach;
-		err(1, "Unexpected stop in waitpid");
-	}
+		if (waitid(P_PID, info->pid, &si, WTRAPPED | WEXITED) == -1) {
+			if (errno == EINTR)
+				continue;
+			err(1, "Unexpected error from waitid");
+		}
 
-	if (WIFCONTINUED(waitval)) {
-		info->pr_why = S_NONE;
-		return;
-	}
-	if (WIFEXITED(waitval)) {
-		info->pr_why = S_EXIT;
-		info->pr_data = WEXITSTATUS(waitval);
-		return;
-	}
-	if (WIFSTOPPED(waitval)) {
-		ptrace(PT_LWPINFO, info->pid, (caddr_t)&lwpinfo,
-		    sizeof(lwpinfo));
-		find_thread(info, lwpinfo.pl_lwpid);
-		switch (WSTOPSIG(waitval)) {
-		case SIGTRAP:
-			if (lwpinfo.pl_flags & PL_FLAG_SCE) {
-				info->pr_why = S_SCE;
-				info->curthread->in_syscall = 1;
-				break;
-			} else if (lwpinfo.pl_flags & PL_FLAG_SCX) {
-				info->pr_why = S_SCX;
-				info->curthread->in_syscall = 0;
-				break;
-			} else {
-				errx(1,
+		assert(si.si_signo == SIGCHLD);
+		assert(si.si_pid == info->pid);
+
+		if (ptrace(PT_LWPINFO, si.si_pid, (caddr_t)&info->pr_lwpinfo,
+		    sizeof(info->pr_lwpinfo)) == -1)
+			err(1, "ptrace(PT_LWPINFO)");
+		find_thread(info, info->pr_lwpinfo.pl_lwpid);
+
+		info->pr_data = si.si_status;
+		switch (si.si_code) {
+		case CLD_EXITED:
+			info->pr_why = EXIT;
+			return;
+		case CLD_KILLED:
+			info->pr_why = KILLED;
+			return;
+		case CLD_DUMPED:
+			info->pr_why = CORED;
+			return;
+		case CLD_TRAPPED:
+			if (si.si_status == SIGTRAP) {
+				if (info->pr_lwpinfo.pl_flags & PL_FLAG_SCE) {
+					info->pr_why = SCE;
+					info->curthread->in_syscall = 1;
+				} else if (info->pr_lwpinfo.pl_flags &
+				    PL_FLAG_SCX) {
+					info->pr_why = SCX;
+					info->curthread->in_syscall = 0;
+				} else
+					errx(1,
 		   "pl_flags %x contains neither PL_FLAG_SCE nor PL_FLAG_SCX",
-				    lwpinfo.pl_flags);
+					    info->pr_lwpinfo.pl_flags);
+			} else {
+				info->pr_why = SIG;
+				info->pending_signal = si.si_status;
 			}
-		default:
-			info->pr_why = S_SIG;
-			info->pr_data = WSTOPSIG(waitval);
-			pending_signal = info->pr_data;
+			return;
+		case CLD_STOPPED:
+			errx(1, "waitid reported CLD_STOPPED");
+		case CLD_CONTINUED:
 			break;
 		}
-	}
-	if (WIFSIGNALED(waitval)) {
-		info->pr_why = S_EXIT;
-		info->pr_data = 0;
-		return;
 	}
 }
