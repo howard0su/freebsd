@@ -88,7 +88,7 @@ static struct freebsd_syscall *
 alloc_fsc(void)
 {
 
-	return (malloc(sizeof(struct freebsd_syscall)));
+	return (calloc(1, sizeof(struct freebsd_syscall)));
 }
 
 /* Clear up and free parts of the fsc structure. */
@@ -106,24 +106,20 @@ free_fsc(struct freebsd_syscall *fsc)
 	free(fsc);
 }
 
-/*
- * Called when a process has entered a system call.  nargs is the
- * number of words, not number of arguments (a necessary distinction
- * in some cases).  Note that if the STOPEVENT() code in amd64/amd64/trap.c
- * is ever changed these functions need to keep up.
- */
-
+/* Called when a thread has entered a system call. */
 void
-amd64_syscall_entry(struct trussinfo *trussinfo, int nargs)
+amd64_syscall_entry(struct trussinfo *trussinfo)
 {
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
 	struct freebsd_syscall *fsc;
 	struct syscall *sc;
 	lwpid_t tid;
-	int i, reg, syscall_num;
+	int i, nargs, reg, syscall_num;
 
 	tid = trussinfo->curthread->tid;
+	nargs = trussinfo->pr_lwpinfo.pl_syscall_narg;
+	syscall_num = trussinfo->pr_lwpinfo.pl_syscall_code;
 
 	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
 		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
@@ -131,16 +127,18 @@ amd64_syscall_entry(struct trussinfo *trussinfo, int nargs)
 	}
 
 	/*
-	 * FreeBSD has two special kinds of system call redirctions --
+	 * FreeBSD has two special kinds of system call redirections --
 	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()
 	 * routine, basically; the latter is for quad-aligned arguments.
+	 *
+	 * The system call argument count and code from ptrace() already
+	 * account for these, but we need to skip over %rax if it contains
+	 * either of these values.
 	 */
 	reg = 0;
-	syscall_num = regs.r_rax;
-	switch (syscall_num) {
+	switch (regs.r_rax) {
 	case SYS_syscall:
 	case SYS___syscall:
-		syscall_num = regs.r_rdi;
 		reg++;
 		break;
 	}
@@ -166,7 +164,7 @@ amd64_syscall_entry(struct trussinfo *trussinfo, int nargs)
 	if (nargs == 0)
 		return;
 
-	fsc->args = malloc((1 + nargs) * sizeof(unsigned long));
+	fsc->args = calloc(1 + nargs, sizeof(unsigned long));
 	for (i = 0; i < nargs && reg < 6; i++, reg++) {
 		switch (reg) {
 		case 0: fsc->args[i] = regs.r_rdi; break;
@@ -198,7 +196,7 @@ amd64_syscall_entry(struct trussinfo *trussinfo, int nargs)
 		fsc->nargs = nargs;
 	}
 
-	fsc->s_args = calloc(1, (1 + fsc->nargs) * sizeof(char *));
+	fsc->s_args = calloc(1 + fsc->nargs, sizeof(char *));
 	fsc->sc = sc;
 
 	/*
@@ -261,12 +259,10 @@ amd64_syscall_entry(struct trussinfo *trussinfo, int nargs)
 /*
  * And when the system call is done, we handle it here.
  * Currently, no attempt is made to ensure that the system calls
- * match -- this needs to be fixed (and is, in fact, why S_SCX includes
- * the system call number instead of, say, an error status).
+ * match.
  */
-
 long
-amd64_syscall_exit(struct trussinfo *trussinfo, int syscall_num __unused)
+amd64_syscall_exit(struct trussinfo *trussinfo)
 {
 	struct reg regs;
 	struct freebsd_syscall *fsc;

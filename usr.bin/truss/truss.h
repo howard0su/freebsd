@@ -26,6 +26,7 @@
  */
 
 #include <sys/queue.h>
+#include <sys/ptrace.h>
 
 #define	FOLLOWFORKS		0x00000001
 #define	RELATIVETIMESTAMPS	0x00000002
@@ -46,12 +47,18 @@ struct threadinfo
 	struct timespec after;
 };
 
+enum stop_type {
+	SCE, SCX, SIG, KILLED, CORED, EXIT, DETACHED
+};
+
 struct trussinfo
 {
 	pid_t pid;
 	int flags;
-	int pr_why;
+	enum stop_type pr_why;
+	struct ptrace_lwpinfo pr_lwpinfo;
 	int pr_data;
+	int pending_signal;
 	int strsize;
 	FILE *outfile;
 
@@ -82,6 +89,7 @@ struct trussinfo
 		}							\
 	} while (0)
 
+#if 0
 #define	S_NONE	0
 #define	S_SCE	1
 #define	S_SCX	2
@@ -89,3 +97,4 @@ struct trussinfo
 #define	S_SIG	4
 #define	S_EXEC	5
 #define	S_DETACHED	6
+#endif
