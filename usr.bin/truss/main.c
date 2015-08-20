@@ -157,6 +157,22 @@ strsig(int sig)
 	return (NULL);
 }
 
+static void
+enter_syscall(struct ex_types *funcs, struct trussinfo *info)
+{
+
+	funcs->enter_syscall(info);
+	clock_gettime(CLOCK_REALTIME, &info->curthread->before);
+}
+
+static long
+exit_syscall(struct ex_types *funcs, struct trussinfo *info)
+{
+
+	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
+	return (funcs->exit_syscall(info));
+}
+
 int
 main(int ac, char **av)
 {
@@ -167,6 +183,7 @@ main(int ac, char **av)
 	char *fname;
 	char *signame;
 	char **command;
+	long retval;
 	pid_t childpid;
 	int c, initial_open, status, quit;
 
@@ -285,18 +302,15 @@ START_TRACE:
 
 		switch (trussinfo->pr_why) {
 		case SCE:
-			funcs->enter_syscall(trussinfo);
-			clock_gettime(CLOCK_REALTIME,
-			    &trussinfo->curthread->before);
+			enter_syscall(funcs, trussinfo);
 			break;
 		case SCX:
-			clock_gettime(CLOCK_REALTIME,
-			    &trussinfo->curthread->after);
+			retval = exit_syscall(funcs, trussinfo);
 
 			if (trussinfo->curthread->in_fork &&
 			    (trussinfo->flags & FOLLOWFORKS)) {
 				trussinfo->curthread->in_fork = 0;
-				childpid = funcs->exit_syscall(trussinfo);
+				childpid = retval;
 
 				/*
 				 * Fork a new copy of ourself to trace
@@ -310,7 +324,6 @@ START_TRACE:
 				}
 				break;
 			}
-			funcs->exit_syscall(trussinfo);
 			break;
 		case SIG:
 			if (trussinfo->flags & NOSIGS)

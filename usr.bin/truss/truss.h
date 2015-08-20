@@ -36,13 +36,26 @@
 #define	EXECVEENVS		0x00000020
 #define	COUNTONLY		0x00000040
 
+struct current_syscall {
+	struct syscall *sc;
+	const char *name;
+	int number;
+	unsigned long *args;
+	int nargs;
+	char **s_args;	/* the printable arguments */
+};
+	
 struct threadinfo
 {
 	SLIST_ENTRY(threadinfo) entries;
 	lwpid_t tid;
 	int in_syscall;
 	int in_fork;
+#if 0
+	struct current_syscall cs;
+#else
 	void *fsc;
+#endif
 	struct timespec before;
 	struct timespec after;
 };
