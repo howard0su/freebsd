@@ -196,11 +196,6 @@ waitevent(struct trussinfo *info)
 		assert(si.si_signo == SIGCHLD);
 		assert(si.si_pid == info->pid);
 
-		if (ptrace(PT_LWPINFO, si.si_pid, (caddr_t)&info->pr_lwpinfo,
-		    sizeof(info->pr_lwpinfo)) == -1)
-			err(1, "ptrace(PT_LWPINFO)");
-		find_thread(info, info->pr_lwpinfo.pl_lwpid);
-
 		info->pr_data = si.si_status;
 		switch (si.si_code) {
 		case CLD_EXITED:
@@ -213,6 +208,12 @@ waitevent(struct trussinfo *info)
 			info->pr_why = CORED;
 			return;
 		case CLD_TRAPPED:
+			if (ptrace(PT_LWPINFO, si.si_pid,
+			    (caddr_t)&info->pr_lwpinfo,
+			    sizeof(info->pr_lwpinfo)) == -1)
+				err(1, "ptrace(PT_LWPINFO)");
+			find_thread(info, info->pr_lwpinfo.pl_lwpid);
+
 			if (si.si_status == SIGTRAP) {
 				if (info->pr_lwpinfo.pl_flags & PL_FLAG_SCE) {
 					info->pr_why = SCE;
