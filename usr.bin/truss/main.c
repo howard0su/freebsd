@@ -165,7 +165,7 @@ exit_syscall(struct trussinfo *info)
 	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
 	p->abi->exit_syscall(info);
 
-	if (info->curthread->pr_lwpinfo.pl_flags & PL_FLAG_EXEC) {
+	if (info->pr_lwpinfo.pl_flags & PL_FLAG_EXEC) {
 		p->abi = find_abi(p->pid);
 		if (p->abi == NULL) {
 			detach_proc(p->pid);
@@ -184,7 +184,7 @@ main(int ac, char **av)
 	char *signame;
 	char **command;
 	pid_t pid;
-	int c, status, quit;
+	int c;
 
 	fname = NULL;
 
@@ -197,7 +197,7 @@ main(int ac, char **av)
 	trussinfo->outfile = stderr;
 	trussinfo->strsize = 32;
 	trussinfo->curthread = NULL;
-	SLIST_INIT(&trussinfo->proclist);
+	LIST_INIT(&trussinfo->proclist);
 	while ((c = getopt(ac, av, "p:o:facedDs:S")) != -1) {
 		switch (c) {
 		case 'p':	/* specified pid */
@@ -262,7 +262,7 @@ main(int ac, char **av)
 	if (pid == 0) {
 		/* Start a command ourselves */
 		command = av;
-		setup_and_wait(command);
+		setup_and_wait(trussinfo, command);
 		signal(SIGINT, SIG_IGN);
 		signal(SIGTERM, SIG_IGN);
 		signal(SIGQUIT, SIG_IGN);
@@ -273,7 +273,7 @@ main(int ac, char **av)
 		sigaction(SIGINT, &sa, NULL);
 		sigaction(SIGQUIT, &sa, NULL);
 		sigaction(SIGTERM, &sa, NULL);
-		start_tracing(trussinfo->pid);
+		start_tracing(trussinfo, pid);
 	}
 
 	/*
@@ -294,7 +294,7 @@ main(int ac, char **av)
 		 */
 		if (pid == 0)
 			kill(trussinfo->curthread->proc->pid, 9);
-		ptrace(PT_DETACH, trussinfo->curthread->proc->pid);
+		ptrace(PT_DETACH, trussinfo->curthread->proc->pid, NULL, 0);
 		return (1);
 	}
 
@@ -320,7 +320,7 @@ main(int ac, char **av)
 				break;
 			if (trussinfo->flags & FOLLOWFORKS)
 				fprintf(trussinfo->outfile, "%5d: ",
-				    trussinfo->pid);
+				    trussinfo->curthread->proc->pid);
 			if (trussinfo->flags & ABSOLUTETIMESTAMPS) {
 				timespecsubt(&trussinfo->curthread->after,
 				    &trussinfo->start_time, &timediff);

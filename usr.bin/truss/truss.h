@@ -37,6 +37,7 @@
 #define	COUNTONLY		0x00000040
 
 struct procinfo;
+struct trussinfo;
 
 struct procabi {
 	const char *type;
@@ -55,7 +56,7 @@ struct current_syscall {
 
 struct threadinfo
 {
-	LIST_ENTRY(threadinfo) entries;
+	SLIST_ENTRY(threadinfo) entries;
 	struct procinfo *proc;
 	lwpid_t tid;
 	int in_syscall;
@@ -69,11 +70,11 @@ struct threadinfo
 };
 
 struct procinfo {
-	SLIST_ENTRY(procinfo) entries;
+	LIST_ENTRY(procinfo) entries;
 	pid_t pid;
 	struct procabi *abi;
 
-	LIST_HEAD(, threadinfo) threadlist;	
+	SLIST_HEAD(, threadinfo) threadlist;	
 };
 
 enum stop_type {
@@ -87,7 +88,7 @@ struct trussinfo
 	int strsize;
 	FILE *outfile;
 	struct timespec start_time;
-	SLIST_HEAD(, procinfo) proclist;
+	LIST_HEAD(, procinfo) proclist;
 
 	/* State from the current event. */
 	enum stop_type pr_why;
@@ -126,3 +127,7 @@ struct trussinfo
 #define	S_EXEC	5
 #define	S_DETACHED	6
 #endif
+
+void detach_proc(pid_t pid);
+struct procabi *find_abi(pid_t pid);
+void free_proc(struct procinfo *);

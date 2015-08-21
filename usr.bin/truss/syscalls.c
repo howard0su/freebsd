@@ -843,7 +843,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 	pid_t pid;
 
 	fp = open_memstream(&tmp, &tmplen);
-	pid = trussinfo->pid;
+	pid = trussinfo->curthread->proc->pid;
 	switch (sc->type & ARG_MASK) {
 	case Hex:
 		fprintf(fp, "0x%x", (int)args[sc->offset]);
@@ -1536,7 +1536,8 @@ print_syscall(struct trussinfo *trussinfo, const char *name, int nargs,
 
 	len = 0;
 	if (trussinfo->flags & FOLLOWFORKS)
-		len += fprintf(trussinfo->outfile, "%5d: ", trussinfo->pid);
+		len += fprintf(trussinfo->outfile, "%5d: ",
+		    trussinfo->curthread->proc->pid);
 
 	if (name != NULL && (strcmp(name, "execve") == 0 ||
 	    strcmp(name, "exit") == 0)) {

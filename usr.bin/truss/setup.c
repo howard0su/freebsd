@@ -92,7 +92,7 @@ setup_and_wait(struct trussinfo *info, char *command[])
 /*
  * start_tracing is called to attach to an existing process.
  */
-int
+void
 start_tracing(struct trussinfo *info, pid_t pid)
 {
 	int ret, retry;
@@ -105,12 +105,10 @@ start_tracing(struct trussinfo *info, pid_t pid)
 	if (ret)
 		err(1, "can not attach to target process");
 
-	new_proc(info, pid)
+	new_proc(info, pid);
 
 	if (waitpid(pid, NULL, 0) < 0)
 		err(1, "Unexpect stop in waitpid");
-
-	return (0);
 }
 
 /*
@@ -126,7 +124,7 @@ restore_proc(int signo __unused)
 	detaching = 1;
 }
 
-static void
+void
 detach_proc(pid_t pid)
 {
 
@@ -268,11 +266,11 @@ waitevent(struct trussinfo *info)
 			    sizeof(info->pr_lwpinfo)) == -1)
 				err(1, "ptrace(PT_LWPINFO)");
 
-			if (pl->pl_flags & PL_FLAG_CHILD) {
-				new_proc(si.si_pid);
-				assert(new_proc->abi != NULL);
-			}
+			if (info->pr_lwpinfo.pl_flags & PL_FLAG_CHILD)
+				new_proc(info, si.si_pid);
 			find_thread(info, si.si_pid, info->pr_lwpinfo.pl_lwpid);
+			if (info->pr_lwpinfo.pl_flags & PL_FLAG_CHILD)
+				assert(info->curthread->proc->abi != NULL);
 
 			if (si.si_status == SIGTRAP) {
 				if (info->pr_lwpinfo.pl_flags & PL_FLAG_SCE) {
