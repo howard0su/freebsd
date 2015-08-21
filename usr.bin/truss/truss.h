@@ -36,6 +36,14 @@
 #define	EXECVEENVS		0x00000020
 #define	COUNTONLY		0x00000040
 
+struct procinfo;
+
+struct procabi {
+	const char *type;
+	void (*enter_syscall)(struct trussinfo *);
+	long (*exit_syscall)(struct trussinfo *);
+};
+	
 struct current_syscall {
 	struct syscall *sc;
 	const char *name;
@@ -44,13 +52,13 @@ struct current_syscall {
 	int nargs;
 	char **s_args;	/* the printable arguments */
 };
-	
+
 struct threadinfo
 {
-	SLIST_ENTRY(threadinfo) entries;
+	LIST_ENTRY(threadinfo) entries;
+	struct procinfo *proc;
 	lwpid_t tid;
 	int in_syscall;
-	int in_fork;
 #if 0
 	struct current_syscall cs;
 #else
@@ -60,26 +68,33 @@ struct threadinfo
 	struct timespec after;
 };
 
+struct procinfo {
+	SLIST_ENTRY(procinfo) entries;
+	pid_t pid;
+	struct procabi *abi;
+
+	LIST_HEAD(, threadinfo) threadlist;	
+};
+
 enum stop_type {
 	SCE, SCX, SIG, KILLED, CORED, EXIT, DETACHED
 };
 
 struct trussinfo
 {
-	pid_t pid;
+	/* Global settings. */
 	int flags;
+	int strsize;
+	FILE *outfile;
+	struct timespec start_time;
+	SLIST_HEAD(, procinfo) proclist;
+
+	/* State from the current event. */
 	enum stop_type pr_why;
 	struct ptrace_lwpinfo pr_lwpinfo;
 	int pr_data;
 	int pending_signal;
-	int strsize;
-	FILE *outfile;
-
-	struct timespec start_time;
-
 	struct threadinfo *curthread;
-
-	SLIST_HEAD(, threadinfo) threadlist;
 };
 
 #define	timespecsubt(tvp, uvp, vvp)					\

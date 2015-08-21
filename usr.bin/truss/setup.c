@@ -60,15 +60,16 @@ __FBSDID("$FreeBSD$");
 
 static sig_atomic_t detaching;
 
+static void	new_proc(struct trussinfo *, pid_t);
+
 /*
  * setup_and_wait() is called to start a process.  All it really does
- * is fork(), set itself up to stop on exec or exit, and then exec
- * the given command.  At that point, the child process stops, and
- * the parent can wake up and deal with it.
+ * is fork(), enable tracing in the child, and then exec the given
+ * command.  At that point, the child process stops, and the parent
+ * can wake up and deal with it.
  */
-
-int
-setup_and_wait(char *command[])
+void
+setup_and_wait(struct trussinfo *info, char *command[])
 {
 	pid_t pid;
 
@@ -81,21 +82,18 @@ setup_and_wait(char *command[])
 		err(1, "execvp %s", command[0]);
 	}
 
+	new_proc(info, pid);
+
 	/* Only in the parent here */
 	if (waitpid(pid, NULL, 0) < 0)
 		err(1, "unexpect stop in waitpid");
-
-	return (pid);
 }
 
 /*
- * start_tracing picks up where setup_and_wait() dropped off -- namely,
- * it sets the event mask for the given process id.  Called for both
- * monitoring an existing process and when we create our own.
+ * start_tracing is called to attach to an existing process.
  */
-
 int
-start_tracing(pid_t pid)
+start_tracing(struct trussinfo *info, pid_t pid)
 {
 	int ret, retry;
 
@@ -106,6 +104,8 @@ start_tracing(pid_t pid)
 	} while (ret && retry-- > 0);
 	if (ret)
 		err(1, "can not attach to target process");
+
+	new_proc(info, pid)
 
 	if (waitpid(pid, NULL, 0) < 0)
 		err(1, "Unexpect stop in waitpid");
@@ -119,7 +119,6 @@ start_tracing(pid_t pid)
  * applies if truss was told to monitor an already-existing
  * process.
  */
-
 void
 restore_proc(int signo __unused)
 {
@@ -142,59 +141,115 @@ detach_proc(pid_t pid)
 	kill(pid, SIGCONT);
 }
 
+static void
+detach_all_procs(struct trussinfo *info)
+{
+	struct procinfo *p, *p2;
+
+	LIST_FOREACH_SAFE(p, &info->proclist, entries, p2) {
+		detach_proc(p->pid);
+		free_proc(p);
+	}
+}
+
+static void
+new_proc(struct trussinfo *info, pid_t pid)
+{
+	struct procinfo *np;
+
+	/*
+	 * If this happens it means there is a bug in truss.  Unfortunately
+	 * this will kill any processes are attached to.
+	 */
+	LIST_FOREACH(np, &info->proclist, entries) {
+		if (np->pid == pid)
+			errx(1, "Duplicate process for pid %ld", (long)pid);
+	}
+
+	if (info->flags & FOLLOWFORKS)
+		ptrace(PT_FOLLOW_FORK, pid, NULL, 1);
+	np = calloc(1, sizeof(struct procinfo));
+	np->pid = pid;
+	np->abi = find_abi(pid);
+	SLIST_INIT(&np->threadlist);
+	LIST_INSERT_HEAD(&info->proclist, np, entries);
+}
+
+void
+free_proc(struct procinfo *p)
+{
+	struct threadinfo *t, *t2;
+
+	SLIST_FOREACH_SAFE(t, &p->threadlist, entries, t2) {
+		free(t);
+	}
+	LIST_REMOVE(p, entries);
+	free(p);
+}
+
 /*
- * Change curthread member based on lwpid.
- * If it is a new thread, create a threadinfo structure
+ * Change curthread member based on (pid, lwpid).
+ * If it is a new thread, create a threadinfo structure.
  */
 static void
-find_thread(struct trussinfo *info, lwpid_t lwpid)
+find_thread(struct trussinfo *info, pid_t pid, lwpid_t lwpid)
 {
-	struct threadinfo *np;
+	struct procinfo *np;
+	struct threadinfo *nt;
 
 	info->curthread = NULL;
-	SLIST_FOREACH(np, &info->threadlist, entries) {
-		if (np->tid == lwpid) {
-			info->curthread = np;
+
+	LIST_FOREACH(np, &info->proclist, entries) {
+		if (np->pid == pid)
+			break;
+	}
+
+	assert(np != NULL);
+
+	SLIST_FOREACH(nt, &np->threadlist, entries) {
+		if (nt->tid == lwpid) {
+			info->curthread = nt;
 			return;
 		}
 	}
 
-	np = (struct threadinfo *)calloc(1, sizeof(struct threadinfo));
-	if (np == NULL)
+	nt = calloc(1, sizeof(struct threadinfo));
+	if (nt == NULL)
 		err(1, "calloc() failed");
-	np->tid = lwpid;
-	SLIST_INSERT_HEAD(&info->threadlist, np, entries);
-	info->curthread = np;
+	nt->proc = np;
+	nt->tid = lwpid;
+	SLIST_INSERT_HEAD(&np->threadlist, nt, entries);
+	info->curthread = nt;
 }
 
 /*
- * Start the traced process and wait until it stoped.
+ * Start the currently stopped process and wait until another process stops.
  * Fill trussinfo structure.
- * When this even returns, the traced process is in stop state.
+ * When this returns, the traced process is in stop state.
  */
 void
 waitevent(struct trussinfo *info)
 {
 	siginfo_t si;
 
-	ptrace(PT_SYSCALL, info->pid, (caddr_t)1, info->pending_signal);
+	ptrace(PT_SYSCALL, info->curthread->proc->pid, (caddr_t)1,
+	    info->pending_signal);
 	info->pending_signal = 0;
 
 	for (;;) {
 		if (detaching) {
-			detach_proc(info->pid);
+			detach_all_procs(info);
 			info->pr_why = DETACHED;
 			return;
 		}
 
-		if (waitid(P_PID, info->pid, &si, WTRAPPED | WEXITED) == -1) {
+		if (waitid(P_ALL, 0, &si, WTRAPPED | WEXITED) == -1) {
 			if (errno == EINTR)
 				continue;
 			err(1, "Unexpected error from waitid");
 		}
 
 		assert(si.si_signo == SIGCHLD);
-		assert(si.si_pid == info->pid);
 
 		info->pr_data = si.si_status;
 		switch (si.si_code) {
@@ -212,7 +267,12 @@ waitevent(struct trussinfo *info)
 			    (caddr_t)&info->pr_lwpinfo,
 			    sizeof(info->pr_lwpinfo)) == -1)
 				err(1, "ptrace(PT_LWPINFO)");
-			find_thread(info, info->pr_lwpinfo.pl_lwpid);
+
+			if (pl->pl_flags & PL_FLAG_CHILD) {
+				new_proc(si.si_pid);
+				assert(new_proc->abi != NULL);
+			}
+			find_thread(info, si.si_pid, info->pr_lwpinfo.pl_lwpid);
 
 			if (si.si_status == SIGTRAP) {
 				if (info->pr_lwpinfo.pl_flags & PL_FLAG_SCE) {

@@ -133,11 +133,6 @@ amd64_linux32_syscall_entry(struct trussinfo *trussinfo)
 		    syscall_num);
 	}
 
-	if (fsc->name && (trussinfo->flags & FOLLOWFORKS) &&
-	    (strcmp(fsc->name, "linux_fork") == 0 ||
-	    strcmp(fsc->name, "linux_vfork") == 0))
-		trussinfo->curthread->in_fork = 1;
-
 	if (nargs == 0)
 		return;
 
