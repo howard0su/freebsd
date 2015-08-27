@@ -379,6 +379,26 @@ eventloop(struct trussinfo *info)
 					errx(1,
 		   "pl_flags %x contains neither PL_FLAG_SCE nor PL_FLAG_SCX",
 					    pl.pl_flags);
+			} else if (pl.pl_flags & PL_FLAG_CHILD) {
+				clock_gettime(CLOCK_REALTIME,
+				    &info->curthread->after);
+				assert(info->flags & FOLLOWFORKS);
+				fprintf(info->outfile, "%5d: ", si.si_pid);
+				if (info->flags & ABSOLUTETIMESTAMPS) {
+					timespecsubt(&info->curthread->after,
+					    &info->start_time, &timediff);
+					fprintf(info->outfile, "%jd.%09ld ",
+					    (intmax_t)timediff.tv_sec,
+					    timediff.tv_nsec);
+				}
+				if (info->flags & RELATIVETIMESTAMPS) {
+					timediff.tv_sec = 0;
+					timediff.tv_nsec = 0;
+					fprintf(info->outfile, "%jd.%09ld ",
+					    (intmax_t)timediff.tv_sec,
+					    timediff.tv_nsec);
+				}
+				fprintf(info->outfile, "<new process>\n");
 			} else if ((info->flags & NOSIGS) == 0) {
 				if (info->flags & FOLLOWFORKS)
 					fprintf(info->outfile, "%5d: ",
