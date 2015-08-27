@@ -300,6 +300,7 @@ eventloop(struct trussinfo *info)
 	struct timespec timediff;
 	siginfo_t si;
 	char *signame;
+	int pending_signal;
 
 	while (!LIST_EMPTY(&info->proclist)) {
 		if (detaching) {
@@ -379,6 +380,7 @@ eventloop(struct trussinfo *info)
 					errx(1,
 		   "pl_flags %x contains neither PL_FLAG_SCE nor PL_FLAG_SCX",
 					    pl.pl_flags);
+				pending_signal = 0;
 			} else if (pl.pl_flags & PL_FLAG_CHILD) {
 				clock_gettime(CLOCK_REALTIME,
 				    &info->curthread->after);
@@ -399,7 +401,7 @@ eventloop(struct trussinfo *info)
 					    timediff.tv_nsec);
 				}
 				fprintf(info->outfile, "<new process>\n");
-				si.si_status = 0;
+				pending_signal = 0;
 			} else if ((info->flags & NOSIGS) == 0) {
 				if (info->flags & FOLLOWFORKS)
 					fprintf(info->outfile, "%5d: ",
@@ -423,9 +425,10 @@ eventloop(struct trussinfo *info)
 				fprintf(info->outfile,
 				    "SIGNAL %u (%s)\n", si.si_status,
 				    signame == NULL ? "?" : signame);
+				pending_signal = si.si_status;
 			}
 			ptrace(PT_SYSCALL, si.si_pid, (caddr_t)1,
-			    si.si_status == SIGTRAP ? 0 : si.si_status);
+			    pending_signal);
 			break;
 		case CLD_STOPPED:
 			errx(1, "waitid reported CLD_STOPPED");
