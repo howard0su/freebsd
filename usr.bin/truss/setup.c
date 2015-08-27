@@ -82,11 +82,11 @@ setup_and_wait(struct trussinfo *info, char *command[])
 		err(1, "execvp %s", command[0]);
 	}
 
-	new_proc(info, pid);
-
 	/* Only in the parent here */
 	if (waitpid(pid, NULL, 0) < 0)
 		err(1, "unexpect stop in waitpid");
+
+	new_proc(info, pid);
 }
 
 /*
@@ -105,10 +105,10 @@ start_tracing(struct trussinfo *info, pid_t pid)
 	if (ret)
 		err(1, "can not attach to target process");
 
-	new_proc(info, pid);
-
 	if (waitpid(pid, NULL, 0) < 0)
 		err(1, "Unexpect stop in waitpid");
+
+	new_proc(info, pid);
 }
 
 /*
@@ -185,6 +185,19 @@ free_proc(struct procinfo *p)
 	free(p);
 }
 
+static struct procinfo *
+find_proc(struct trussinfo *info, pid_t pid)
+{
+	struct procinfo *np;
+
+	LIST_FOREACH(np, &info->proclist, entries) {
+		if (np->pid == pid)
+			return (np);
+	}
+
+	return (NULL);
+}
+
 /*
  * Change curthread member based on (pid, lwpid).
  * If it is a new thread, create a threadinfo structure.
@@ -195,13 +208,7 @@ find_thread(struct trussinfo *info, pid_t pid, lwpid_t lwpid)
 	struct procinfo *np;
 	struct threadinfo *nt;
 
-	info->curthread = NULL;
-
-	LIST_FOREACH(np, &info->proclist, entries) {
-		if (np->pid == pid)
-			break;
-	}
-
+	np = find_proc(info, pid);
 	assert(np != NULL);
 
 	SLIST_FOREACH(nt, &np->threadlist, entries) {
@@ -221,6 +228,41 @@ find_thread(struct trussinfo *info, pid_t pid, lwpid_t lwpid)
 }
 
 /*
+ * When a process exits, it no longer has any threads left.  However,
+ * the main loop expects a valid curthread.  In cases when a thread
+ * triggers the termination (e.g. calling exit or triggering a fault)
+ * we would ideally use that thread.  However, if a process is killed
+ * by a signal sent from another process then there is no "correct"
+ * thread.  We just punt and use the first thread.
+ */
+static void
+find_exit_thread(struct trussinfo *info, pid_t pid)
+{
+	struct procinfo *np;
+	struct threadinfo *nt;
+
+	np = find_proc(info, pid);
+	assert(np != NULL);
+
+	if (SLIST_EMPTY(&np->threadlist)) {
+		/*
+		 * If an existing process exits right after we attach
+		 * to it but before it posts any events, there won't
+		 * be any threads.  Create a dummy thread and set its
+		 * "after" time to the global start time.
+		 */
+		nt = calloc(1, sizeof(struct threadinfo));
+		if (nt == NULL)
+			err(1, "calloc() failed");
+		nt->proc = np;
+		nt->tid = 0;
+		SLIST_INSERT_HEAD(&np->threadlist, nt, entries);
+		nt->after = nt->before = info->start_time;
+	}
+	info->curthread = SLIST_FIRST(&np->threadlist);
+}
+
+/*
  * Start the currently stopped process and wait until another process stops.
  * Fill trussinfo structure.
  * When this returns, the traced process is in stop state.
@@ -230,9 +272,11 @@ waitevent(struct trussinfo *info)
 {
 	siginfo_t si;
 
-	ptrace(PT_SYSCALL, info->curthread->proc->pid, (caddr_t)1,
-	    info->pending_signal);
-	info->pending_signal = 0;
+	if (info->curthread != NULL) {
+		ptrace(PT_SYSCALL, info->curthread->proc->pid, (caddr_t)1,
+		    info->pending_signal);
+		info->pending_signal = 0;
+	}
 
 	for (;;) {
 		if (detaching) {
@@ -252,12 +296,15 @@ waitevent(struct trussinfo *info)
 		info->pr_data = si.si_status;
 		switch (si.si_code) {
 		case CLD_EXITED:
+			find_exit_thread(info, si.si_pid);
 			info->pr_why = EXIT;
 			return;
 		case CLD_KILLED:
+			find_exit_thread(info, si.si_pid);
 			info->pr_why = KILLED;
 			return;
 		case CLD_DUMPED:
+			find_exit_thread(info, si.si_pid);
 			info->pr_why = CORED;
 			return;
 		case CLD_TRAPPED:
@@ -266,11 +313,12 @@ waitevent(struct trussinfo *info)
 			    sizeof(info->pr_lwpinfo)) == -1)
 				err(1, "ptrace(PT_LWPINFO)");
 
-			if (info->pr_lwpinfo.pl_flags & PL_FLAG_CHILD)
+			if (info->pr_lwpinfo.pl_flags & PL_FLAG_CHILD) {
 				new_proc(info, si.si_pid);
+				assert(LIST_FIRST(&info->proclist)->abi !=
+				    NULL);
+			}
 			find_thread(info, si.si_pid, info->pr_lwpinfo.pl_lwpid);
-			if (info->pr_lwpinfo.pl_flags & PL_FLAG_CHILD)
-				assert(info->curthread->proc->abi != NULL);
 
 			if (si.si_status == SIGTRAP) {
 				if (info->pr_lwpinfo.pl_flags & PL_FLAG_SCE) {
