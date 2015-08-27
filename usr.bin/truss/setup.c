@@ -399,6 +399,7 @@ eventloop(struct trussinfo *info)
 					    timediff.tv_nsec);
 				}
 				fprintf(info->outfile, "<new process>\n");
+				si.si_status = 0;
 			} else if ((info->flags & NOSIGS) == 0) {
 				if (info->flags & FOLLOWFORKS)
 					fprintf(info->outfile, "%5d: ",
