@@ -250,7 +250,7 @@ find_exit_thread(struct trussinfo *info, pid_t pid)
 		 * If an existing process exits right after we attach
 		 * to it but before it posts any events, there won't
 		 * be any threads.  Create a dummy thread and set its
-		 * "after" time to the global start time.
+		 * "before" time to the global start time.
 		 */
 		nt = calloc(1, sizeof(struct threadinfo));
 		if (nt == NULL)
@@ -258,7 +258,7 @@ find_exit_thread(struct trussinfo *info, pid_t pid)
 		nt->proc = np;
 		nt->tid = 0;
 		SLIST_INSERT_HEAD(&np->threadlist, nt, entries);
-		nt->after = nt->before = info->start_time;
+		nt->before = info->start_time;
 	}
 	info->curthread = SLIST_FIRST(&np->threadlist);
 }
@@ -325,6 +325,8 @@ eventloop(struct trussinfo *info)
 				if (info->flags & FOLLOWFORKS)
 					fprintf(info->outfile, "%5d: ",
 					    si.si_pid);
+				clock_gettime(CLOCK_REALTIME,
+				    &info->curthread->after);
 				if (info->flags & ABSOLUTETIMESTAMPS) {
 					timespecsubt(&info->curthread->after,
 					    &info->start_time, &timediff);
