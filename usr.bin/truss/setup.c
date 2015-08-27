@@ -125,7 +125,7 @@ restore_proc(int signo __unused)
 	detaching = 1;
 }
 
-void
+static void
 detach_proc(pid_t pid)
 {
 
@@ -138,17 +138,6 @@ detach_proc(pid_t pid)
 		err(1, "Can not detach the process");
 
 	kill(pid, SIGCONT);
-}
-
-static void
-detach_all_procs(struct trussinfo *info)
-{
-	struct procinfo *p, *p2;
-
-	LIST_FOREACH_SAFE(p, &info->proclist, entries, p2) {
-		detach_proc(p->pid);
-		free_proc(p);
-	}
 }
 
 static void
@@ -174,7 +163,7 @@ new_proc(struct trussinfo *info, pid_t pid)
 	LIST_INSERT_HEAD(&info->proclist, np, entries);
 }
 
-void
+static void
 free_proc(struct procinfo *p)
 {
 	struct threadinfo *t, *t2;
@@ -184,6 +173,17 @@ free_proc(struct procinfo *p)
 	}
 	LIST_REMOVE(p, entries);
 	free(p);
+}
+
+static void
+detach_all_procs(struct trussinfo *info)
+{
+	struct procinfo *p, *p2;
+
+	LIST_FOREACH_SAFE(p, &info->proclist, entries, p2) {
+		detach_proc(p->pid);
+		free_proc(p);
+	}
 }
 
 static struct procinfo *
@@ -405,7 +405,7 @@ eventloop(struct trussinfo *info)
 			}
 			ptrace(PT_SYSCALL, si.si_pid, (caddr_t)1,
 			    si.si_status == SIGTRAP ? 0 : si.si_status);
-			return;
+			break;
 		case CLD_STOPPED:
 			errx(1, "waitid reported CLD_STOPPED");
 		case CLD_CONTINUED:
