@@ -280,9 +280,7 @@ main(int ac, char **av)
 	 * At this point, if we started the process, it is stopped waiting to
 	 * be woken up, either in exit() or in execve().
 	 */
-	trussinfo->curthread->proc->abi =
-	    find_abi(trussinfo->curthread->proc->pid);
-	if (trussinfo->curthread->proc->abi == NULL) {
+	if (LIST_FIRST(&trussinfo->proclist)->abi == NULL) {
 		/*
 		 * If we are not able to handle this ABI, detach from the
 		 * process and exit.  If we just created a new process to
@@ -293,10 +291,13 @@ main(int ac, char **av)
 		 * quite what we want?
 		 */
 		if (pid == 0)
-			kill(trussinfo->curthread->proc->pid, 9);
-		ptrace(PT_DETACH, trussinfo->curthread->proc->pid, NULL, 0);
+			kill(LIST_FIRST(&trussinfo->proclist)->pid, 9);
+		ptrace(PT_DETACH, LIST_FIRST(&trussinfo->proclist)->pid, NULL,
+		    0);
 		return (1);
-	}
+	} else
+		ptrace(PT_SYSCALL, LIST_FIRST(&trussinfo->proclist)->pid,
+		    (caddr_t)1, 0);
 
 	/*
 	 * At this point, it's a simple loop, waiting for the process to
