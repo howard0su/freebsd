@@ -77,10 +77,6 @@ struct procinfo {
 	SLIST_HEAD(, threadinfo) threadlist;	
 };
 
-enum stop_type {
-	SCE, SCX, SIG, KILLED, CORED, EXIT, DETACHED
-};
-
 struct trussinfo
 {
 	/* Global settings. */
@@ -115,16 +111,4 @@ struct trussinfo
 		}							\
 	} while (0)
 
-#if 0
-#define	S_NONE	0
-#define	S_SCE	1
-#define	S_SCX	2
-#define	S_EXIT	3
-#define	S_SIG	4
-#define	S_EXEC	5
-#define	S_DETACHED	6
-#endif
-
-void detach_proc(pid_t pid);
 struct procabi *find_abi(pid_t pid);
-void free_proc(struct procinfo *);
