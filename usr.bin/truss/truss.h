@@ -91,10 +91,7 @@ struct trussinfo
 	LIST_HEAD(, procinfo) proclist;
 
 	/* State from the current event. */
-	enum stop_type pr_why;
 	struct ptrace_lwpinfo pr_lwpinfo;
-	int pr_data;
-	int pending_signal;
 	struct threadinfo *curthread;
 };
 

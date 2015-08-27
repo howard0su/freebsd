@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD$");
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -262,26 +263,47 @@ find_exit_thread(struct trussinfo *info, pid_t pid)
 	info->curthread = SLIST_FIRST(&np->threadlist);
 }
 
+static void
+enter_syscall(struct trussinfo *info)
+{
+
+	info->curthread->proc->abi->enter_syscall(info);
+	clock_gettime(CLOCK_REALTIME, &info->curthread->before);
+}
+
+static void
+exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
+{
+	struct procinfo *p;
+
+	p = info->curthread->proc;
+	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
+	p->abi->exit_syscall(info);
+
+	if (pl->pl_flags & PL_FLAG_EXEC) {
+		p->abi = find_abi(p->pid);
+		if (p->abi == NULL) {
+			detach_proc(p->pid);
+			free_proc(p);
+		}
+	}
+}
+
 /*
- * Start the currently stopped process and wait until another process stops.
- * Fill trussinfo structure.
- * When this returns, the traced process is in stop state.
+ * Wait for events until all the processes have exited or truss has been
+ * asked to stop.
  */
 void
-waitevent(struct trussinfo *info)
+eventloop(struct trussinfo *info)
 {
+	struct ptrace_lwpinfo pl;
+	struct timespec timediff;
 	siginfo_t si;
+	char *signame;
 
-	if (info->curthread != NULL) {
-		ptrace(PT_SYSCALL, info->curthread->proc->pid, (caddr_t)1,
-		    info->pending_signal);
-		info->pending_signal = 0;
-	}
-
-	for (;;) {
+	while (!LIST_EMPTY(&info->proclist)) {
 		if (detaching) {
 			detach_all_procs(info);
-			info->pr_why = DETACHED;
 			return;
 		}
 
@@ -293,49 +315,96 @@ waitevent(struct trussinfo *info)
 
 		assert(si.si_signo == SIGCHLD);
 
-		info->pr_data = si.si_status;
 		switch (si.si_code) {
 		case CLD_EXITED:
-			find_exit_thread(info, si.si_pid);
-			info->pr_why = EXIT;
-			return;
 		case CLD_KILLED:
-			find_exit_thread(info, si.si_pid);
-			info->pr_why = KILLED;
-			return;
 		case CLD_DUMPED:
 			find_exit_thread(info, si.si_pid);
-			info->pr_why = CORED;
-			return;
+			if ((info->flags & COUNTONLY) == 0) {
+				if (info->flags & FOLLOWFORKS)
+					fprintf(info->outfile, "%5d: ",
+					    si.si_pid);
+				if (info->flags & ABSOLUTETIMESTAMPS) {
+					timespecsubt(&info->curthread->after,
+					    &info->start_time, &timediff);
+					fprintf(info->outfile, "%jd.%09ld ",
+					    (intmax_t)timediff.tv_sec,
+					    timediff.tv_nsec);
+				}
+				if (info->flags & RELATIVETIMESTAMPS) {
+					timespecsubt(&info->curthread->after,
+					    &info->curthread->before,
+					    &timediff);
+					fprintf(info->outfile, "%jd.%09ld ",
+					    (intmax_t)timediff.tv_sec,
+					    timediff.tv_nsec);
+				}
+				if (si.si_code == CLD_EXITED)
+					fprintf(info->outfile,
+					    "process exit, rval = %u\n",
+					    si.si_status);
+				else
+					fprintf(info->outfile,
+					    "process killed, signal = %u%s\n",
+					    si.si_status,
+					    si.si_code == CLD_DUMPED ?
+					    " (core dumped)" : "");
+			}
+			free_proc(info->curthread->proc);
+			info->curthread = NULL;
+			break;
 		case CLD_TRAPPED:
-			if (ptrace(PT_LWPINFO, si.si_pid,
-			    (caddr_t)&info->pr_lwpinfo,
-			    sizeof(info->pr_lwpinfo)) == -1)
+			if (ptrace(PT_LWPINFO, si.si_pid, (caddr_t)&pl,
+			    sizeof(pl)) == -1)
 				err(1, "ptrace(PT_LWPINFO)");
 
-			if (info->pr_lwpinfo.pl_flags & PL_FLAG_CHILD) {
+			if (pl.pl_flags & PL_FLAG_CHILD) {
 				new_proc(info, si.si_pid);
 				assert(LIST_FIRST(&info->proclist)->abi !=
 				    NULL);
 			}
-			find_thread(info, si.si_pid, info->pr_lwpinfo.pl_lwpid);
+			find_thread(info, si.si_pid, pl.pl_lwpid);
+			info->pr_lwpinfo = pl;  // XXX: Temporary
 
 			if (si.si_status == SIGTRAP) {
-				if (info->pr_lwpinfo.pl_flags & PL_FLAG_SCE) {
-					info->pr_why = SCE;
+				if (pl.pl_flags & PL_FLAG_SCE) {
 					info->curthread->in_syscall = 1;
-				} else if (info->pr_lwpinfo.pl_flags &
+					enter_syscall(info);
+				} else if (pl.pl_flags &
 				    PL_FLAG_SCX) {
-					info->pr_why = SCX;
 					info->curthread->in_syscall = 0;
+					exit_syscall(info, &pl);
+					
 				} else
 					errx(1,
 		   "pl_flags %x contains neither PL_FLAG_SCE nor PL_FLAG_SCX",
-					    info->pr_lwpinfo.pl_flags);
-			} else {
-				info->pr_why = SIG;
-				info->pending_signal = si.si_status;
+					    pl.pl_flags);
+			} else if ((info->flags & NOSIGS) == 0) {
+				if (info->flags & FOLLOWFORKS)
+					fprintf(info->outfile, "%5d: ",
+					    si.si_pid);
+				if (info->flags & ABSOLUTETIMESTAMPS) {
+					timespecsubt(&info->curthread->after,
+					    &info->start_time, &timediff);
+					fprintf(info->outfile, "%jd.%09ld ",
+					    (intmax_t)timediff.tv_sec,
+					    timediff.tv_nsec);
+				}
+				if (info->flags & RELATIVETIMESTAMPS) {
+					timespecsubt(&info->curthread->after,
+					    &info->curthread->before,
+					    &timediff);
+					fprintf(info->outfile, "%jd.%09ld ",
+					    (intmax_t)timediff.tv_sec,
+					    timediff.tv_nsec);
+				}
+				signame = strsig(si.si_status);
+				fprintf(info->outfile,
+				    "SIGNAL %u (%s)\n", si.si_status,
+				    signame == NULL ? "?" : signame);
 			}
+			ptrace(PT_SYSCALL, si.si_pid, (caddr_t)1,
+			    si.si_status == SIGTRAP ? 0 : si.si_status);
 			return;
 		case CLD_STOPPED:
 			errx(1, "waitid reported CLD_STOPPED");
