@@ -148,40 +148,12 @@ strsig(int sig)
 	return (NULL);
 }
 
-static void
-enter_syscall(struct trussinfo *info)
-{
-
-	info->curthread->proc->abi->enter_syscall(info);
-	clock_gettime(CLOCK_REALTIME, &info->curthread->before);
-}
-
-static void
-exit_syscall(struct trussinfo *info)
-{
-	struct procinfo *p;
-
-	p = info->curthread->proc;
-	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
-	p->abi->exit_syscall(info);
-
-	if (info->pr_lwpinfo.pl_flags & PL_FLAG_EXEC) {
-		p->abi = find_abi(p->pid);
-		if (p->abi == NULL) {
-			detach_proc(p->pid);
-			free_proc(p);
-		}
-	}
-}
-
 int
 main(int ac, char **av)
 {
-	struct timespec timediff;
 	struct sigaction sa;
 	struct trussinfo *trussinfo;
 	char *fname;
-	char *signame;
 	char **command;
 	pid_t pid;
 	int c;
@@ -306,80 +278,7 @@ main(int ac, char **av)
 	 */
 	clock_gettime(CLOCK_REALTIME, &trussinfo->start_time);
 
-	do {
-		waitevent(trussinfo);
-
-		switch (trussinfo->pr_why) {
-		case SCE:
-			enter_syscall(trussinfo);
-			break;
-		case SCX:
-			exit_syscall(trussinfo);
-			break;
-		case SIG:
-			if (trussinfo->flags & NOSIGS)
-				break;
-			if (trussinfo->flags & FOLLOWFORKS)
-				fprintf(trussinfo->outfile, "%5d: ",
-				    trussinfo->curthread->proc->pid);
-			if (trussinfo->flags & ABSOLUTETIMESTAMPS) {
-				timespecsubt(&trussinfo->curthread->after,
-				    &trussinfo->start_time, &timediff);
-				fprintf(trussinfo->outfile, "%jd.%09ld ",
-				    (intmax_t)timediff.tv_sec,
-				    timediff.tv_nsec);
-			}
-			if (trussinfo->flags & RELATIVETIMESTAMPS) {
-				timespecsubt(&trussinfo->curthread->after,
-				    &trussinfo->curthread->before, &timediff);
-				fprintf(trussinfo->outfile, "%jd.%09ld ",
-				    (intmax_t)timediff.tv_sec,
-				    timediff.tv_nsec);
-			}
-			signame = strsig(trussinfo->pr_data);
-			fprintf(trussinfo->outfile,
-			    "SIGNAL %u (%s)\n", trussinfo->pr_data,
-			    signame == NULL ? "?" : signame);
-			break;
-		case EXIT:
-		case KILLED:
-		case CORED:
-			if (trussinfo->flags & COUNTONLY)
-				break;
-			if (trussinfo->flags & FOLLOWFORKS)
-				fprintf(trussinfo->outfile, "%5d: ",
-				    trussinfo->curthread->proc->pid);
-			if (trussinfo->flags & ABSOLUTETIMESTAMPS) {
-				timespecsubt(&trussinfo->curthread->after,
-				    &trussinfo->start_time, &timediff);
-				fprintf(trussinfo->outfile, "%jd.%09ld ",
-				    (intmax_t)timediff.tv_sec,
-				    timediff.tv_nsec);
-			}
-			if (trussinfo->flags & RELATIVETIMESTAMPS) {
-				timespecsubt(&trussinfo->curthread->after,
-				    &trussinfo->curthread->before, &timediff);
-				fprintf(trussinfo->outfile, "%jd.%09ld ",
-				    (intmax_t)timediff.tv_sec,
-				    timediff.tv_nsec);
-			}
-			if (trussinfo->pr_why == EXIT)
-				fprintf(trussinfo->outfile,
-				    "process exit, rval = %u\n",
-				    trussinfo->pr_data);
-			else
-				fprintf(trussinfo->outfile,
-				    "process killed, signal = %u%s\n",
-				    trussinfo->pr_data,
-				    trussinfo->pr_why == CORED ?
-				    " (core dumped)" : "");
-			free_proc(trussinfo->curthread->proc);
-			trussinfo->curthread = NULL;
-			break;
-		default:
-			break;
-		}
-	} while (!LIST_EMPTY(&trussinfo->proclist));
+	eventloop(trussinfo);
 
 	if (trussinfo->flags & COUNTONLY)
 		print_summary(trussinfo);
