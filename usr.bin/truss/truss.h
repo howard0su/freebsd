@@ -42,19 +42,19 @@ struct trussinfo;
 
 struct procabi {
 	const char *type;
-#if 0
-	void (*enter_syscall)(struct trussinfo *);
-	long (*exit_syscall)(struct trussinfo *);
-#else
 	const char **syscallnames;
 	int nsyscalls;
 	int (*fetch_args)(struct trussinfo *);
 	int (*fetch_retval)(struct trussinfo *, long *, int *);
-#endif
 };
 
 #define	PROCABI(abi)	DATA_SET(procabi, abi)
 
+/*
+ * This is confusingly named.  It holds per-thread state about the
+ * currently executing system call.  syscalls.h defines a struct
+ * syscall that holds metadata used to format system call arguments.
+ */
 struct current_syscall {
 	struct syscall *sc;
 	const char *name;
@@ -70,11 +70,7 @@ struct threadinfo
 	struct procinfo *proc;
 	lwpid_t tid;
 	int in_syscall;
-#if 1
 	struct current_syscall cs;
-#else
-	void *fsc;
-#endif
 	struct timespec before;
 	struct timespec after;
 };
@@ -89,16 +85,15 @@ struct procinfo {
 
 struct trussinfo
 {
-	/* Global settings. */
 	int flags;
 	int strsize;
 	FILE *outfile;
-	struct timespec start_time;
-	LIST_HEAD(, procinfo) proclist;
 
-	/* State from the current event. */
-//	struct ptrace_lwpinfo pr_lwpinfo;
+	struct timespec start_time;
+
 	struct threadinfo *curthread;
+
+	LIST_HEAD(, procinfo) proclist;
 };
 
 #define	timespecsubt(tvp, uvp, vvp)					\
