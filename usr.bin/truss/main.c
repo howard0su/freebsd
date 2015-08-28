@@ -70,12 +70,6 @@ usage(void)
 
 #if 0
 static struct procabi abis[] = {
-#ifdef __i386__
-	{ "FreeBSD a.out", i386_syscall_entry, i386_syscall_exit },
-	{ "FreeBSD ELF", i386_syscall_entry, i386_syscall_exit },
-	{ "FreeBSD ELF32", i386_syscall_entry, i386_syscall_exit },
-	{ "Linux ELF", i386_linux_syscall_entry, i386_linux_syscall_exit },
-#endif
 #ifdef __powerpc__
 	{ "FreeBSD ELF", powerpc_syscall_entry, powerpc_syscall_exit },
 	{ "FreeBSD ELF32", powerpc_syscall_entry, powerpc_syscall_exit },
