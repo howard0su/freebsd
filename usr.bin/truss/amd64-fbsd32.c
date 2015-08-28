@@ -29,32 +29,21 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static const char rcsid[] =
-  "$FreeBSD$";
-#endif /* not lint */
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD$");
 
 /* FreeBSD/i386-specific system call handling. */
 
-#include <sys/types.h>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
 
 #include <machine/reg.h>
 #include <machine/psl.h>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
 
 #include "truss.h"
-#include "syscall.h"
-#include "extern.h"
 
 #include "freebsd32_syscalls.h"
 
