@@ -57,6 +57,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/reg.h>
 
 #include "truss.h"
+#include "syscall.h"
 #include "extern.h"
 
 static sig_atomic_t detaching;
@@ -264,22 +265,157 @@ find_exit_thread(struct trussinfo *info, pid_t pid)
 }
 
 static void
-enter_syscall(struct trussinfo *info)
+alloc_syscall(struct threadinfo *t, struct ptrace_lwpinfo *pl)
 {
 
-	info->curthread->proc->abi->enter_syscall(info);
-	clock_gettime(CLOCK_REALTIME, &info->curthread->before);
+	assert(t->in_syscall == 0);
+	assert(t->cs.number == 0);
+	assert(t->cs.name == NULL);
+	assert(t->cs.args == NULL);
+	assert(t->cs.nargs == 0);
+	assert(t->cs.s_args == NULL);
+	t->cs.number = pl->pl_syscall_code;
+	t->cs.nargs = pl->pl_syscall_narg;
+	if (t->cs.nargs != 0)
+		t->cs.args = calloc(1 + t->cs.nargs, sizeof(t->cs.args[0]));
+	t->in_syscall = 1;
+}
+
+static void
+free_syscall(struct threadinfo *t)
+{
+	int i;
+
+	free(t->cs.args);
+	if (t->cs.s_args) {
+		for (i = 0; i < t->cs.nargs; i++)
+			free(t->cs.s_args[i]);
+		free(t->cs.s_args);
+	}
+	memset(&t->cs, 0, sizeof(t->cs));
+	t->in_syscall = 0;
+}
+
+static void
+enter_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
+{
+	struct threadinfo *t;
+	struct syscall *sc;
+	int i;
+
+	t = info->curthread;
+	alloc_syscall(t, pl);
+	if (t->cs.nargs != 0 && t->proc->abi->fetch_args(info) != 0) {
+		free_syscall(t);
+		return;
+	}
+
+	if (t->cs.number >= 0 && t->cs.number < t->proc->abi->nsyscalls)
+		t->cs.name = t->proc->abi->syscallnames[t->cs.number];
+	if (t->cs.name == NULL)
+		fprintf(info->outfile, "-- UNKNOWN %s SYSCALL %d --\n",
+		    t->proc->abi->type, t->cs.number);
+
+	sc = get_syscall(t->cs.name);
+	if (sc)
+		t->cs.nargs = sc->nargs;
+	else {
+#if DEBUG
+		fprintf(stderr, "unknown syscall %s -- setting "
+		    "args to %d\n", t->cs.name, t->cs.nargs);
+#endif
+	}
+
+	t->cs.s_args = calloc(1 + t->cs.nargs, sizeof(char *));
+	t->cs.sc = sc;
+
+	/*
+	 * At this point, we set up the system call arguments.
+	 * We ignore any OUT ones, however -- those are arguments that
+	 * are set by the system call, and so are probably meaningless
+	 * now.	This doesn't currently support arguments that are
+	 * passed in *and* out, however.
+	 */
+	if (t->cs.name != NULL) {
+#if DEBUG
+		fprintf(stderr, "syscall %s(", t->cs.name);
+#endif
+		for (i = 0; i < t->cs.nargs; i++) {
+#if DEBUG
+			fprintf(stderr, "0x%lx%s", sc ?
+			    t->cs.args[sc->args[i].offset] : t->cs.args[i],
+			    i < (t->cs.nargs - 1) ? "," : "");
+#endif
+			if (sc && !(sc->args[i].type & OUT)) {
+				t->cs.s_args[i] = print_arg(&sc->args[i],
+				    t->cs.args, 0, info);
+			}
+		}
+#if DEBUG
+		fprintf(stderr, ")\n");
+#endif
+	}
+
+	clock_gettime(CLOCK_REALTIME, &t->before);
 }
 
 static void
 exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 {
+	struct threadinfo *t;
 	struct procinfo *p;
+	struct syscall *sc;
+	long retval;
+	int errorp, i;
 
-	p = info->curthread->proc;
-	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
-	p->abi->exit_syscall(info);
+	t = info->curthread;
+	if (!t->in_syscall)
+		return;
 
+	clock_gettime(CLOCK_REALTIME, &t->after);
+	p = t->proc;
+	if (p->abi->fetch_retval(info, &retval, &errorp) < 0) {
+		free_syscall(t);
+		return;
+	}
+
+	sc = t->cs.sc;
+	if (sc == NULL) {
+		for (i = 0; i < t->cs.nargs; i++)
+			asprintf(&t->cs.s_args[i], "0x%lx", t->cs.args[i]);
+	} else {
+		/*
+		 * Here, we only look for arguments that have OUT masked in --
+		 * otherwise, they were handled in enter_syscall().
+		 */
+		for (i = 0; i < sc->nargs; i++) {
+			char *temp;
+
+			if (sc->args[i].type & OUT) {
+				/*
+				 * If an error occurred, then don't bother
+				 * getting the data; it may not be valid.
+				 */
+				if (errorp) {
+					asprintf(&temp, "0x%lx",
+					    t->cs.args[sc->args[i].offset]);
+				} else {
+					temp = print_arg(&sc->args[i],
+					    t->cs.args, retval, info);
+				}
+				t->cs.s_args[i] = temp;
+			}
+		}
+	}
+
+	print_syscall_ret(info, t->cs.name, t->cs.nargs, t->cs.s_args,
+	    errorp, retval, sc);
+	free_syscall(t);
+
+	/*
+	 * If the process executed a new image, check the ABI.  If the
+	 * new ABI isn't supported, stop tracing this process.
+	 */
 	if (pl->pl_flags & PL_FLAG_EXEC) {
 		p->abi = find_abi(p->pid);
 		if (p->abi == NULL) {
@@ -367,18 +503,14 @@ eventloop(struct trussinfo *info)
 				    NULL);
 			}
 			find_thread(info, si.si_pid, pl.pl_lwpid);
-			info->pr_lwpinfo = pl;  // XXX: Temporary
 
 			if (si.si_status == SIGTRAP) {
-				if (pl.pl_flags & PL_FLAG_SCE) {
-					info->curthread->in_syscall = 1;
-					enter_syscall(info);
-				} else if (pl.pl_flags &
-				    PL_FLAG_SCX) {
-					info->curthread->in_syscall = 0;
+				if (pl.pl_flags & PL_FLAG_SCE)
+					enter_syscall(info, &pl);
+				else if (pl.pl_flags & PL_FLAG_SCX)
 					exit_syscall(info, &pl);
 					
-				} else
+				else
 					errx(1,
 		   "pl_flags %x contains neither PL_FLAG_SCE nor PL_FLAG_SCX",
 					    pl.pl_flags);

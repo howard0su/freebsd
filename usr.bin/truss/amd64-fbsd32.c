@@ -64,6 +64,7 @@ static const char rcsid[] =
 
 #include "freebsd32_syscalls.h"
 
+#if 0
 static int nsyscalls = nitems(freebsd32_syscallnames);
 
 /*
@@ -105,7 +106,91 @@ free_fsc(struct freebsd32_syscall *fsc)
 	}
 	free(fsc);
 }
+#endif
 
+#if 1
+static int
+amd64_fbsd32_fetch_args(struct trussinfo *trussinfo)
+{
+	struct ptrace_io_desc iorequest;
+	struct reg regs;
+	struct current_syscall *cs;
+	unsigned int *args32;
+	unsigned long parm_offset;
+	lwpid_t tid;
+	int i;
+
+	tid = trussinfo->curthread->tid;
+	cs = &trussinfo->curthread->cs;
+	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
+		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
+		return (-1);
+	}
+	parm_offset = regs.r_rsp + sizeof(int);
+	
+	/*
+	 * FreeBSD has two special kinds of system call redirections --
+	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()
+	 * routine, basically; the latter is for quad-aligned arguments.
+	 *
+	 * The system call argument count and code from ptrace() already
+	 * account for these, but we need to skip over the first argument.
+	 */
+	switch (regs.r_rax) {
+	case SYS_syscall:
+		parm_offset += sizeof(int);
+		break;
+	case SYS___syscall:
+		parm_offset += sizeof(quad_t);
+		break;
+	}
+
+	args32 = calloc(1 + cs->nargs, sizeof(unsigned int));
+	iorequest.piod_op = PIOD_READ_D;
+	iorequest.piod_offs = (void *)parm_offset;
+	iorequest.piod_addr = args32;
+	iorequest.piod_len = (1 + cs->nargs) * sizeof(unsigned int);
+	ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
+	if (iorequest.piod_len == 0) {
+		free(args32);
+		return (-1);
+	}
+
+	for (i = 0; i < cs->nargs + 1; i++)
+		 cs->args[i] = args32[i];
+	free(args32);
+	return (0);
+}
+
+static int
+amd64_fbsd32_fetch_retval(struct trussinfo *trussinfo, long *retval,
+    int *errorp)
+{
+	struct reg regs;
+	lwpid_t tid;
+
+	tid = trussinfo->curthread->tid;
+	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
+		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
+		return (-1);
+	}
+
+	*retval = regs.r_rax;
+	*errorp = !!(regs.r_rflags & PSL_C);
+	return (0);
+}
+
+static struct procabi amd64_fbsd32 = {
+	"FreeBSD ELF32",
+	freebsd32_syscallnames,
+	nitems(freebsd32_syscallnames),
+	amd64_fbsd32_fetch_args,
+	amd64_fbsd32_fetch_retval
+};
+
+PROCABI(amd64_fbsd32);
+
+#else
 /* Called when a thread has entered a system call. */
 void
 amd64_fbsd32_syscall_entry(struct trussinfo *trussinfo)
@@ -305,3 +390,4 @@ amd64_fbsd32_syscall_exit(struct trussinfo *trussinfo)
 
 	return (retval);
 }
+#endif

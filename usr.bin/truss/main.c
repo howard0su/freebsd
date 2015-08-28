@@ -68,6 +68,7 @@ usage(void)
 	exit(1);
 }
 
+#if 0
 static struct procabi abis[] = {
 #ifdef __arm__
 	{ "FreeBSD ELF32", arm_syscall_entry, arm_syscall_exit },
@@ -100,6 +101,10 @@ static struct procabi abis[] = {
 #endif
 	{ 0, 0, 0 },
 };
+#else
+SET_DECLARE(procabi, struct procabi);
+#endif
+
 
 /*
  * Determine the ABI.  This is called after every exec, and when
@@ -108,7 +113,7 @@ static struct procabi abis[] = {
 struct procabi *
 find_abi(pid_t pid)
 {
-	struct procabi *abi;
+	struct procabi **pabi;
 	size_t len;
 	int error;
 	int mib[4];
@@ -123,16 +128,13 @@ find_abi(pid_t pid)
 	if (error != 0)
 		err(2, "can not get sysvec name");
 
-	for (abi = abis; abi->type; abi++)
-		if (strcmp(abi->type, progt) == 0)
+	SET_FOREACH(pabi, procabi) {
+		if (strcmp((*pabi)->type, progt) == 0)
 			break;
-
-	if (abi->type == NULL) {
-		warnx("ABI %s for pid %ld is not supported", abi->type,
-		    (long)pid);
-		return (NULL);
 	}
-	return (abi);
+	if (*pabi == NULL)
+		warnx("ABI %s for pid %ld is not supported", progt, (long)pid);
+	return (*pabi);
 }
 
 char *

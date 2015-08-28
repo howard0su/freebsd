@@ -64,6 +64,7 @@ static const char rcsid[] =
 
 #include "syscalls.h"
 
+#if 0
 static int nsyscalls = nitems(syscallnames);
 
 /*
@@ -105,7 +106,93 @@ free_fsc(struct freebsd_syscall *fsc)
 	}
 	free(fsc);
 }
+#endif
 
+#if 1
+static int
+amd64_fetch_args(struct trussinfo *trussinfo)
+{
+	struct ptrace_io_desc iorequest;
+	struct reg regs;
+	struct current_syscall *cs;
+	lwpid_t tid;
+	int i, reg;
+
+	tid = trussinfo->curthread->tid;
+	cs = &trussinfo->curthread->cs;
+	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
+		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
+		return (-1);
+	}
+	
+	/*
+	 * FreeBSD has two special kinds of system call redirections --
+	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()
+	 * routine, basically; the latter is for quad-aligned arguments.
+	 *
+	 * The system call argument count and code from ptrace() already
+	 * account for these, but we need to skip over %rax if it contains
+	 * either of these values.
+	 */
+	reg = 0;
+	switch (regs.r_rax) {
+	case SYS_syscall:
+	case SYS___syscall:
+		reg++;
+		break;
+	}
+
+	for (i = 0; i < cs->nargs && reg < 6; i++, reg++) {
+		switch (reg) {
+		case 0: cs->args[i] = regs.r_rdi; break;
+		case 1: cs->args[i] = regs.r_rsi; break;
+		case 2: cs->args[i] = regs.r_rdx; break;
+		case 3: cs->args[i] = regs.r_rcx; break;
+		case 4: cs->args[i] = regs.r_r8; break;
+		case 5: cs->args[i] = regs.r_r9; break;
+		}
+	}
+	if (cs->nargs > i) {
+		iorequest.piod_op = PIOD_READ_D;
+		iorequest.piod_offs = (void *)(regs.r_rsp + sizeof(register_t));
+		iorequest.piod_addr = &cs->args[i];
+		iorequest.piod_len = (cs->nargs - i) * sizeof(register_t);
+		ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
+		if (iorequest.piod_len == 0)
+			return (-1);
+	}
+
+	return (0);
+}
+
+static int
+amd64_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
+{
+	struct reg regs;
+	lwpid_t tid;
+
+	tid = trussinfo->curthread->tid;
+	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
+		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
+		return (-1);
+	}
+
+	*retval = regs.r_rax;
+	*errorp = !!(regs.r_rflags & PSL_C);
+	return (0);
+}
+
+static struct procabi amd64_fbsd = {
+	"FreeBSD ELF64",
+	syscallnames,
+	nitems(syscallnames),
+	amd64_fetch_args,
+	amd64_fetch_retval
+};
+
+PROCABI(amd64_fbsd);
+
+#else
 /* Called when a thread has entered a system call. */
 void
 amd64_syscall_entry(struct trussinfo *trussinfo)
@@ -305,3 +392,4 @@ amd64_syscall_exit(struct trussinfo *trussinfo)
 
 	return (retval);
 }
+#endif
