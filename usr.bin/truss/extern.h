@@ -37,6 +37,7 @@ extern void restore_proc(int);
 extern void eventloop(struct trussinfo *);
 extern const char *ioctlname(unsigned long val);
 extern char *strsig(int sig);
+#if 0
 #ifdef __arm__
 extern void arm_syscall_entry(struct trussinfo *);
 extern long arm_syscall_exit(struct trussinfo *);
@@ -69,4 +70,4 @@ extern long sparc64_syscall_exit(struct trussinfo *);
 extern void mips_syscall_entry(struct trussinfo *);
 extern long mips_syscall_exit(struct trussinfo *);
 #endif
-
+#endif

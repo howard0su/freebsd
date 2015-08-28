@@ -61,6 +61,7 @@ static const char rcsid[] =
 
 #include "linux32_syscalls.h"
 
+#if 0
 static int nsyscalls = nitems(linux32_syscallnames);
 
 /*
@@ -102,7 +103,48 @@ free_fsc(struct linux_syscall *fsc)
 	}
 	free(fsc);
 }
+#endif
 
+#if 1
+static int
+amd64_linux32_fetch_args(struct trussinfo *trussinfo)
+{
+	struct reg regs;
+	struct current_syscall *cs;
+	lwpid_t tid;
+
+	tid = trussinfo->curthread->tid;
+	cs = &trussinfo->curthread->cs;
+	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
+		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
+		return (-1);
+	}
+	
+	/*
+	 * Linux passes syscall arguments in registers, not
+	 * on the stack.  Fortunately, we've got access to the
+	 * register set.  Note that we don't bother checking the
+	 * number of arguments.	And what does linux do for syscalls
+	 * that have more than five arguments?
+	 */
+	switch (cs->nargs) {
+	default:
+		cs->args[5] = regs.r_rbp;	/* Unconfirmed */
+	case 5:
+		cs->args[4] = regs.r_rdi;
+	case 4:
+		cs->args[3] = regs.r_rsi;
+	case 3:
+		cs->args[2] = regs.r_rdx;
+	case 2:
+		cs->args[1] = regs.r_rcx;
+	case 1:
+		cs->args[0] = regs.r_rbx;
+	}
+
+	return (0);
+}
+#else
 /* Called when a thread has entered a system call. */
 void
 amd64_linux32_syscall_entry(struct trussinfo *trussinfo)
@@ -208,6 +250,7 @@ amd64_linux32_syscall_entry(struct trussinfo *trussinfo)
 
 	trussinfo->curthread->fsc = fsc;
 }
+#endif
 
 /*
  * Linux syscalls return negative errno's, we do positive and map them
@@ -224,6 +267,48 @@ static const int bsd_to_linux_errno[] = {
 	-6,
 };
 
+#if 1
+static int
+amd64_linux32_fetch_retval(struct trussinfo *trussinfo, long *retval,
+    int *errorp)
+{
+	struct reg regs;
+	lwpid_t tid;
+	size_t i;
+
+	tid = trussinfo->curthread->tid;
+	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
+		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
+		return (-1);
+	}
+
+	*retval = regs.r_rax;
+	*errorp = !!(regs.r_rflags & PSL_C);
+
+	if (*errorp) {
+		for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
+			if (*retval == bsd_to_linux_errno[i]) {
+				*retval = i;
+				return (0);
+			}
+		}
+
+		/* XXX: How to handle unknown errors? */
+	}
+	return (0);
+}
+
+static struct procabi amd64_linux32 = {
+	"Linux ELF32",
+	linux32_syscallnames,
+	nitems(linux32_syscallnames),
+	amd64_linux32_fetch_args,
+	amd64_linux32_fetch_retval
+};
+
+PROCABI(amd64_linux32);
+
+#else
 long
 amd64_linux32_syscall_exit(struct trussinfo *trussinfo)
 {
@@ -303,3 +388,4 @@ amd64_linux32_syscall_exit(struct trussinfo *trussinfo)
 
 	return (retval);
 }
+#endif

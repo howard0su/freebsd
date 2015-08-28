@@ -25,6 +25,7 @@
  * $FreeBSD$
  */
 
+#include <sys/linker_set.h>
 #include <sys/queue.h>
 #include <sys/ptrace.h>
 
@@ -41,10 +42,19 @@ struct trussinfo;
 
 struct procabi {
 	const char *type;
+#if 0
 	void (*enter_syscall)(struct trussinfo *);
 	long (*exit_syscall)(struct trussinfo *);
+#else
+	const char **syscallnames;
+	int nsyscalls;
+	int (*fetch_args)(struct trussinfo *);
+	int (*fetch_retval)(struct trussinfo *, long *, int *);
+#endif
 };
-	
+
+#define	PROCABI(abi)	DATA_SET(procabi, abi)
+
 struct current_syscall {
 	struct syscall *sc;
 	const char *name;
@@ -60,7 +70,7 @@ struct threadinfo
 	struct procinfo *proc;
 	lwpid_t tid;
 	int in_syscall;
-#if 0
+#if 1
 	struct current_syscall cs;
 #else
 	void *fsc;
@@ -87,7 +97,7 @@ struct trussinfo
 	LIST_HEAD(, procinfo) proclist;
 
 	/* State from the current event. */
-	struct ptrace_lwpinfo pr_lwpinfo;
+//	struct ptrace_lwpinfo pr_lwpinfo;
 	struct threadinfo *curthread;
 };
 
