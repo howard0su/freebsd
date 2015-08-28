@@ -131,7 +131,7 @@ powerpc64_syscall_entry(struct trussinfo *trussinfo, int nargs)
 	}
 
 	/*
-	 * FreeBSD has two special kinds of system call redirctions --
+	 * FreeBSD has two special kinds of system call redirections --
 	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()
 	 * routine, basically; the latter is for quad-aligned arguments.
 	 */

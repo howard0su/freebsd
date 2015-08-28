@@ -85,7 +85,7 @@ arm_fetch_args(struct trussinfo *trussinfo)
 	ap = &regs.r[0];
 
 	/*
-	 * FreeBSD has two special kinds of system call redirctions --
+	 * FreeBSD has two special kinds of system call redirections --
 	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()
 	 * routine, basically; the latter is for quad-aligned arguments.
 	 *
