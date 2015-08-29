@@ -124,6 +124,16 @@ i386_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 	return (0);
 }
 
+static struct procabi i386_fbsd = {
+	"FreeBSD ELF32",
+	syscallnames,
+	nitems(syscallnames),
+	i386_fetch_args,
+	i386_fetch_retval
+};
+
+PROCABI(i386_fbsd);
+
 static struct procabi i386_fbsd_aout = {
 	"FreeBSD a.out",
 	syscallnames,
@@ -134,22 +144,3 @@ static struct procabi i386_fbsd_aout = {
 
 PROCABI(i386_fbsd_aout);
 
-static struct procabi i386_fbsd = {
-	"FreeBSD ELF",
-	syscallnames,
-	nitems(syscallnames),
-	i386_fetch_args,
-	i386_fetch_retval
-};
-
-PROCABI(i386_fbsd);
-
-static struct procabi i386_fbsd32 = {
-	"FreeBSD ELF32",
-	syscallnames,
-	nitems(syscallnames),
-	i386_fetch_args,
-	i386_fetch_retval
-};
-
-PROCABI(i386_fbsd32);
