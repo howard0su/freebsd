@@ -73,8 +73,7 @@ arm_fetch_args(struct trussinfo *trussinfo)
 	struct reg regs;
 	struct current_syscall *cs;
 	lwpid_t tid;
-	int i, syscall_num;
-	register_t *ap;
+	int i, reg, syscall_num;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;
@@ -82,7 +81,6 @@ arm_fetch_args(struct trussinfo *trussinfo)
 		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
 		return (-1);
 	}
-	ap = &regs.r[0];
 
 	/*
 	 * FreeBSD has two special kinds of system call redirections --
@@ -104,53 +102,27 @@ arm_fetch_args(struct trussinfo *trussinfo)
 	syscall_num = syscall_num & 0x000fffff;
 #endif
 
-	/*
-	 * XXX: This doesn't seem correct.  The code below always reads
-	 * 4 args from ap[] even if these are used.  If this needs to be
-	 * fixed, the approach in amd64-fbsd.c would probably work well.
-	 */
+	reg = 0;
 	switch (syscall_num) {
 	case SYS_syscall:
-		ap += 1;
+		reg = 1;
 		break;
 	case SYS___syscall:
-		ap += 2;
+		reg = 2;
 		break;
 	}
 
-	switch (cs->nargs) {
-	default:
-		/*
-		 * The OS doesn't seem to allow more than 10 words of
-		 * parameters (yay!).	So we shouldn't be here.
-		 */
-		warn("More than 10 words (%d) of arguments!\n", cs->nargs);
-		break;
-	case 10:
-	case 9:
-	case 8:
-	case 7:
-	case 6:
-	case 5:
-		/*
-		 * If there are 7-10 words of arguments, they are placed
-		 * on the stack, as is normal for other processors.
-		 * The fall-through for all of these is deliberate!!!
-		 */
-		// XXX BAD constant used here
+	for (i = 0; i < cs->nargs && reg < 5; i++; reg++)
+		cs->args[i] = regs.r[reg];
+	if (cs->nargs > i) {
 		iorequest.piod_op = PIOD_READ_D;
 		iorequest.piod_offs = (void *)(regs.r_sp +
 		    4 * sizeof(uint32_t));
-		iorequest.piod_addr = &cs->args[4];
-		iorequest.piod_len = (cs->nargs - 4) * sizeof(cs->args[0]);
+		iorequest.piod_addr = &cs->args[i];
+		iorequest.piod_len = (cs->nargs - i) * sizeof(cs->args[0]);
 		ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 		if (iorequest.piod_len == 0)
 			return (-1);
-	case 4:	cs->args[3] = ap[3];
-	case 3:	cs->args[2] = ap[2];
-	case 2:	cs->args[1] = ap[1];
-	case 1:	cs->args[0] = ap[0];
-	case 0: break;
 	}
 
 	return (0);
