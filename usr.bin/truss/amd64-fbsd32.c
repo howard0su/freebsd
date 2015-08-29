@@ -127,3 +127,13 @@ static struct procabi amd64_fbsd32 = {
 };
 
 PROCABI(amd64_fbsd32);
+
+static struct procabi amd64_fbsd32_aout = {
+	"FreeBSD a.out",
+	freebsd32_syscallnames,
+	nitems(freebsd32_syscallnames),
+	amd64_fbsd32_fetch_args,
+	amd64_fbsd32_fetch_retval
+};
+
+PROCABI(amd64_fbsd32_aout);
