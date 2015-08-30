@@ -68,46 +68,6 @@ usage(void)
 	exit(1);
 }
 
-#if 0
-static struct procabi abis[] = {
-	{ 0, 0, 0 },
-};
-#else
-SET_DECLARE(procabi, struct procabi);
-#endif
-
-
-/*
- * Determine the ABI.  This is called after every exec, and when
- * a process is first monitored.
- */
-struct procabi *
-find_abi(pid_t pid)
-{
-	struct procabi **pabi;
-	size_t len;
-	int error;
-	int mib[4];
-	char progt[32];
-
-	len = sizeof(progt);
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_PROC;
-	mib[2] = KERN_PROC_SV_NAME;
-	mib[3] = pid;
-	error = sysctl(mib, 4, progt, &len, NULL, 0);
-	if (error != 0)
-		err(2, "can not get sysvec name");
-
-	SET_FOREACH(pabi, procabi) {
-		if (strcmp((*pabi)->type, progt) == 0)
-			break;
-	}
-	if (*pabi == NULL)
-		warnx("ABI %s for pid %ld is not supported", progt, (long)pid);
-	return (*pabi);
-}
-
 char *
 strsig(int sig)
 {

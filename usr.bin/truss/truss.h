@@ -115,5 +115,3 @@ struct trussinfo
 			(vvp)->tv_nsec -= 1000000000;			\
 		}							\
 	} while (0)
-
-struct procabi *find_abi(pid_t pid);

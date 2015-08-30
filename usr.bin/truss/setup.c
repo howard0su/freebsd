@@ -60,6 +60,8 @@ __FBSDID("$FreeBSD$");
 #include "syscall.h"
 #include "extern.h"
 
+SET_DECLARE(procabi, struct procabi);
+
 static sig_atomic_t detaching;
 
 static void	new_proc(struct trussinfo *, pid_t);
@@ -139,6 +141,37 @@ detach_proc(pid_t pid)
 		err(1, "Can not detach the process");
 
 	kill(pid, SIGCONT);
+}
+
+/*
+ * Determine the ABI.  This is called after every exec, and when
+ * a process is first monitored.
+ */
+static struct procabi *
+find_abi(pid_t pid)
+{
+	struct procabi **pabi;
+	size_t len;
+	int error;
+	int mib[4];
+	char progt[32];
+
+	len = sizeof(progt);
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_PROC;
+	mib[2] = KERN_PROC_SV_NAME;
+	mib[3] = pid;
+	error = sysctl(mib, 4, progt, &len, NULL, 0);
+	if (error != 0)
+		err(2, "can not get sysvec name");
+
+	SET_FOREACH(pabi, procabi) {
+		if (strcmp((*pabi)->type, progt) == 0)
+			break;
+	}
+	if (*pabi == NULL)
+		warnx("ABI %s for pid %ld is not supported", progt, (long)pid);
+	return (*pabi);
 }
 
 static void
