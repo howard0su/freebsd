@@ -88,8 +88,7 @@ arm_fetch_args(struct trussinfo *trussinfo)
 	 * routine, basically; the latter is for quad-aligned arguments.
 	 *
 	 * The system call argument count and code from ptrace() already
-	 * account for these, but we need to skip over %rax if it contains
-	 * either of these values.
+	 * account for these, but we need to skip over the first argument.
 	 */
 #ifdef __ARM_EABI__
 	syscall_num = regs.r[7];
