@@ -130,7 +130,6 @@ arm_fetch_args(struct trussinfo *trussinfo)
 static int
 arm_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 {
-{
 	struct reg regs;
 	lwpid_t tid;
 
