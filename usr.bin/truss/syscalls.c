@@ -29,10 +29,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static const char rcsid[] =
-  "$FreeBSD$";
-#endif /* not lint */
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD$");
 
 /*
  * This file has routines used to print out system calls and their
@@ -40,23 +38,19 @@ static const char rcsid[] =
  */
 
 #include <sys/types.h>
+#include <sys/event.h>
+#include <sys/ioccom.h>
 #include <sys/mman.h>
 #include <sys/procctl.h>
-#include <sys/ptrace.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
-#include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/umtx.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <machine/sysarch.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/ioccom.h>
-#include <machine/atomic.h>
-#include <errno.h>
-#include <sys/umtx.h>
-#include <sys/event.h>
-#include <sys/stat.h>
-#include <sys/resource.h>
-#include <machine/sysarch.h>
 
 #include <ctype.h>
 #include <err.h>

@@ -37,15 +37,13 @@ __FBSDID("$FreeBSD$");
  * I'm afraid.
  */
 
-#include <sys/param.h>
-#include <sys/types.h>
 #include <sys/ptrace.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 
 #include <assert.h>
 #include <err.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -53,8 +51,6 @@ __FBSDID("$FreeBSD$");
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#include <machine/reg.h>
 
 #include "truss.h"
 #include "syscall.h"
