@@ -86,6 +86,9 @@ i386_fetch_args(struct trussinfo *trussinfo)
 	 * FreeBSD has two special kinds of system call redirections --
 	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()
 	 * routine, basically; the latter is for quad-aligned arguments.
+	 *
+	 * The system call argument count and code from ptrace() already
+	 * account for these, but we need to skip over the first argument.
 	 */
 	switch (regs.r_eax) {
 	case SYS_syscall:
