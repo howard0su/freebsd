@@ -70,9 +70,6 @@ usage(void)
 
 #if 0
 static struct procabi abis[] = {
-#ifdef __sparc64__
-	{ "FreeBSD ELF64", sparc64_syscall_entry, sparc64_syscall_exit },
-#endif
 	{ 0, 0, 0 },
 };
 #else
