@@ -65,7 +65,7 @@ amd64_fbsd32_fetch_args(struct trussinfo *trussinfo)
 		return (-1);
 	}
 	parm_offset = regs.r_rsp + sizeof(int);
-	
+
 	/*
 	 * FreeBSD has two special kinds of system call redirections --
 	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()

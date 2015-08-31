@@ -113,7 +113,7 @@ powerpc_fetch_args(struct trussinfo *trussinfo)
 		cs->args[i] = regs.fixreg[FIRSTARG + reg];
 #endif
 	}
-	if (cs->nargs > i) {	
+	if (cs->nargs > i) {
 #ifdef __powerpc64__
 		uint32_t *args32;
 		int j;

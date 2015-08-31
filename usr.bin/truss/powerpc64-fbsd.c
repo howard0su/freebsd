@@ -95,7 +95,7 @@ powerpc64_fetch_args(struct trussinfo *trussinfo)
 
 	for (i = 0; i < cs->nargs && reg < NARGREG; i++, reg++)
 		cs->args[i] = regs.fixreg[FIRSTARG + reg];
-	if (cs->nargs > i) {	
+	if (cs->nargs > i) {
 		iorequest.piod_op = PIOD_READ_D;
 		iorequest.piod_offs = (void *)(regs.fixreg[1] + 48);
 		iorequest.piod_addr = &cs->args[i];

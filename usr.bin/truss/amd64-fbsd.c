@@ -61,7 +61,7 @@ amd64_fetch_args(struct trussinfo *trussinfo)
 		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
 		return (-1);
 	}
-	
+
 	/*
 	 * FreeBSD has two special kinds of system call redirections --
 	 * SYS_syscall, and SYS___syscall.  The former is the old syscall()

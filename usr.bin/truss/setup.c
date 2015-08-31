@@ -538,7 +538,6 @@ eventloop(struct trussinfo *info)
 					enter_syscall(info, &pl);
 				else if (pl.pl_flags & PL_FLAG_SCX)
 					exit_syscall(info, &pl);
-					
 				else
 					errx(1,
 		   "pl_flags %x contains neither PL_FLAG_SCE nor PL_FLAG_SCX",

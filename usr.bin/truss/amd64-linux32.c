@@ -58,7 +58,7 @@ amd64_linux32_fetch_args(struct trussinfo *trussinfo)
 		fprintf(trussinfo->outfile, "-- CANNOT READ REGISTERS --\n");
 		return (-1);
 	}
-	
+
 	/*
 	 * Linux passes syscall arguments in registers, not
 	 * on the stack.  Fortunately, we've got access to the

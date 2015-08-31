@@ -79,7 +79,7 @@ struct procinfo {
 	pid_t pid;
 	struct procabi *abi;
 
-	SLIST_HEAD(, threadinfo) threadlist;	
+	SLIST_HEAD(, threadinfo) threadlist;
 };
 
 struct trussinfo

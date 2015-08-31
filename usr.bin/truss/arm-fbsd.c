@@ -93,7 +93,7 @@ arm_fetch_args(struct trussinfo *trussinfo)
 #ifdef __ARM_EABI__
 	syscall_num = regs.r[7];
 #else
-	if ((syscall_num = ptrace(PT_READ_I, tid, 
+	if ((syscall_num = ptrace(PT_READ_I, tid,
 	    (caddr_t)(regs.r[_REG_PC] - INSN_SIZE), 0)) == -1) {
 		fprintf(trussinfo->outfile, "-- CANNOT READ PC --\n");
 		return (-1);
