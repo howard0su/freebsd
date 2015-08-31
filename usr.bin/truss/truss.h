@@ -27,7 +27,6 @@
 
 #include <sys/linker_set.h>
 #include <sys/queue.h>
-#include <sys/ptrace.h>
 
 #define	FOLLOWFORKS		0x00000001
 #define	RELATIVETIMESTAMPS	0x00000002

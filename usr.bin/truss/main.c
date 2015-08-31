@@ -38,6 +38,8 @@ __FBSDID("$FreeBSD$");
  * do a lot of the work :).
  */
 
+#include <sys/ptrace.h>
+
 #include <err.h>
 #include <signal.h>
 #include <stdio.h>
