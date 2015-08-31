@@ -236,7 +236,7 @@ _amd64_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		} else
 			return (AMD64_NBPDP - (va & AMD64_PDPMASK));
 	}
-	
+
 	pdeindex = (va >> AMD64_PDRSHIFT) & (AMD64_NPDEPG - 1);
 	pde_pa = (pdpe & AMD64_PG_FRAME) + (pdeindex * sizeof(amd64_pde_t));
 

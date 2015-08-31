@@ -115,7 +115,7 @@ _arm_initvtop(kvm_t *kd)
 		_kvm_err(kd, kd->program, "raw dumps not supported on arm");
 		return (-1);
 	}
-		
+
 	vm = _kvm_malloc(kd, sizeof(*vm));
 	if (vm == 0) {
 		_kvm_err(kd, kd->program, "cannot allocate vm");
