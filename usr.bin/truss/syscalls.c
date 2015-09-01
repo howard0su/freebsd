@@ -120,7 +120,7 @@ static struct syscall syscalls[] = {
 		    { Whence, 1 + QUAD_SLOTS + QUAD_ALIGN } } },
 	{ .name = "linux_lseek", .ret_type = 2, .nargs = 3,
 	  .args = { { Int, 0 }, { Int, 1 }, { Whence, 2 } } },
-	{ .name = "mmap", .ret_type = 2, .nargs = 6,
+	{ .name = "mmap", .ret_type = 1, .nargs = 6,
 	  .args = { { Ptr, 0 }, { Int, 1 }, { Mprot, 2 }, { Mmapflags, 3 },
 		    { Int, 4 }, { Quad, 5 + QUAD_ALIGN } } },
 	{ .name = "linux_mkdir", .ret_type = 1, .nargs = 2,
