@@ -34,9 +34,6 @@ __FBSDID("$FreeBSD$");
 
 /* FreeBSD/sparc64-specific system call handling. */
 
-#if 0
-#include <sys/types.h>
-#endif
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
 
@@ -44,26 +41,9 @@ __FBSDID("$FreeBSD$");
 #include <machine/reg.h>
 #include <machine/tstate.h>
 
-#if 0
-#include <err.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <stddef.h>
-#endif
 #include <stdio.h>
-#if 0
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#endif
 
 #include "truss.h"
-#if 0
-#include "syscall.h"
-#include "extern.h"
-#endif
 
 #include "syscalls.h"
 

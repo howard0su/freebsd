@@ -34,9 +34,6 @@ __FBSDID("$FreeBSD$");
 
 /* FreeBSD/arm-specific system call handling. */
 
-#if 0
-#include <sys/types.h>
-#endif
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
 
@@ -44,25 +41,9 @@ __FBSDID("$FreeBSD$");
 #include <machine/armreg.h>
 #include <machine/ucontext.h>
 
-#if 0
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#endif
 #include <stdio.h>
-#if 0
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#include <err.h>
-#endif
 
 #include "truss.h"
-#if 0
-#include "syscall.h"
-#include "extern.h"
-#endif
 
 #include "syscalls.h"
 

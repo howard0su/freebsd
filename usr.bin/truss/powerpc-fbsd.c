@@ -30,34 +30,15 @@ __FBSDID("$FreeBSD$");
 
 /* FreeBSD/powerpc-specific system call handling. */
 
-#if 0
-#include <sys/types.h>
-#endif
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
 
 #include <machine/reg.h>
 #include <machine/frame.h>
 
-#if 0
-#include <err.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#endif
 #include <stdio.h>
-#if 0
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#endif
 
 #include "truss.h"
-#if 0
-#include "syscall.h"
-#include "extern.h"
-#endif
 
 #ifdef __powerpc64__	/* 32-bit compatibility */
 #include "freebsd32_syscalls.h"

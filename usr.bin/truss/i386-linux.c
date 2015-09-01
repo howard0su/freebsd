@@ -34,32 +34,14 @@ __FBSDID("$FreeBSD$");
 
 /* Linux/i386-specific system call handling. */
 
-#if 0
-#include <sys/types.h>
-#endif
 #include <sys/ptrace.h>
 
 #include <machine/reg.h>
 #include <machine/psl.h>
 
-#if 0
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#endif
 #include <stdio.h>
-#if 0
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#endif
 
 #include "truss.h"
-#if 0
-#include "syscall.h"
-#include "extern.h"
-#endif
 
 #include "linux_syscalls.h"
 
