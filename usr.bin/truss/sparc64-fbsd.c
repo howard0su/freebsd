@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/reg.h>
 #include <machine/tstate.h>
 
+#include <stddef.h>
 #include <stdio.h>
 
 #include "truss.h"
