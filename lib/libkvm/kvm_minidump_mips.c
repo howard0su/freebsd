@@ -187,7 +187,7 @@ _mips_minidump_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		return (0);
 	}
 
- 	offset = va & MIPS_PAGE_MASK;
+	offset = va & MIPS_PAGE_MASK;
 	/* Operate with page-aligned address */
 	va &= ~MIPS_PAGE_MASK;
 
