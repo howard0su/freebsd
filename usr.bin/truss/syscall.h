@@ -65,7 +65,7 @@ struct syscall {
 };
 
 struct syscall *get_syscall(const char*);
-char *print_arg(struct syscall_args *, unsigned long*, long, struct trussinfo *);
+char *print_arg(struct syscall_args *, unsigned long*, long *, struct trussinfo *);
 
 /*
  * Linux Socket defines
@@ -109,5 +109,5 @@ struct linux_socketcall_args {
 
 void print_syscall(struct trussinfo *, const char *, int, char **);
 void print_syscall_ret(struct trussinfo *, const char *, int, char **, int,
-    long, struct syscall *);
+    long *, struct syscall *);
 void print_summary(struct trussinfo *trussinfo);

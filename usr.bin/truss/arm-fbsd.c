@@ -120,7 +120,9 @@ arm_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 		return (-1);
 	}
 
-	*retval = regs.r[0];
+	/* XXX: Does not have the __ARMEB__ handling for __syscall(). */
+	retval[0] = regs.r[0];
+	retval[1] = regs.r[1];
 	*errorp = !!(regs.r_cpsr & PSR_C);
 	return (0);
 }

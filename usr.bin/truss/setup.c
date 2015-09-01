@@ -394,7 +394,7 @@ exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 	struct threadinfo *t;
 	struct procinfo *p;
 	struct syscall *sc;
-	long retval;
+	long retval[2];
 	int errorp, i;
 
 	t = info->curthread;
@@ -403,7 +403,7 @@ exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 
 	clock_gettime(CLOCK_REALTIME, &t->after);
 	p = t->proc;
-	if (p->abi->fetch_retval(info, &retval, &errorp) < 0) {
+	if (p->abi->fetch_retval(info, retval, &errorp) < 0) {
 		free_syscall(t);
 		return;
 	}

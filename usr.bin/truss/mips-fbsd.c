@@ -118,7 +118,9 @@ mips_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 		return (-1);
 	}
 
-	*retval = regs.r_regs[V0];
+	/* XXX: Does not have special handling for __syscall(). */
+	retval[0] = regs.r_regs[V0];
+	retval[1] = regs.r_regs[V1];
 	*errorp = !!regs.r_regs[A3];
 	return (0);
 }

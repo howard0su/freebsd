@@ -113,7 +113,8 @@ i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 		return (-1);
 	}
 
-	*retval = regs.r_eax;
+	retval[0] = regs.r_eax;
+	retval[1] = regs.r_edx;
 	*errorp = !!(regs.r_eflags & PSL_C);
 
 	if (*errorp) {

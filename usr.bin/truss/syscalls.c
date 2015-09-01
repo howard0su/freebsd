@@ -830,7 +830,7 @@ print_kevent(FILE *fp, struct kevent *ke, int input)
  * an array of all of the system call arguments.
  */
 char *
-print_arg(struct syscall_args *sc, unsigned long *args, long retval,
+print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
     struct trussinfo *trussinfo)
 {
 	FILE *fp;
@@ -878,7 +878,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 		int truncated = 0;
 
 		if (sc->type & OUT)
-			len = retval;
+			len = retval[0];
 		else
 			len = args[sc->offset + 1];
 
@@ -992,9 +992,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 	case Readlinkres: {
 		char *tmp2;
 
-		if (retval == -1)
+		if (retval[0] == -1)
 			break;
-		tmp2 = get_string(pid, (void*)args[sc->offset], retval);
+		tmp2 = get_string(pid, (void*)args[sc->offset], retval[0]);
 		fprintf(fp, "\"%s\"", tmp2);
 		free(tmp2);
 		break;
@@ -1391,8 +1391,8 @@ print_arg(struct syscall_args *sc, unsigned long *args, long retval,
 
 		if (sc->offset == 1)
 			numevents = args[sc->offset+1];
-		else if (sc->offset == 3 && retval != -1)
-			numevents = retval;
+		else if (sc->offset == 3 && retval[0] != -1)
+			numevents = retval[0];
 
 		if (numevents >= 0) {
 			bytes = sizeof(struct kevent) * numevents;
@@ -1572,7 +1572,7 @@ print_syscall(struct trussinfo *trussinfo, const char *name, int nargs,
 
 void
 print_syscall_ret(struct trussinfo *trussinfo, const char *name, int nargs,
-    char **s_args, int errorp, long retval, struct syscall *sc)
+    char **s_args, int errorp, long *retval, struct syscall *sc)
 {
 	struct timespec timediff;
 
@@ -1592,16 +1592,16 @@ print_syscall_ret(struct trussinfo *trussinfo, const char *name, int nargs,
 	print_syscall(trussinfo, name, nargs, s_args);
 	fflush(trussinfo->outfile);
 	if (errorp)
-		fprintf(trussinfo->outfile, " ERR#%ld '%s'\n", retval,
-		    strerror(retval));
+		fprintf(trussinfo->outfile, " ERR#%ld '%s'\n", retval[0],
+		    strerror(retval[0]));
 	else {
 		/*
 		 * Because pipe(2) has a special assembly glue to provide the
 		 * libc API, we have to adjust retval.
 		 */
 		if (name != NULL && strcmp(name, "pipe") == 0)
-			retval = 0;
-		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval, retval);
+			retval[0] = 0;
+		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval[0], retval[0]);
 	}
 }
 

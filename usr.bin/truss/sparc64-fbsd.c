@@ -108,7 +108,8 @@ sparc64_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 		return (-1);
 	}
 
-	*retval = regs.r_out[0];
+	retval[0] = regs.r_out[0];
+	retval[1] = regs.r_out[1];
 	*errorp = !!(regs.r_tstate & TSTATE_XCC_C);
 	return (0);
 }

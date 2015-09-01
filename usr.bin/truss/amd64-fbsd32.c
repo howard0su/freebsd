@@ -113,7 +113,8 @@ amd64_fbsd32_fetch_retval(struct trussinfo *trussinfo, long *retval,
 		return (-1);
 	}
 
-	*retval = regs.r_rax;
+	retval[0] = regs.r_rax;
+	retval[1] = regs.r_rdx;
 	*errorp = !!(regs.r_rflags & PSL_C);
 	return (0);
 }
