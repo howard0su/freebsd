@@ -110,7 +110,7 @@ mips_fetch_args(struct trussinfo *trussinfo)
 #define	MAXREG		A3
 #endif
 
-	for (i = 0; i < cs->nargs && reg <= MAXREG; i++; reg++)
+	for (i = 0; i < cs->nargs && reg <= MAXREG; i++, reg++)
 		cs->args[i] = regs.r_regs[reg];
 	if (cs->nargs > i) {
 		iorequest.piod_op = PIOD_READ_D;

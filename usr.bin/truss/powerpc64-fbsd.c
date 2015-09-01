@@ -68,7 +68,7 @@ powerpc64_fetch_args(struct trussinfo *trussinfo)
 	struct reg regs;
 	struct current_syscall *cs;
 	lwpid_t tid;
-	int i, rega;
+	int i, reg;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;

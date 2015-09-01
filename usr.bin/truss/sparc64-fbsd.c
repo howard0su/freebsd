@@ -72,7 +72,7 @@ sparc64_fetch_args(struct trussinfo *trussinfo)
 {
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
-	struct curthread_syscall *cs;
+	struct current_syscall *cs;
 	lwpid_t tid;
 	int i, reg;
 
@@ -99,7 +99,7 @@ sparc64_fetch_args(struct trussinfo *trussinfo)
 		break;
 	}
 
-	for (i = 0; i < cs->nargs && reg < 6; i++; reg++)
+	for (i = 0; i < cs->nargs && reg < 6; i++, reg++)
 		cs->args[i] = regs.r_out[reg];
 	if (cs->nargs > i) {
 		iorequest.piod_op = PIOD_READ_D;

@@ -111,7 +111,7 @@ arm_fetch_args(struct trussinfo *trussinfo)
 		break;
 	}
 
-	for (i = 0; i < cs->nargs && reg < 5; i++; reg++)
+	for (i = 0; i < cs->nargs && reg < 5; i++, reg++)
 		cs->args[i] = regs.r[reg];
 	if (cs->nargs > i) {
 		iorequest.piod_op = PIOD_READ_D;
