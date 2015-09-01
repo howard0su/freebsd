@@ -326,7 +326,8 @@ static struct syscall syscalls[] = {
 	  .args = { { Name | IN, 0 }, { Hex, 1 } } },
 	{ .name = "pathconf", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Pathconf, 1 } } },
-	{ .name = "pipe", .ret_type = 1, .nargs = 0 },
+	{ .name = "pipe", .ret_type = 2, .nargs = 1,
+	  .args = { { PipeFds | OUT, 0 } } },
 	{ .name = "pipe2", .ret_type = 1, .nargs = 2,
 	  .args = { { Ptr, 0 }, { Open, 1 } } },
 	{ .name = "truncate", .ret_type = 1, .nargs = 3,
@@ -1511,6 +1512,21 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 	case Sysarch:
 		fputs(xlookup(sysarch_ops, args[sc->offset]), fp);
 		break;
+	case PipeFds:
+		/*
+		 * The pipe() system call in the kernel returns its
+		 * two file descriptors via return values.  However,
+		 * the interface exposed by libc is that pipe()
+		 * accepts a pointer to an array of descriptors.
+		 * Format the output to match the libc API by printing
+		 * the returned file descriptors as a fake argument.
+		 *
+		 * Overwrite the first retval to signal a successful
+		 * return as well.
+		 */
+		fprintf(fp, "{ %ld, %ld }", retval[0], retval[1]);
+		retval[0] = 0;
+		break;
 	default:
 		errx(1, "Invalid argument type %d\n", sc->type & ARG_MASK);
 	}
@@ -1595,12 +1611,6 @@ print_syscall_ret(struct trussinfo *trussinfo, const char *name, int nargs,
 		fprintf(trussinfo->outfile, " ERR#%ld '%s'\n", retval[0],
 		    strerror(retval[0]));
 	else {
-		/*
-		 * Because pipe(2) has a special assembly glue to provide the
-		 * libc API, we have to adjust retval.
-		 */
-		if (name != NULL && strcmp(name, "pipe") == 0)
-			retval[0] = 0;
 		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval[0], retval[0]);
 	}
 }
