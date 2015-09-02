@@ -326,7 +326,7 @@ static struct syscall syscalls[] = {
 	  .args = { { Name | IN, 0 }, { Hex, 1 } } },
 	{ .name = "pathconf", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Pathconf, 1 } } },
-	{ .name = "pipe", .ret_type = 2, .nargs = 1,
+	{ .name = "pipe", .ret_type = 1, .nargs = 1,
 	  .args = { { PipeFds | OUT, 0 } } },
 	{ .name = "pipe2", .ret_type = 1, .nargs = 2,
 	  .args = { { Ptr, 0 }, { Open, 1 } } },
@@ -1610,9 +1610,22 @@ print_syscall_ret(struct trussinfo *trussinfo, const char *name, int nargs,
 	if (errorp)
 		fprintf(trussinfo->outfile, " ERR#%ld '%s'\n", retval[0],
 		    strerror(retval[0]));
-	else {
-		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval[0], retval[0]);
+#ifndef __LP64__
+	else if (sc != NULL && sc->ret_type == 2) {
+		off_t off;
+
+#if _BYTE_ORDER == _LITTLE_ENDIAN
+		off = (off_t)retval[1] << 32 | retval[0];
+#else
+		off = (off_t)retval[0] << 32 | retval[1];
+#endif
+		fprintf(trussinfo->outfile, " = %jd (0x%jx)\n", (intmax_t)off,
+		    (intmax_t)off);
 	}
+#endif
+	else
+		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval[0],
+		    retval[0]);
 }
 
 void
