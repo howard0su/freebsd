@@ -168,7 +168,7 @@ ATF_TC_BODY(mmap__cdev_private, tc)
 {
 	int fd;
 
-	fd = open("/dev/mem", O_RDONLY);
+	fd = open("/dev/devstat", O_RDONLY);
 	if (fd == -1)
 		atf_tc_skip("Could not open /dev/mem");
 
@@ -176,8 +176,10 @@ ATF_TC_BODY(mmap__cdev_private, tc)
 	 * Character devices other than /dev/zero do not support private
 	 * mappings.
 	 */
+	checked_mmap(PROT_READ, MAP_SHARED, fd, 0,
+	    "MAP_SHARED of /dev/devstat");
 	checked_mmap(PROT_READ, MAP_PRIVATE, fd, EINVAL,
-	    "MAP_PRIVATE of /dev/mem");
+	    "MAP_PRIVATE of /dev/devstat");
 }
 
 ATF_TC_WITHOUT_HEAD(mmap__dev_zero);
