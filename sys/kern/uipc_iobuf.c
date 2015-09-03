@@ -68,6 +68,74 @@ iobuf_init(void *arg __unused)
 	iobuf_dev_ino = devfs_alloc_cdp_inode();
 	KASSERT(iobuf_dev_ino > 0, ("I/O buf dev inode not initialized"));
 }
+SYSINIT(iobuf_init, SI_SUB_DRIVERS, SI_ORDER_ANY, iobuf_init, NULL);
+
+struct iobuf_pool *
+iobuf_pool_hold(struct iobuf_pool *ip)
+{
+
+	refcount_acquire(&ip->ip_refs);
+	return (ip);
+}
+
+void
+iobuf_pool_release(struct iobuf_pool *ip)
+{
+#ifdef INVARIANTS
+	struct iobuf *io;
+	int i;
+#endif
+
+	if (!refcount_release(&ip->ip_refs))
+		return;
+
+#ifdef INVARIANTS
+	i = 0;
+	STAILQ_FOR_EACH(io, &ip->ip_freebufs, io_link) {
+		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
+		KASSERT(io == &ip->ip_buffers[io->io_id],
+		    ("iobuf id mismatch"));
+		i++;
+	}
+	KASSERT(i == ip->ip_nbufs, ("iobuf free count mismatch"));
+#endif
+	vm_object_deallocate(ip->ip_object);
+	mtx_destroy(&ip->ip_lock);
+	free(ip->ip_buffers, M_IOBUF);
+	free(ip, M_IOBUF);
+}
+
+struct iobuf *
+iobuf_get(struct iobuf_pool *ip)
+{
+	struct iobuf *io;
+
+	mtx_lock(&ip->ip_lock);
+	io = STAILQ_FIRST(&ip->ip_freebufs);
+	if (io != NULL) {
+		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
+		KASSERT(io == &ip->ip_buffers[io->io_id],
+		    ("iobuf id mismatch"));
+		STAILQ_REMOVE_HEAD(&ip->ip_freebufs, io_link);
+		iobuf_pool_hold(ip);
+	}
+	mtx_unlock(&ip->ip_lock);
+	return (io);
+}
+
+void
+iobuf_put(struct iobuf *io)
+{
+	struct iobuf_pool *ip;
+
+	ip = io->io_pool;
+	KASSERT(io == &ip->ip_buffers[io->io_id],
+	    ("iobuf id mismatch"));
+	mtx_lock(&ip->ip_lock);
+	STAILQ_INSERT_TAIL(&ip->ip_freebufs, io, io_link);
+	mtx_unlock(&ip->ip_lock);
+	iobuf_pool_release(ip);
+}
 
 int
 sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
@@ -115,6 +183,8 @@ sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
 		STAILQ_INSERT_TAIL(&ip->ip_freebufs, ip->ip_buffers[i],
 		    io_link);
 	}
+	refcount_init(&ip->ip_refs, 1);
+	mtx_init(&ip->ip_lock, "iobuf pool", NULL, MTX_DEF);
 	finit(fp, FFLAGS(O_RDWR), DTYPE_IOBUF, ip, &iobuf_ops);
 
 	td->td_retval[0] = fd;
@@ -159,26 +229,10 @@ static int
 iobuf_close(struct file *fp, struct thread *td)
 {
 	struct iobuf_pool *ip;
-#ifdef INVARIANTS
-	struct iobuf *io;
-	int i;
-#endif
 
 	ip = fp->f_data;
-#ifdef INVARIANTS
-	i = 0;
-	STAILQ_FOR_EACH(io, &ip->ip_freebufs, io_link) {
-		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
-		KASSERT(io == &ip->ip_buffers[io->io_id],
-		    ("iobuf id mismatch"));
-		i++;
-	}
-	KASSERT(i == ip->ip_nbufs, ("iobuf free count mismatch"));
-#endif
 	fp->f_data = NULL;
-	vm_object_deallocate(ip->ip_object);
-	free(ip->ip_buffers);
-	free(ip, M_IOBUF);
+	iobuf_pool_release(ip);
 
 	return (0);
 }

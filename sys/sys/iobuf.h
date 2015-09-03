@@ -30,15 +30,16 @@
 #ifndef __SYS_IOBUF_H__
 #define	__SYS_IOBUF_H__
 
-#ifdef _KERNEL
+#if defined(_KERNEL) || defined(_WANT_FILE)
+#include <sys/_lock.h>
+#include <sys/_mutex.h>
+
 struct iobuf {
 	STAILQ_ENTRY(iobuf) io_link;
 	struct iobuf_pool *io_pool;
 	int	io_id;
 };
-#endif
 
-#if defined(_KERNEL) || defined(_WANT_FILE)
 struct iobuf_pool {
 	size_t	ip_size;
 	size_t	ip_nbufs;
@@ -60,14 +61,19 @@ struct iobuf_pool {
 	struct timespec	ip_birthtime;
 	ino_t	ip_ino;
 
-#if 0
 	struct mtx ip_lock;
 	int ip_refs;
-#endif
 };
 #endif
 
-#ifndef _KERNEL
+#ifdef _KERNEL
+
+struct iobuf_pool *iobuf_pool_hold(struct iobuf_pool *);
+void	iobuf_pool_release(struct iobuf_pool *);
+struct iobuf *iobuf_get(struct iobuf_pool *);
+void	iobuf_put(struct iobuf *);
+
+#else /* !_KERNEL */
 
 __BEGIN_DECLS
 #if __BSD_VISIBLE
