@@ -110,8 +110,9 @@ checked_mmap(int prot, int flags, int fd, int error, const char *msg)
 ATF_TC_WITHOUT_HEAD(mmap__bad_arguments);
 ATF_TC_BODY(mmap__bad_arguments, tc)
 {
-	int shmfd, zerofd;
+	int devstatfd, shmfd, zerofd;
 
+	ATF_REQUIRE((devstatfd = open("/dev/devstat", O_RDONLY)) >= 0);
 	ATF_REQUIRE((shmfd = shm_open(SHM_ANON, O_RDWR, 0644)) >= 0);
 	ATF_REQUIRE(ftruncate(shmfd, getpagesize()) == 0);
 	ATF_REQUIRE((zerofd = open("/dev/zero", O_RDONLY)) >= 0);
@@ -127,6 +128,8 @@ ATF_TC_BODY(mmap__bad_arguments, tc)
 	    "simple /dev/zero shared");
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_PRIVATE, zerofd, 0,
 	    "simple /dev/zero private");
+	checked_mmap(PROT_READ, MAP_SHARED, devstatfd, 0,
+	    "simple /dev/devstat shared");
 
 	/* Extra PROT flags. */
 	checked_mmap(PROT_READ | PROT_WRITE | 0x100000, MAP_ANON, -1, EINVAL,
@@ -161,24 +164,12 @@ ATF_TC_BODY(mmap__bad_arguments, tc)
 	/* Writable MAP_SHARED should fail on read-only descriptors. */
 	checked_mmap(PROT_READ | PROT_WRITE, MAP_SHARED, zerofd, EACCES,
 	    "MAP_SHARED of read-only /dev/zero");
-}
-
-ATF_TC_WITHOUT_HEAD(mmap__cdev_private);
-ATF_TC_BODY(mmap__cdev_private, tc)
-{
-	int fd;
-
-	fd = open("/dev/devstat", O_RDONLY);
-	if (fd == -1)
-		atf_tc_skip("Could not open /dev/mem");
 
 	/*
 	 * Character devices other than /dev/zero do not support private
 	 * mappings.
 	 */
-	checked_mmap(PROT_READ, MAP_SHARED, fd, 0,
-	    "MAP_SHARED of /dev/devstat");
-	checked_mmap(PROT_READ, MAP_PRIVATE, fd, EINVAL,
+	checked_mmap(PROT_READ, MAP_PRIVATE, devstatfd, EINVAL,
 	    "MAP_PRIVATE of /dev/devstat");
 }
 
@@ -224,7 +215,6 @@ ATF_TP_ADD_TCS(tp)
 
 	ATF_TP_ADD_TC(tp, mmap__map_at_zero);
 	ATF_TP_ADD_TC(tp, mmap__bad_arguments);
-	ATF_TP_ADD_TC(tp, mmap__cdev_private);
 	ATF_TP_ADD_TC(tp, mmap__dev_zero);
 
 	return (atf_no_error());
