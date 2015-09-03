@@ -54,7 +54,6 @@ i386_fetch_args(struct trussinfo *trussinfo)
 	struct current_syscall *cs;
 	lwpid_t tid;
 	unsigned int parm_offset;
-	int i;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;

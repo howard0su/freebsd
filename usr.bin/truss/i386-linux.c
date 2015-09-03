@@ -51,7 +51,6 @@ i386_linux_fetch_args(struct trussinfo *trussinfo)
 	struct reg regs;
 	struct current_syscall *cs;
 	lwpid_t tid;
-	int i;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;
@@ -119,8 +118,8 @@ i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 
 	if (*errorp) {
 		for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
-			if (retval == bsd_to_linux_errno[i]) {
-				*retval = i;
+			if (retval[0] == bsd_to_linux_errno[i]) {
+				retval[0] = i;
 				return (0);
 			}
 		}
