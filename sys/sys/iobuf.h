@@ -46,6 +46,7 @@ struct iobuf_pool {
 	size_t	ip_nfreebuf;
 	vm_object_t ip_object;
 	STAILQ_HEAD(, iobuf) ip_freebufs;
+	struct iobuf *ip_buffers;
 
 	/*
 	 * Values maintained solely to make this a better-behaved file

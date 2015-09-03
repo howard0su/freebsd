@@ -75,7 +75,7 @@ sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
 	size_t total_size;
 	struct file *fp;
 	struct iobuf_pool *ip;
-	int error, fd, ino;
+	int error, fd, i, ino;
 
 	total_size = uap->number * uap->size;
 	if (total_size / uap->number != uap->size)
@@ -106,6 +106,15 @@ sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
 		ip->ip_ino = 0;
 	else
 		ip->ip_ino = ino;
+	STAILQ_INIT(&ip->ip_freebufs);
+	ip->ip_buffers = malloc(sizeof(*ip->ip_buffers) * ip->ip_nbufs,
+	    M_IOBUF, M_WAITOK | M_ZERO);
+	for (i = 0; i < ip->ip_nbufs; i++) {
+		ip->ip_buffers[i].io_pool = ip;
+		ip->ip_buffers[i].io_id = i;
+		STAILQ_INSERT_TAIL(&ip->ip_freebufs, ip->ip_buffers[i],
+		    io_link);
+	}
 	finit(fp, FFLAGS(O_RDWR), DTYPE_IOBUF, ip, &iobuf_ops);
 
 	td->td_retval[0] = fd;
@@ -150,10 +159,25 @@ static int
 iobuf_close(struct file *fp, struct thread *td)
 {
 	struct iobuf_pool *ip;
+#ifdef INVARIANTS
+	struct iobuf *io;
+	int i;
+#endif
 
 	ip = fp->f_data;
+#ifdef INVARIANTS
+	i = 0;
+	STAILQ_FOR_EACH(io, &ip->ip_freebufs, io_link) {
+		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
+		KASSERT(io == &ip->ip_buffers[io->io_id],
+		    ("iobuf id mismatch"));
+		i++;
+	}
+	KASSERT(i == ip->ip_nbufs, ("iobuf free count mismatch"));
+#endif
 	fp->f_data = NULL;
 	vm_object_deallocate(ip->ip_object);
+	free(ip->ip_buffers);
 	free(ip, M_IOBUF);
 
 	return (0);
@@ -204,4 +228,3 @@ iobuf_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 
 	return (0);
 }
-
