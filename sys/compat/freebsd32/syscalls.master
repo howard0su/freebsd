@@ -122,7 +122,7 @@
 				    struct ostat32 *ub); }
 39	AUE_GETPPID	NOPROTO	{ pid_t getppid(void); }
 40	AUE_LSTAT	COMPAT	{ int freebsd32_lstat(char *path, \
-				    struct ostat *ub); }
+				    struct ostat32 *ub); }
 41	AUE_DUP		NOPROTO	{ int dup(u_int fd); }
 42	AUE_PIPE	NOPROTO	{ int pipe(void); }
 43	AUE_GETEGID	NOPROTO	{ gid_t getegid(void); }
@@ -130,7 +130,7 @@
 				    size_t offset, u_int scale); }
 45	AUE_KTRACE	NOPROTO	{ int ktrace(const char *fname, int ops, \
 				    int facs, int pid); }
-46	AUE_SIGACTION	COMPAT	{ int freebsd32_sigaction( int signum, \
+46	AUE_SIGACTION	COMPAT	{ int freebsd32_sigaction(int signum, \
 				   struct osigaction32 *nsa, \
 				   struct osigaction32 *osa); }
 47	AUE_GETGID	NOPROTO	{ gid_t getgid(void); }
@@ -218,7 +218,7 @@
 101	AUE_NULL	OBSOL	osend
 102	AUE_NULL	OBSOL	orecv
 103	AUE_NULL	COMPAT	{ int freebsd32_sigreturn( \
-				    struct ia32_sigcontext3 *sigcntxp); }
+				    void *sigcntxp); }
 104	AUE_BIND	NOPROTO	{ int bind(int s, caddr_t name, \
 				    int namelen); }
 105	AUE_SETSOCKOPT	NOPROTO	{ int setsockopt(int s, int level, \
@@ -229,8 +229,8 @@
 				     struct sigvec32 *nsv, \
 				     struct sigvec32 *osv); }
 109	AUE_O_SIGBLOCK	COMPAT	{ int freebsd32_sigblock(int mask); }
-110	AUE_O_SIGSETMASK	COMPAT	{ int freebsd32_sigsetmask( int mask); }
-111	AUE_SIGSUSPEND	COMPAT	{ int freebsd32_sigsuspend( int mask); }
+110	AUE_O_SIGSETMASK	COMPAT	{ int freebsd32_sigsetmask(int mask); }
+111	AUE_SIGSUSPEND	COMPAT	{ int freebsd32_sigsuspend(int mask); }
 112	AUE_O_SIGSTACK	COMPAT	{ int freebsd32_sigstack( \
 				     struct sigstack32 *nss, \
 				     struct sigstack32 *oss); }
@@ -442,7 +442,7 @@
 				    const struct timespec32 *tp); }
 234	AUE_NULL	STD	{ int freebsd32_clock_getres(clockid_t clock_id, \
 				    struct timespec32 *tp); }
-235	AUE_NULL	STD	{ int freebsd32_ktimer_create(\
+235	AUE_NULL	STD	{ int freebsd32_ktimer_create( \
 				    clockid_t clock_id, \
 				    struct sigevent32 *evp, int *timerid); }
 236	AUE_NULL	NOPROTO	{ int ktimer_delete(int timerid); }
@@ -464,7 +464,7 @@
 244	AUE_NULL	UNIMPL	nosys
 245	AUE_NULL	UNIMPL	nosys
 246	AUE_NULL	UNIMPL	nosys
-247	AUE_NULL	STD	{ int freebsd32_clock_getcpuclockid2(\
+247	AUE_NULL	STD	{ int freebsd32_clock_getcpuclockid2( \
 				    uint32_t id1, uint32_t id2,\
 				    int which, clockid_t *clock_id); }
 248	AUE_NULL	UNIMPL	ntp_gettime
@@ -619,10 +619,10 @@
 344	AUE_SIGRETURN	COMPAT4	{ int freebsd32_sigreturn( \
 		    const struct freebsd4_freebsd32_ucontext *sigcntxp); }
 345	AUE_SIGWAIT	STD	{ int freebsd32_sigtimedwait(const sigset_t *set, \
-				    siginfo_t *info, \
-				    const struct timespec *timeout); }
+				    struct siginfo32 *info, \
+				    const struct timespec32 *timeout); }
 346	AUE_NULL	STD	{ int freebsd32_sigwaitinfo(const sigset_t *set, \
-				    siginfo_t *info); }
+				    struct siginfo32 *info); }
 347	AUE_NULL	NOPROTO	{ int __acl_get_file(const char *path, \
 				    acl_type_t type, struct acl *aclp); }
 348	AUE_NULL	NOPROTO	{ int __acl_set_file(const char *path, \
@@ -934,9 +934,9 @@
 492	AUE_FEXECVE	STD	{ int freebsd32_fexecve(int fd, \
 				    uint32_t *argv, uint32_t *envv); }
 493	AUE_FSTATAT	STD	{ int freebsd32_fstatat(int fd, char *path, \
-				    struct stat *buf, int flag); }
+				    struct stat32 *buf, int flag); }
 494	AUE_FUTIMESAT	STD	{ int freebsd32_futimesat(int fd, char *path, \
-				    struct timeval *times); }
+				    struct timeval32 *times); }
 495	AUE_LINKAT	NOPROTO	{ int linkat(int fd1, char *path1, int fd2, \
 				    char *path2, int flag); }
 496	AUE_MKDIRAT	NOPROTO	{ int mkdirat(int fd, char *path, \
@@ -1016,7 +1016,7 @@
 				    uint32_t id1, uint32_t id2, \
 				    int *status, int options, \
 				    struct wrusage32 *wrusage, \
-				    siginfo_t *info); }
+				    struct siginfo32 *info); }
 #else
 530	AUE_NULL	STD	{ int freebsd32_posix_fallocate(int fd,\
 				    uint32_t offset1, uint32_t offset2,\
@@ -1029,7 +1029,7 @@
 				    uint32_t id1, uint32_t id2, \
 				    int *status, int options, \
 				    struct wrusage32 *wrusage, \
-				    siginfo_t *info); }
+				    struct siginfo32 *info); }
 #endif
 533	AUE_CAP_RIGHTS_LIMIT	NOPROTO	{ \
 				    int cap_rights_limit(int fd, \
@@ -1070,7 +1070,7 @@
 				    u_int nfds, const struct timespec32 *ts, \
 				    const sigset_t *set); }
 546	AUE_FUTIMES	STD	{ int freebsd32_futimens(int fd, \
-				    struct timespec *times); }
+				    struct timespec32 *times); }
 547	AUE_FUTIMESAT	STD	{ int freebsd32_utimensat(int fd, \
 				    char *path, \
 				    struct timespec32 *times, int flag); }
