@@ -30,6 +30,13 @@
 #ifndef __SYS_IOBUF_H__
 #define	__SYS_IOBUF_H__
 
+#include <sys/_types.h>
+
+#ifndef _SIZE_T_DECLARED
+typedef	__size_t	size_t;
+#define	_SIZE_T_DECLARED
+#endif
+
 #if defined(_KERNEL) || defined(_WANT_FILE)
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
@@ -66,6 +73,12 @@ struct iobuf_pool {
 };
 #endif
 
+struct iobuf_vec {
+	int	iov_id;
+	size_t	iov_base;
+	size_t	iov_len;
+};
+
 #ifdef _KERNEL
 
 struct iobuf_pool *iobuf_pool_hold(struct iobuf_pool *);
@@ -77,7 +90,12 @@ void	iobuf_put(struct iobuf *);
 
 __BEGIN_DECLS
 #if __BSD_VISIBLE
-int	iobuf_pool_create(size_t, size_t);
+int	iobuf_create(size_t, size_t);
+int	iobuf_bind(int, int);
+ssize_t	iobuf_read(int, struct iobuf_vec *, int);
+ssize_t	iobuf_pread(int, struct iobuf_vec *, int, off_t);
+ssize_t	iobuf_write(int, int, const struct iobuf_vec *, int);
+ssize_t	iobuf_pwrite(int, int, const struct iobuf_vec *, int, off_t);
 #endif
 __END_DECLS
 

@@ -303,3 +303,146 @@ iobuf_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 
 	return (0);
 }
+
+int
+sys_iobuf_bind(struct thread *td, struct iobuf_bind_args *uap)
+{
+
+	/*
+	 * TODO
+	 *
+	 * Bind a file descriptor to a specific I/O buffer pool.  This
+	 * allows iobuf_{p,}read() to be used with a file descriptor.
+	 * Note that once a file descriptor is bound to a pool it cannot
+	 * be read with normal operations, only via iobuf reads.
+	 *
+	 * XXX: This could perhaps be an ioctl on the fd instead of a
+	 * new system call?
+	 */
+	return (EOPNOTSUPP);
+}
+
+/*
+ * TODO
+ *
+ * Eventually we will need separate fileops hooks for iobuf read/write.
+ * These hooks will be optional.  If they do not exist, we will resort
+ * to mapping the buffers into the kernel and copying.
+ */
+
+static int
+iobuf_map(struct iobuf *io, void **memp, bool writable)
+{
+	vm_offset_t kva, ofs;
+	vm_ooffset_t offset;
+	vm_object_t obj;
+	vm_size_t size;
+	vm_prot_t prot;
+	int rv;
+
+	obj = io->io_pool->ip_object;
+	size = io->io_pool->ip_bufsize;
+	offset = size * io->io_id;
+	prot = VM_PROT_READ;
+	if (writable)
+		prot |= VM_PROT_WRITE;
+	vm_object_reference(obj);
+
+	/* Map this buffer's pages into the kernel_map and wire it. */
+	kva = vm_map_pin(kernel_map);
+	ofs = offset & PAGE_MASK;
+	size = round_page(size + ofs);
+	rv = vm_map_find(kernel_map, obj, offset, &kva, size, 0,
+	    VMFS_OPTIMAL_SPACE, prot, prot, 0);
+	if (rv == KERN_SUCCESS) {
+		rv = vm_map_wire(kernel_map, kva, kva + size,
+		    VM_MAP_WIRE_SYSTEM | VM_MAP_WIRE_NOHOLES);
+		if (rv == KERN_SUCCESS) {
+			*memp = (void *)(kva + ofs);
+			return (0);
+		}
+		vm_map_remove(kernel_map, kva, kva + size);
+	} else
+		vm_object_deallocate(obj);
+	return (vm_mmap_to_errno(rv));
+}
+
+static void
+iobuf_unmap(struct iobuf *io, void *mem)
+{
+	vm_offset_t kva, ofs;
+	vm_ooffset_t offset;
+	vm_size_t size;
+	vm_map_t map;
+#ifdef INVARIANTS
+	vm_object_t obj;
+	vm_pindex_t pindex;
+	vm_prot_t prot;
+	boolean_t wired;
+	int rv;
+#endif
+
+	size = io->io_pool->ip_bufsize;
+	offset = size * io->io_id;
+	ofs = offset & PAGE_MASK;
+	size = round_page(size + ofs);
+	kva = (vm_offset_t)mem - ofs;
+	KASSERT((kva & PAGE_MASK) == 0, ("iobuf_unmap: kva not aligned"));
+	map = kernel_map;
+#ifdef INVARIANTS
+	rv = vm_map_lookup(&map, kva, VM_PROT_READ, &entry, &obj, &pindex,
+	    &prot, &wired);
+	KASSERT(rv == KERN_SUCCESS, ("iobuf_unmap: did not find entry"));
+	KASSERT(entry->start == kva, ("iobuf_unmap: entry start mismatch"));
+	KASSERT(entry->end != kva + size,
+	    ("iobuf_unmap: entry start mismatch"));
+	vm_map_lookup_done(map, entry);
+	KASSERT(obj == io->io_pool->ip_object,
+	    ("iobuf_unmap: object mismatch"));
+	KASSERT(wired != 0, ("iobuf_unmap: entry not wired"));
+#endif
+	vm_map_remove(map, kva, kva + size);
+}
+
+int
+sys_iobuf_read(struct thread *td, struct iobuf_read_args *uap)
+{
+
+	/*
+	 * TODO
+	 */
+	return (EOPNOTSUPP);
+}
+
+int
+sys_iobuf_pread(struct thread *td, struct iobuf_pread_args *uap)
+{
+
+	/*
+	 * TODO
+	 */
+	return (EOPNOTSUPP);
+}
+
+
+int
+sys_iobuf_write(struct thread *td, struct iobuf_write_args *uap)
+{
+
+	/*
+	 * TODO
+	 */
+	return (EOPNOTSUPP);
+}
+
+int
+sys_iobuf_pwrite(struct thread *td, struct iobuf_pwrite_args *uap)
+{
+
+	/*
+	 * TODO
+	 */
+	return (EOPNOTSUPP);
+}
+
+/* XXX: Might also need recvfrom, recvmsg, sendto, sendmsg variants. */

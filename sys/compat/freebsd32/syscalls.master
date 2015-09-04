@@ -1082,3 +1082,16 @@
 				    const struct vm_domain_policy *policy); }
 550	AUE_NULL	NOPROTO	{ int iobuf_create(size_t number, \
 				    size_t size); }
+551	AUE_NULL	NOPROTO	{ int iobuf_bind(int pool, int fd); }
+552	AUE_NULL	STD	{ ssize_t freebsd32_iobuf_read(int fd, \
+				  struct iobuf_vec32 *iov, int iovcnt); }
+553	AUE_NULL	STD	{ ssize_t freebsd32_iobuf_pread(int fd, \
+				  struct iobuf_vec32 *iov, int iovcnt, \
+				  uint32_t offset1, uint32_t offset2); }
+554	AUE_NULL	STD	{ ssize_t freebsd32_iobuf_write(int fd, \
+				  int pool, struct iobuf_vec32 *iov, \
+				  int iovcnt); }
+555	AUE_NULL	STD	{ ssize_t freebsd32_iobuf_pwrite(int fd, \
+				  int pool, struct iobuf_vec32 *iov, \
+				  int iovcnt, uint32_t offset1, \
+				  uint32_t offset2); }

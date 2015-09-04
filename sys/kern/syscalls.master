@@ -996,6 +996,17 @@
 				    const struct vm_domain_policy_entry *policy); }
 550	AUE_NULL	STD	{ int iobuf_create(size_t number, \
 				    size_t size); }
+551	AUE_NULL	STD	{ int iobuf_bind(int pool, int fd); }
+552	AUE_NULL	STD	{ ssize_t iobuf_read(int fd, \
+				  struct iobuf_vec *iov, int iovcnt); }
+553	AUE_NULL	STD	{ ssize_t iobuf_pread(int fd, \
+				  struct iobuf_vec *iov, int iovcnt, \
+				  off_t offset); }
+554	AUE_NULL	STD	{ ssize_t iobuf_write(int fd, int pool, \
+				  struct iobuf_vec *iov, int iovcnt); }
+555	AUE_NULL	STD	{ ssize_t iobuf_pwrite(int fd, int pool, \
+				  struct iobuf_vec *iov, int iovcnt, \
+				  off_t offset); }
 
 ; Please copy any additions and changes to the following compatability tables:
 ; sys/compat/freebsd32/syscalls.master
