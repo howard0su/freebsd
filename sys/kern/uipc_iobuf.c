@@ -126,29 +126,32 @@ iobuf_pool_drop(struct iobuf_pool *ip)
 }
 
 static struct iobuf *
-iobuf_get_locked(struct iobuf_pool *ip)
+iobuf_get_locked(struct iobuf_pool *ip, enum iobuf_owner owner)
 {
 	struct iobuf *io;
 
+	KASSERT(owner == KERNEL || owner == USER);
 	mtx_assert(&ip->ip_lock, MA_OWNED);
 	io = STAILQ_FIRST(&ip->ip_freebufs);
 	if (io != NULL) {
 		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
 		KASSERT(io == &ip->ip_buffers[io->io_id],
 		    ("iobuf id mismatch"));
+		KASSERT(io->io_owner == FREE, ("iobuf not free"));
 		STAILQ_REMOVE_HEAD(&ip->ip_freebufs, io_link);
+		io->owner = owner;
 		iobuf_pool_hold(ip);
 	}
 	return (io);
 }
 
 struct iobuf *
-iobuf_get(struct iobuf_pool *ip)
+iobuf_get(struct iobuf_pool *ip, enum iobuf_owner owner)
 {
 	struct iobuf *io;
 
 	mtx_lock(&ip->ip_lock);
-	io = iobuf_get_locked(ip);
+	io = iobuf_get_locked(ip, owner);
 	mtx_unlock(&ip->ip_lock);
 	return (io);
 }
@@ -161,7 +164,9 @@ iobuf_put_locked(struct iobuf *io)
 	ip = io->io_pool;
 	KASSERT(io == &ip->ip_buffers[io->io_id],
 	    ("iobuf id mismatch"));
+	KASSERT(io->io_owner != FREE, ("iobuf already free"));
 	mtx_assert(&ip->ip_lock, MA_OWNED);
+	io->io_owner = FREE;
 	STAILQ_INSERT_TAIL(&ip->ip_freebufs, io, io_link);
 	if (refcount_release(&ip->ip_refs))
 		panic("iobuf_put_locked: dropped last pool reference");
@@ -175,7 +180,9 @@ iobuf_put(struct iobuf *io)
 	ip = io->io_pool;
 	KASSERT(io == &ip->ip_buffers[io->io_id],
 	    ("iobuf id mismatch"));
+	KASSERT(io->io_owner != FREE, ("iobuf already free"));
 	mtx_lock(&ip->ip_lock);
+	io->io_owner = FREE;
 	STAILQ_INSERT_TAIL(&ip->ip_freebufs, io, io_link);
 	mtx_unlock(&ip->ip_lock);
 	iobuf_pool_drop(ip);
@@ -224,6 +231,7 @@ sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
 	for (i = 0; i < ip->ip_nbufs; i++) {
 		ip->ip_buffers[i].io_pool = ip;
 		ip->ip_buffers[i].io_id = i;
+		ip->ip_buffers[i].io_owner = FREE;
 		STAILQ_INSERT_TAIL(&ip->ip_freebufs, &ip->ip_buffers[i],
 		    io_link);
 	}
@@ -273,9 +281,20 @@ static int
 iobuf_close(struct file *fp, struct thread *td)
 {
 	struct iobuf_pool *ip;
+	int i;
 
 	ip = fp->f_data;
 	fp->f_data = NULL;
+
+	/*
+	 * Free buffers owned by userland (but not buffers owned
+	 * by an in-kernel consumer).
+	 */
+	mtx_lock(&ip->ip_lock);
+	for (i = 0; i < ip->ip_nbufs; i++)
+		if (ip->ip_buffers[i].io_owner == USER)
+			iobuf_put_locked(&ip->ip_buffers[i]);
+	mtx_unlock(&ip->ip_lock);
 	iobuf_pool_drop(ip);
 
 	return (0);
@@ -523,7 +542,7 @@ iobuf_alloc_read_buffers(struct iobuf_pool *ip, int iovcnt,
 	iov = malloc(sizeof(*iov) * iovcnt, M_IOV, M_WAITOK);
 	mtx_lock(&ip->ip_lock);
 	for (i = 0; i < iovcnt; i++) {
-		io = iobuf_get_locked(ip);
+		io = iobuf_get_locked(ip, USER);
 		if (io == NULL)
 			goto fail;
 		iov[i].iov_id = io->io_id;

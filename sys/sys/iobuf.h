@@ -41,6 +41,10 @@ typedef	__size_t	size_t;
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
 
+enum iobuf_owner {
+	FREE, KERNEL, USER
+};
+
 /*
  * Will probably eventually want to track exclusive, writable
  * ownership vs shared, read-only ownership.
@@ -49,6 +53,7 @@ struct iobuf {
 	STAILQ_ENTRY(iobuf) io_link;
 	struct iobuf_pool *io_pool;
 	int	io_id;
+	enum iobuf_owner io_owner;
 };
 
 struct iobuf_pool {
@@ -87,7 +92,7 @@ struct iobuf_vec {
 
 struct iobuf_pool *iobuf_pool_hold(struct iobuf_pool *);
 void	iobuf_pool_drop(struct iobuf_pool *);
-struct iobuf *iobuf_get(struct iobuf_pool *);
+struct iobuf *iobuf_get(struct iobuf_pool *, enum iobuf_owner);
 void	iobuf_put(struct iobuf *);
 
 #else /* !_KERNEL */
