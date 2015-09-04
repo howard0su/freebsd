@@ -700,7 +700,7 @@ struct freebsd32_futimens_args {
 struct freebsd32_utimensat_args {
 	char fd_l_[PADL_(int)]; int fd; char fd_r_[PADR_(int)];
 	char path_l_[PADL_(char *)]; char * path; char path_r_[PADR_(char *)];
-	char times_l_[PADL_(struct timespec *)]; struct timespec * times; char times_r_[PADR_(struct timespec *)];
+	char times_l_[PADL_(struct timespec32 *)]; struct timespec32 * times; char times_r_[PADR_(struct timespec32 *)];
 	char flag_l_[PADL_(int)]; int flag; char flag_r_[PADR_(int)];
 };
 #if !defined(PAD64_REQUIRED) && (defined(__powerpc__) || defined(__mips__))

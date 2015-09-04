@@ -3322,7 +3322,7 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		struct freebsd32_utimensat_args *p = params;
 		iarg[0] = p->fd; /* int */
 		uarg[1] = (intptr_t) p->path; /* char * */
-		uarg[2] = (intptr_t) p->times; /* struct timespec * */
+		uarg[2] = (intptr_t) p->times; /* struct timespec32 * */
 		iarg[3] = p->flag; /* int */
 		*n_args = 4;
 		break;
@@ -3343,6 +3343,14 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		iarg[1] = p->id; /* id_t */
 		uarg[2] = (intptr_t) p->policy; /* const struct vm_domain_policy * */
 		*n_args = 3;
+		break;
+	}
+	/* iobuf_create */
+	case 550: {
+		struct iobuf_create_args *p = params;
+		uarg[0] = p->number; /* size_t */
+		uarg[1] = p->size; /* size_t */
+		*n_args = 2;
 		break;
 	}
 	default:
@@ -8932,7 +8940,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			p = "char *";
 			break;
 		case 2:
-			p = "struct timespec *";
+			p = "struct timespec32 *";
 			break;
 		case 3:
 			p = "int";
@@ -8968,6 +8976,19 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			break;
 		case 2:
 			p = "const struct vm_domain_policy *";
+			break;
+		default:
+			break;
+		};
+		break;
+	/* iobuf_create */
+	case 550:
+		switch(ndx) {
+		case 0:
+			p = "size_t";
+			break;
+		case 1:
+			p = "size_t";
 			break;
 		default:
 			break;
@@ -10868,6 +10889,11 @@ systrace_return_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		break;
 	/* numa_setaffinity */
 	case 549:
+		if (ndx == 0 || ndx == 1)
+			p = "int";
+		break;
+	/* iobuf_create */
+	case 550:
 		if (ndx == 0 || ndx == 1)
 			p = "int";
 		break;

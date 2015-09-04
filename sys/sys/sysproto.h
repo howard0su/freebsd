@@ -1800,6 +1800,10 @@ struct numa_setaffinity_args {
 	char id_l_[PADL_(id_t)]; id_t id; char id_r_[PADR_(id_t)];
 	char policy_l_[PADL_(const struct vm_domain_policy_entry *)]; const struct vm_domain_policy_entry * policy; char policy_r_[PADR_(const struct vm_domain_policy_entry *)];
 };
+struct iobuf_create_args {
+	char number_l_[PADL_(size_t)]; size_t number; char number_r_[PADR_(size_t)];
+	char size_l_[PADL_(size_t)]; size_t size; char size_r_[PADR_(size_t)];
+};
 int	nosys(struct thread *, struct nosys_args *);
 void	sys_sys_exit(struct thread *, struct sys_exit_args *);
 int	sys_fork(struct thread *, struct fork_args *);
@@ -2190,6 +2194,7 @@ int	sys_futimens(struct thread *, struct futimens_args *);
 int	sys_utimensat(struct thread *, struct utimensat_args *);
 int	sys_numa_getaffinity(struct thread *, struct numa_getaffinity_args *);
 int	sys_numa_setaffinity(struct thread *, struct numa_setaffinity_args *);
+int	sys_iobuf_create(struct thread *, struct iobuf_create_args *);
 
 #ifdef COMPAT_43
 
@@ -2945,6 +2950,7 @@ int	freebsd7_shmctl(struct thread *, struct freebsd7_shmctl_args *);
 #define	SYS_AUE_utimensat	AUE_FUTIMESAT
 #define	SYS_AUE_numa_getaffinity	AUE_NULL
 #define	SYS_AUE_numa_setaffinity	AUE_NULL
+#define	SYS_AUE_iobuf_create	AUE_NULL
 
 #undef PAD_
 #undef PADL_

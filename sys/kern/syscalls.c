@@ -557,4 +557,5 @@ const char *syscallnames[] = {
 	"utimensat",			/* 547 = utimensat */
 	"numa_getaffinity",			/* 548 = numa_getaffinity */
 	"numa_setaffinity",			/* 549 = numa_setaffinity */
+	"iobuf_create",			/* 550 = iobuf_create */
 };

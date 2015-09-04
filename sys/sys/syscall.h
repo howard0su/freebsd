@@ -467,4 +467,5 @@
 #define	SYS_utimensat	547
 #define	SYS_numa_getaffinity	548
 #define	SYS_numa_setaffinity	549
-#define	SYS_MAXSYSCALL	550
+#define	SYS_iobuf_create	550
+#define	SYS_MAXSYSCALL	551
