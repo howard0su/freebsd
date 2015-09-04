@@ -41,6 +41,10 @@ typedef	__size_t	size_t;
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
 
+/*
+ * Will probably eventually want to track exclusive, writable
+ * ownership vs shared, read-only ownership.
+ */
 struct iobuf {
 	STAILQ_ENTRY(iobuf) io_link;
 	struct iobuf_pool *io_pool;
@@ -82,7 +86,7 @@ struct iobuf_vec {
 #ifdef _KERNEL
 
 struct iobuf_pool *iobuf_pool_hold(struct iobuf_pool *);
-void	iobuf_pool_release(struct iobuf_pool *);
+void	iobuf_pool_drop(struct iobuf_pool *);
 struct iobuf *iobuf_get(struct iobuf_pool *);
 void	iobuf_put(struct iobuf *);
 

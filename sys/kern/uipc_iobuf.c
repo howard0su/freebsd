@@ -99,7 +99,7 @@ iobuf_pool_hold(struct iobuf_pool *ip)
 }
 
 void
-iobuf_pool_release(struct iobuf_pool *ip)
+iobuf_pool_drop(struct iobuf_pool *ip)
 {
 #ifdef INVARIANTS
 	struct iobuf *io;
@@ -125,12 +125,12 @@ iobuf_pool_release(struct iobuf_pool *ip)
 	free(ip, M_IOBUF);
 }
 
-struct iobuf *
-iobuf_get(struct iobuf_pool *ip)
+static struct iobuf *
+iobuf_get_locked(struct iobuf_pool *ip)
 {
 	struct iobuf *io;
 
-	mtx_lock(&ip->ip_lock);
+	mtx_assert(&ip->ip_lock, MA_OWNED);
 	io = STAILQ_FIRST(&ip->ip_freebufs);
 	if (io != NULL) {
 		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
@@ -139,8 +139,32 @@ iobuf_get(struct iobuf_pool *ip)
 		STAILQ_REMOVE_HEAD(&ip->ip_freebufs, io_link);
 		iobuf_pool_hold(ip);
 	}
+	return (io);
+}
+
+struct iobuf *
+iobuf_get(struct iobuf_pool *ip)
+{
+	struct iobuf *io;
+
+	mtx_lock(&ip->ip_lock);
+	io = iobuf_get_locked(ip);
 	mtx_unlock(&ip->ip_lock);
 	return (io);
+}
+
+static void
+iobuf_put_locked(struct iobuf *io)
+{
+	struct iobuf_pool *ip;
+
+	ip = io->io_pool;
+	KASSERT(io == &ip->ip_buffers[io->io_id],
+	    ("iobuf id mismatch"));
+	mtx_assert(&ip->ip_lock, MA_OWNED);
+	STAILQ_INSERT_TAIL(&ip->ip_freebufs, io, io_link);
+	if (refcount_release(&ip->ip_refs))
+		panic("iobuf_put_locked: dropped last pool reference");
 }
 
 void
@@ -154,7 +178,7 @@ iobuf_put(struct iobuf *io)
 	mtx_lock(&ip->ip_lock);
 	STAILQ_INSERT_TAIL(&ip->ip_freebufs, io, io_link);
 	mtx_unlock(&ip->ip_lock);
-	iobuf_pool_release(ip);
+	iobuf_pool_drop(ip);
 }
 
 int
@@ -252,7 +276,7 @@ iobuf_close(struct file *fp, struct thread *td)
 
 	ip = fp->f_data;
 	fp->f_data = NULL;
-	iobuf_pool_release(ip);
+	iobuf_pool_drop(ip);
 
 	return (0);
 }
@@ -404,14 +428,201 @@ iobuf_unmap(struct iobuf *io, void *mem)
 	vm_map_remove(map, kva, kva + size);
 }
 
+/*
+ * For the "legacy" path, map all of the buffers in an iobuf_vec into
+ * KVA and wire them.  I considered iterating through the passed in
+ * iobuf_vec array and doing separate read/write operations for each
+ * vec entry.  However, this would not properly handle datagrams, etc.
+ * Instead, each system call needs to result in a single call to
+ * fo_read() or fo_write().
+ */
+struct iobuf_uio {
+	struct uio uio;
+	void **bufs;
+};
+	
+static int
+iobuf_map_vec(struct iobuf_pool *ip, struct iobuf_vec *iov, u_int iovcnt,
+    bool writable, struct iobuf_uio **uiop)
+{
+	struct iobuf_uio *uio;
+	struct iovec *iov2;
+	void **memp;
+	size_t iovlen, resid;
+	int error, i;
+
+	/* Check for invalid length or too many vectors. */
+	if (iovcnt > UIO_MAXIOV)
+		return (EINVAL);
+	resid = 0;
+	for (i = 0; i < iovcnt; i++) {
+		if (iov[i].iov_len > IOSIZE_MAX - resid)
+			return (EINVAL);
+		resid += iov[i].iov_len;
+	}
+
+	/* Allocate the uio and associated arrays. */
+	iovlen = iovcnt * sizeof(struct iovec);
+	uio = malloc(sizeof(*uio) + iovlen + iovcnt * sizeof(void *), M_IOV,
+	    M_WAITOK | M_ZERO);
+	iov2 = (struct iovec *)(uio + 1);
+	memp = (void **)((char *)iov2 + iovlen);
+
+	/* Map all the buffers. */
+	for (i = 0; i < iovcnt; i++) {
+		error = iobuf_map(ip->ip_buffers[iov[i].iov_id], &memp[i],
+		    writable);
+		if (error) {
+			for (i--; i >= 0; i--)
+				iobuf_unmap(ip->ip_buffers[iov[i].iov_id],
+				    memp[i]);
+			free(uio, M_IOV);
+			return (error);
+		}
+	}
+
+	/* Populate the uio. */
+	uio->uio.uio_iov = iov2;
+	uio->uio.uio_iovcnt = iovcnt;
+	uio->uio.uio_segflg = UIO_SYSSPACE;
+	uio->uio.uio_offset = -1;
+	uio->uio.uio_resid = resid;
+	for (i = 0; i < iovcnt; i++) {
+		iov2[i].iov_base = (char *)memp[i] + iov[i].iov_base;
+		iov2[i].iov_len = iov[i].iov_len;
+	}
+	uio->bufs = memp;
+	return (0);
+}
+
+static void
+iobuf_unmap_vec(struct iobuf_uio *uio, struct iobuf_pool *ip,
+    struct iobuf_vec *iov, u_int iovcnt)
+{
+	int i;
+
+	for (i = 0; i < iovcnt; i++)
+		iobuf_unmap(ip->ip_buffers[iov[i].iov_id], uio->bufs[i]);
+	free(uio, M_IOV);
+}
+
+/*
+ * For read, allocate as many buffers as userland will accept.  If
+ * userland requests more buffers than are available fail rather
+ * than returning a truncated datagram.
+ */
+static int
+iobuf_alloc_read_buffers(struct iobuf_pool *ip, int iovcnt,
+    struct iobuf_vec **iovp)
+{
+	struct iobuf *io;
+	int i;
+
+	if (iovcnt > ip->ip_nbufs)
+		return (EINVAL);
+	iov = malloc(sizeof(*iov) * iovcnt, M_IOV, M_WAITOK);
+	mtx_lock(&ip->ip_lock);
+	for (i = 0; i < iovcnt; i++) {
+		io = iobuf_get_locked(ip);
+		if (io == NULL)
+			goto fail;
+		iov[i].iov_id = io->io_id;
+		iov[i].iov_base = 0;
+		iov[i].iov_len = ip->ip_bufsize;
+	}
+	mtx_unlock(&ip->ip_lock);
+	*iovp = iov;
+	return (0);
+fail:
+	for (i--; i >= 0; i--)
+		iobuf_put_locked(&ip->ip_buffers[iov[i].iov_id]);
+	mtx_unlock(&ip->ip_lock);
+	free(iov, M_IOV);
+	return (EAGAIN);
+}
+
+static void
+iobuf_free_read_buffers(struct iobuf_pool *ip, int iovcnt,
+    struct iobuf_vec *iov)
+{
+	int i;
+
+	mtx_lock(&ip->ip_lock);
+	for (i = 0; i < iovcnt; i++)
+		iobuf_put_locked(&ip->ip_buffers[iov[i].iov_id]);
+	mtx_unlock(&ip->ip_lock);
+	free(iov, M_IOV);
+}
+
+static struct iobuf_pool *
+iobuf_pool_from_file(struct file *fp)
+{
+	struct iobuf_pool *ip;
+	struct mtx *mtxp;
+
+	mtxp = mtx_pool_find(mtxpool_sleep, fp);
+	mtx_lock(mtxp);
+	if (fp->f_iobuf_pool != NULL)
+		ip = iobuf_pool_hold(fp->f_iobuf_pool);
+	else
+		ip = NULL;
+	mtx_unlock(mtxp);
+	return (ip);
+}
+
 int
 sys_iobuf_read(struct thread *td, struct iobuf_read_args *uap)
 {
+	struct file *fp;
+	struct iobuf_pool *ip;
+	struct iobuf_vec *iov;
+	struct iobuf_uio *uio;
+	cap_rights_t rights;
+	int error;
+
+	error = fget_read(td, uap->fd, cap_rights_init(&rights, CAP_READ),
+	    &fp);
+	if (error)
+		return (error);
+	ip = iobuf_pool_from_file(fp);
+	if (ip == NULL) {
+		fdrop(fp, td);
+		return (EINVAL);
+	}
 
 	/*
-	 * TODO
+	 * TODO: Handle native iobuf fo_read variant case.
 	 */
-	return (EOPNOTSUPP);
+	error = iobuf_alloc_read_buffers(ip, uap->iovcnt, &iov);
+	if (error) {
+		iobuf_pool_drop(ip);
+		fdrop(fp, td);
+		return (error);
+	}
+	error = iobuf_map_vec(ip, iov, uap->iovcnt, true, &uio);
+	if (error) {
+		iobuf_free_read_buffers(ip, uap->iovcnt, iov);
+		iobuf_pool_drop(ip);
+		fdrop(fp, td);
+		return (error);
+	}
+	error = dofileread(td, uap->fd, fp, &uio->uio, -1, 0);
+	iobuf_unmap_vec(uio, ip, iov, uap->iovcnt);
+	if (error == 0)
+		/*
+		 * XXX: If this fails the data from the file
+		 * descriptor is lost.
+		 */
+		error = copyout(iov, uap->iov, uap->iovcnt * sizeof(*iov));
+	if (error) {
+		iobuf_free_read_buffers(ip, uap->iovcnt, iov);
+		iobuf_pool_drop(ip);
+		fdrop(fp, td);
+	}
+	free(iov, M_IOV);
+	iobuf_pool_drop(ip);
+	fdrop(fp, td);
+	return (0);
 }
 
 int

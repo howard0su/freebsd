@@ -156,6 +156,7 @@ struct fileops {
  * (d) cdevpriv_mtx
  * none	not locked
  */
+struct iobuf_pool;
 
 struct fadvise_info {
 	int		fa_advice;	/* (f) FADV_* type. */
@@ -174,6 +175,7 @@ struct file {
 	short		f_vnread_flags; /* (f) Sleep lock for f_offset */
 	volatile u_int	f_flag;		/* see fcntl.h */
 	volatile u_int 	f_count;	/* reference count */
+	struct iobuf_pool *f_iobuf_pool;
 	/*
 	 *  DTYPE_VNODE specific fields.
 	 */
