@@ -28,9 +28,29 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include <sys/param.h>
+#include <sys/conf.h>
+#include <sys/fcntl.h>
 #include <sys/file.h>
+#include <sys/filedesc.h>
 #include <sys/iobuf.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
+#include <sys/mman.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/rwlock.h>
+#include <sys/sysproto.h>
+#include <sys/stat.h>
+#include <sys/user.h>
+#include <sys/vnode.h>
+
+#include <vm/vm.h>
+#include <vm/vm_extern.h>
+#include <vm/vm_object.h>
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
 
 static MALLOC_DEFINE(M_IOBUF, "iobuf", "I/O buffer pool file descriptor");
 static struct unrhdr *iobuf_ino_unr;
@@ -39,8 +59,8 @@ static dev_t iobuf_dev_ino;
 static fo_ioctl_t iobuf_ioctl;
 static fo_stat_t iobuf_stat;
 static fo_close_t iobuf_close;
-static fo_fill_kinfo iobuf_fill_kinfo;
-static fo_mmap iobuf_mmap;
+static fo_fill_kinfo_t iobuf_fill_kinfo;
+static fo_mmap_t iobuf_mmap;
 
 static struct fileops iobuf_ops = {
 	.fo_read = invfo_rdwr,
@@ -91,7 +111,7 @@ iobuf_pool_release(struct iobuf_pool *ip)
 
 #ifdef INVARIANTS
 	i = 0;
-	STAILQ_FOR_EACH(io, &ip->ip_freebufs, io_link) {
+	STAILQ_FOREACH(io, &ip->ip_freebufs, io_link) {
 		KASSERT(io->io_pool == ip, ("iobuf pool mismatch"));
 		KASSERT(io == &ip->ip_buffers[io->io_id],
 		    ("iobuf id mismatch"));
@@ -169,7 +189,7 @@ sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
 	VM_OBJECT_WUNLOCK(ip->ip_object);
 	vfs_timestamp(&ip->ip_birthtime);
 	ip->ip_atime = ip->ip_mtime = ip->ip_ctime = ip->ip_birthtime;
-	ino = alloc_unr(shm_ino_unr);
+	ino = alloc_unr(iobuf_ino_unr);
 	if (ino == -1)
 		ip->ip_ino = 0;
 	else
@@ -180,7 +200,7 @@ sys_iobuf_create(struct thread *td, struct iobuf_create_args *uap)
 	for (i = 0; i < ip->ip_nbufs; i++) {
 		ip->ip_buffers[i].io_pool = ip;
 		ip->ip_buffers[i].io_id = i;
-		STAILQ_INSERT_TAIL(&ip->ip_freebufs, ip->ip_buffers[i],
+		STAILQ_INSERT_TAIL(&ip->ip_freebufs, &ip->ip_buffers[i],
 		    io_link);
 	}
 	refcount_init(&ip->ip_refs, 1);
@@ -244,6 +264,7 @@ iobuf_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t objsize,
 {
 	struct iobuf_pool *ip;
 	vm_prot_t maxprot;
+	int error;
 
 	ip = fp->f_data;
 
@@ -259,7 +280,7 @@ iobuf_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t objsize,
 		return (EINVAL);
 
 	vfs_timestamp(&ip->ip_atime);
-	vm_object_reference(&ip->ip_object);
+	vm_object_reference(ip->ip_object);
 
 	error = vm_mmap_object(map, addr, objsize, prot, maxprot, flags,
 	    ip->ip_object, foff, FALSE, td);
