@@ -590,7 +590,8 @@ eventloop(struct trussinfo *info)
 					    pl.pl_flags);
 				pending_signal = 0;
 			} else if (pl.pl_flags & PL_FLAG_CHILD) {
-				report_new_child(info, si.si_pid);
+				if ((info->flags & COUNTONLY) == 0)
+					report_new_child(info, si.si_pid);
 				pending_signal = 0;
 			} else {
 				if ((info->flags & NOSIGS) == 0)
