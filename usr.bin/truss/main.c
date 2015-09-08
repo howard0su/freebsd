@@ -187,7 +187,7 @@ main(int ac, char **av)
 		 * quite what we want?
 		 */
 		if (pid == 0)
-			kill(LIST_FIRST(&trussinfo->proclist)->pid, 9);
+			kill(LIST_FIRST(&trussinfo->proclist)->pid, SIGKILL);
 		ptrace(PT_DETACH, LIST_FIRST(&trussinfo->proclist)->pid, NULL,
 		    0);
 		return (1);
