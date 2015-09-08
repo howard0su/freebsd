@@ -592,8 +592,9 @@ eventloop(struct trussinfo *info)
 			} else if (pl.pl_flags & PL_FLAG_CHILD) {
 				report_new_child(info, si.si_pid);
 				pending_signal = 0;
-			} else if ((info->flags & NOSIGS) == 0) {
-				report_signal(info, &si);
+			} else {
+				if ((info->flags & NOSIGS) == 0)
+					report_signal(info, &si);
 				pending_signal = si.si_status;
 			}
 			ptrace(PT_SYSCALL, si.si_pid, (caddr_t)1,
