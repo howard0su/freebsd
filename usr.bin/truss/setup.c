@@ -455,6 +455,83 @@ exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 	}
 }
 
+static void
+report_exit(struct trussinfo *info, siginfo_t *si)
+{
+	struct timespec timediff;
+
+	if (info->flags & FOLLOWFORKS)
+		fprintf(info->outfile, "%5d: ", si->si_pid);
+	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
+	if (info->flags & ABSOLUTETIMESTAMPS) {
+		timespecsubt(&info->curthread->after, &info->start_time,
+		    &timediff);
+		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
+		    timediff.tv_nsec);
+	}
+	if (info->flags & RELATIVETIMESTAMPS) {
+		timespecsubt(&info->curthread->after, &info->curthread->before,
+		    &timediff);
+		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
+		    timediff.tv_nsec);
+	}
+	if (si->si_code == CLD_EXITED)
+		fprintf(info->outfile, "process exit, rval = %u\n",
+		    si->si_status);
+	else
+		fprintf(info->outfile, "process killed, signal = %u%s\n",
+		    si->si_status, si->si_code == CLD_DUMPED ?
+		    " (core dumped)" : "");
+}
+
+static void
+report_new_child(struct trussinfo *info, pid_t pid)
+{
+	struct timespec timediff;
+
+	clock_gettime(CLOCK_REALTIME, &info->curthread->after);
+	assert(info->flags & FOLLOWFORKS);
+	fprintf(info->outfile, "%5d: ", pid);
+	if (info->flags & ABSOLUTETIMESTAMPS) {
+		timespecsubt(&info->curthread->after, &info->start_time,
+		    &timediff);
+		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
+		    timediff.tv_nsec);
+	}
+	if (info->flags & RELATIVETIMESTAMPS) {
+		timediff.tv_sec = 0;
+		timediff.tv_nsec = 0;
+		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
+		    timediff.tv_nsec);
+	}
+	fprintf(info->outfile, "<new process>\n");
+}
+
+static void
+report_signal(struct trussinfo *info, siginfo_t *si)
+{
+	struct timespec timediff;
+	char *signame;
+
+	if (info->flags & FOLLOWFORKS)
+		fprintf(info->outfile, "%5d: ", si->si_pid);
+	if (info->flags & ABSOLUTETIMESTAMPS) {
+		timespecsubt(&info->curthread->after, &info->start_time,
+		    &timediff);
+		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
+		    timediff.tv_nsec);
+	}
+	if (info->flags & RELATIVETIMESTAMPS) {
+		timespecsubt(&info->curthread->after, &info->curthread->before,
+		    &timediff);
+		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
+		    timediff.tv_nsec);
+	}
+	signame = strsig(si->si_status);
+	fprintf(info->outfile, "SIGNAL %u (%s)\n", si->si_status,
+	    signame == NULL ? "?" : signame);
+}
+
 /*
  * Wait for events until all the processes have exited or truss has been
  * asked to stop.
@@ -463,9 +540,7 @@ void
 eventloop(struct trussinfo *info)
 {
 	struct ptrace_lwpinfo pl;
-	struct timespec timediff;
 	siginfo_t si;
-	char *signame;
 	int pending_signal;
 
 	while (!LIST_EMPTY(&info->proclist)) {
@@ -487,38 +562,8 @@ eventloop(struct trussinfo *info)
 		case CLD_KILLED:
 		case CLD_DUMPED:
 			find_exit_thread(info, si.si_pid);
-			if ((info->flags & COUNTONLY) == 0) {
-				if (info->flags & FOLLOWFORKS)
-					fprintf(info->outfile, "%5d: ",
-					    si.si_pid);
-				clock_gettime(CLOCK_REALTIME,
-				    &info->curthread->after);
-				if (info->flags & ABSOLUTETIMESTAMPS) {
-					timespecsubt(&info->curthread->after,
-					    &info->start_time, &timediff);
-					fprintf(info->outfile, "%jd.%09ld ",
-					    (intmax_t)timediff.tv_sec,
-					    timediff.tv_nsec);
-				}
-				if (info->flags & RELATIVETIMESTAMPS) {
-					timespecsubt(&info->curthread->after,
-					    &info->curthread->before,
-					    &timediff);
-					fprintf(info->outfile, "%jd.%09ld ",
-					    (intmax_t)timediff.tv_sec,
-					    timediff.tv_nsec);
-				}
-				if (si.si_code == CLD_EXITED)
-					fprintf(info->outfile,
-					    "process exit, rval = %u\n",
-					    si.si_status);
-				else
-					fprintf(info->outfile,
-					    "process killed, signal = %u%s\n",
-					    si.si_status,
-					    si.si_code == CLD_DUMPED ?
-					    " (core dumped)" : "");
-			}
+			if ((info->flags & COUNTONLY) == 0)
+				report_exit(info, &si);
 			free_proc(info->curthread->proc);
 			info->curthread = NULL;
 			break;
@@ -545,49 +590,10 @@ eventloop(struct trussinfo *info)
 					    pl.pl_flags);
 				pending_signal = 0;
 			} else if (pl.pl_flags & PL_FLAG_CHILD) {
-				clock_gettime(CLOCK_REALTIME,
-				    &info->curthread->after);
-				assert(info->flags & FOLLOWFORKS);
-				fprintf(info->outfile, "%5d: ", si.si_pid);
-				if (info->flags & ABSOLUTETIMESTAMPS) {
-					timespecsubt(&info->curthread->after,
-					    &info->start_time, &timediff);
-					fprintf(info->outfile, "%jd.%09ld ",
-					    (intmax_t)timediff.tv_sec,
-					    timediff.tv_nsec);
-				}
-				if (info->flags & RELATIVETIMESTAMPS) {
-					timediff.tv_sec = 0;
-					timediff.tv_nsec = 0;
-					fprintf(info->outfile, "%jd.%09ld ",
-					    (intmax_t)timediff.tv_sec,
-					    timediff.tv_nsec);
-				}
-				fprintf(info->outfile, "<new process>\n");
+				report_new_child(info, si.si_pid);
 				pending_signal = 0;
 			} else if ((info->flags & NOSIGS) == 0) {
-				if (info->flags & FOLLOWFORKS)
-					fprintf(info->outfile, "%5d: ",
-					    si.si_pid);
-				if (info->flags & ABSOLUTETIMESTAMPS) {
-					timespecsubt(&info->curthread->after,
-					    &info->start_time, &timediff);
-					fprintf(info->outfile, "%jd.%09ld ",
-					    (intmax_t)timediff.tv_sec,
-					    timediff.tv_nsec);
-				}
-				if (info->flags & RELATIVETIMESTAMPS) {
-					timespecsubt(&info->curthread->after,
-					    &info->curthread->before,
-					    &timediff);
-					fprintf(info->outfile, "%jd.%09ld ",
-					    (intmax_t)timediff.tv_sec,
-					    timediff.tv_nsec);
-				}
-				signame = strsig(si.si_status);
-				fprintf(info->outfile,
-				    "SIGNAL %u (%s)\n", si.si_status,
-				    signame == NULL ? "?" : signame);
+				report_signal(info, &si);
 				pending_signal = si.si_status;
 			}
 			ptrace(PT_SYSCALL, si.si_pid, (caddr_t)1,
