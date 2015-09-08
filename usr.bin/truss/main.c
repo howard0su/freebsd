@@ -191,9 +191,9 @@ main(int ac, char **av)
 		ptrace(PT_DETACH, LIST_FIRST(&trussinfo->proclist)->pid, NULL,
 		    0);
 		return (1);
-	} else
-		ptrace(PT_SYSCALL, LIST_FIRST(&trussinfo->proclist)->pid,
-		    (caddr_t)1, 0);
+	}
+	ptrace(PT_SYSCALL, LIST_FIRST(&trussinfo->proclist)->pid, (caddr_t)1,
+	    0);
 
 	/*
 	 * At this point, it's a simple loop, waiting for the process to
