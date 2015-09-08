@@ -1716,6 +1716,7 @@ no_kqueue:
 		 */
 		so = fp->f_data;
 		sb = (opcode == LIO_READ) ? &so->so_rcv : &so->so_snd;
+		AIO_LOCK(ki);
 		SOCKBUF_LOCK(sb);
 		if (((opcode == LIO_READ) && (!soreadable(so))) || ((opcode ==
 		    LIO_WRITE) && (!sowriteable(so)))) {
@@ -1725,20 +1726,20 @@ no_kqueue:
 			TAILQ_INSERT_TAIL(&so->so_aiojobq, job, list);
 			mtx_unlock(&aio_job_mtx);
 
-			AIO_LOCK(ki);
 			TAILQ_INSERT_TAIL(&ki->kaio_all, job, allist);
 			TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, job, plist);
 			job->jobstate = JOBST_JOBQSOCK;
 			ki->kaio_count++;
 			if (lj)
 				lj->lioj_count++;
-			AIO_UNLOCK(ki);
 			SOCKBUF_UNLOCK(sb);
+			AIO_UNLOCK(ki);
 			atomic_add_int(&num_queue_count, 1);
 			error = 0;
 			goto done;
 		}
 		SOCKBUF_UNLOCK(sb);
+		AIO_UNLOCK(ki);
 	}
 
 	if ((error = aio_qphysio(p, job)) == 0)
