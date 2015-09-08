@@ -185,7 +185,8 @@ new_proc(struct trussinfo *info, pid_t pid)
 	}
 
 	if (info->flags & FOLLOWFORKS)
-		ptrace(PT_FOLLOW_FORK, pid, NULL, 1);
+		if (ptrace(PT_FOLLOW_FORK, pid, NULL, 1) == -1)
+			err(1, "Unable to follow forks for pid %ld", (long)pid);
 	np = calloc(1, sizeof(struct procinfo));
 	np->pid = pid;
 	np->abi = find_abi(pid);
