@@ -136,8 +136,13 @@ powerpc_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 	}
 
 	/* XXX: Does not have fixup for __syscall(). */
+#ifdef __powerpc64__
+	retval[0] = regs.fixreg[3] & 0xffffffff;
+	retval[1] = regs.fixreg[4] & 0xffffffff;
+#else
 	retval[0] = regs.fixreg[3];
 	retval[1] = regs.fixreg[4];
+#endif
 	*errorp = !!(regs.cr & 0x10000000);
 	return (0);
 }
