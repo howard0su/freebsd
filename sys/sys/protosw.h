@@ -34,6 +34,7 @@
 #define _SYS_PROTOSW_H_
 
 /* Forward declare these structures referenced from prototypes below. */
+struct aiocb;
 struct mbuf;
 struct thread;
 struct sockaddr;
