@@ -244,9 +244,6 @@ struct kaiocb {
 };
 
 /* jobflags */
-#define	KAIOCB_DONE		0x01
-#define	KAIOCB_BUFDONE		0x02
-#define	KAIOCB_RUNDOWN		0x04
 #define	KAIOCB_CHECKSYNC	0x08
 
 /*
@@ -343,10 +340,7 @@ static int	aio_qphysio(struct proc *p, struct kaiocb *job);
 static void	aio_daemon(void *param);
 static void	aio_swake_cb(struct socket *, struct sockbuf *);
 static int	aio_unload(void);
-static void	aio_bio_done_notify(struct proc *userp, struct kaiocb *job,
-		    int type);
-#define DONE_BUF	1
-#define DONE_QUEUE	2
+static void	aio_bio_done_notify(struct proc *userp, struct kaiocb *job);
 static int	aio_kick(struct proc *userp);
 static void	aio_kick_nowait(struct proc *userp);
 static void	aio_kick_helper(void *context, int pending);
@@ -744,7 +738,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 	cbe->uaiocb._aiocb_private.status = -1;
 	cbe->uaiocb._aiocb_private.error = ECANCELED;
 	TAILQ_REMOVE(&ki->kaio_jobqueue, cbe, plist);
-	aio_bio_done_notify(p, cbe, DONE_QUEUE);
+	aio_bio_done_notify(p, cbe);
 	return (1);
 }
 
@@ -989,7 +983,7 @@ aio_process_mlock(struct kaiocb *job)
 }
 
 static void
-aio_bio_done_notify(struct proc *userp, struct kaiocb *job, int type)
+aio_bio_done_notify(struct proc *userp, struct kaiocb *job)
 {
 	struct aioliojob *lj;
 	struct kaioinfo *ki;
@@ -1004,11 +998,6 @@ aio_bio_done_notify(struct proc *userp, struct kaiocb *job, int type)
 		lj->lioj_finished_count++;
 		if (lj->lioj_count == lj->lioj_finished_count)
 			lj_done = 1;
-	}
-	if (type == DONE_QUEUE) {
-		job->jobflags |= KAIOCB_DONE;
-	} else {
-		job->jobflags |= KAIOCB_BUFDONE;
 	}
 	TAILQ_INSERT_TAIL(&ki->kaio_done, job, plist);
 	job->jobstate = JOBST_JOBFINISHED;
@@ -1150,7 +1139,7 @@ aio_daemon(void *_id)
 
 			AIO_LOCK(ki);
 			TAILQ_REMOVE(&ki->kaio_jobqueue, job, plist);
-			aio_bio_done_notify(userp, job, DONE_QUEUE);
+			aio_bio_done_notify(userp, job);
 			AIO_UNLOCK(ki);
 
 			mtx_lock(&aio_job_mtx);
@@ -2402,7 +2391,7 @@ aio_physwakeup(struct bio *bp)
 		job->inputcharge += nblks;
 	TAILQ_REMOVE(&userp->p_aioinfo->kaio_bufqueue, job, plist);
 	ki->kaio_buffer_count--;
-	aio_bio_done_notify(userp, job, DONE_BUF);
+	aio_bio_done_notify(userp, job);
 	AIO_UNLOCK(ki);
 
 	g_destroy_bio(bp);
