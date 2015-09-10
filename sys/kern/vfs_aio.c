@@ -215,7 +215,7 @@ typedef struct oaiocb {
  */
 
 /*
- * Current, there is only two backends: BIO and generic file I/O.
+ * Currently, there are only two backends: BIO and generic file I/O.
  * socket I/O is served by generic file I/O, this is not a good idea, since
  * disk file I/O and any other types without O_NONBLOCK flag can block daemon
  * threads, if there is no thread to serve socket I/O, the socket I/O will be
@@ -232,8 +232,8 @@ struct aiocblist {
 	TAILQ_ENTRY(aiocblist) allist;  /* (a) list of all jobs in proc */
 	int	jobflags;		/* (a) job flags */
 	int	jobstate;		/* (b) job state */
-	int	inputcharge;		/* (*) input blockes */
-	int	outputcharge;		/* (*) output blockes */
+	int	inputcharge;		/* (*) input blocks */
+	int	outputcharge;		/* (*) output blocks */
 	struct	bio *bp;		/* (*) BIO backend BIO pointer */
 	struct	buf *pbuf;		/* (*) BIO backend buffer pointer */
 	struct	vm_page *pages[btoc(MAXPHYS)+1]; /* BIO backend pages */
