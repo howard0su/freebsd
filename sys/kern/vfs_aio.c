@@ -226,30 +226,6 @@ typedef struct oaiocb {
  * daemons.
  */
 
-struct aiocblist {
-	TAILQ_ENTRY(aiocblist) list;	/* (b) internal list of for backend */
-	TAILQ_ENTRY(aiocblist) plist;	/* (a) list of jobs for each backend */
-	TAILQ_ENTRY(aiocblist) allist;  /* (a) list of all jobs in proc */
-	int	jobflags;		/* (a) job flags */
-	int	jobstate;		/* (b) job state */
-	int	inputcharge;		/* (*) input blocks */
-	int	outputcharge;		/* (*) output blocks */
-	struct	bio *bp;		/* (*) BIO backend BIO pointer */
-	struct	buf *pbuf;		/* (*) BIO backend buffer pointer */
-	struct	vm_page *pages[btoc(MAXPHYS)+1]; /* BIO backend pages */
-	int	npages;			/* BIO backend number of pages */
-	struct	proc *userproc;		/* (*) user process */
-	struct  ucred *cred;		/* (*) active credential when created */
-	struct	file *fd_file;		/* (*) pointer to file structure */
-	struct	aioliojob *lio;		/* (*) optional lio job */
-	struct	aiocb *uuaiocb;		/* (*) pointer in userspace of aiocb */
-	struct	knlist klist;		/* (a) list of knotes */
-	struct	aiocb uaiocb;		/* (*) kernel I/O control block */
-	ksiginfo_t ksi;			/* (a) realtime signal info */
-	uint64_t seqno;			/* (*) job number */
-	int	pending;		/* (a) number of pending I/O, aio_fsync only */
-};
-
 /* jobflags */
 #define AIOCBLIST_CHECKSYNC	0x08
 
