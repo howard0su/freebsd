@@ -3093,12 +3093,12 @@ pru_accept_notsupp(struct socket *so, struct sockaddr **nam)
 }
 
 void
-pru_aio_cancel_null(struct socket *so, struct aiocb *cb)
+pru_aio_cancel_null(struct socket *so, struct aiocblist *cbe)
 {
 }
 
 void
-pru_aio_queue_null(struct socket *so, struct aiocb *cb)
+pru_aio_queue_null(struct socket *so, struct aiocblist *cbe)
 {
 }
 
