@@ -1560,6 +1560,7 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 			}
 		}
 
+#if 0
 		if ((toep->ddp_flags & DDP_OK) == 0 &&
 		    time_uptime >= toep->ddp_disabled + DDP_RETRY_WAIT) {
 			toep->ddp_score = DDP_LOW_SCORE;
@@ -1567,7 +1568,9 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 			CTR3(KTR_CXGBE, "%s: tid %u DDP_OK @ %u",
 			    __func__, tid, time_uptime);
 		}
+#endif
 
+#if 0
 		if (toep->ddp_flags & DDP_ON) {
 
 			/*
@@ -1594,6 +1597,18 @@ do_rx_data(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 
 			enable_ddp(sc, toep);
 		}
+#else
+		if (toep->ddp_flags & DDP_ON) {
+			/*
+			 * CPL_RX_DATA with DDP on can only be an indicate.
+			 * Copy this data to the pending request and
+			 * start DDP.
+			 */
+			ddp_indicate(sc, toep, m);
+			return;
+		}
+#endif
+			
 	}
 
 	KASSERT(toep->sb_cc >= sbused(sb),
