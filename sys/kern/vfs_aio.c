@@ -92,6 +92,7 @@ static uint64_t jobseqno;
 #define JOBST_JOBFINISHED	4
 #define JOBST_JOBQBUF		5
 #define JOBST_JOBQSYNC		6
+#define	JOBST_JOBQSOCKPRU	7
 
 #ifndef MAX_AIO_PER_PROC
 #define MAX_AIO_PER_PROC	32
@@ -713,7 +714,12 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 		mtx_lock(&aio_job_mtx);
 		TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
 		mtx_unlock(&aio_job_mtx);
-		(*so->so_proto->pr_usrreqs->pru_aio_cancel)(so, cbe);
+	case JOBST_JOBQSOCKPRU:
+		fp = cbe->fd_file;
+		MPASS(fp->f_type == DTYPE_SOCKET);
+		so = fp->f_data;
+		if ((*so->so_proto->pr_usrreqs->pru_aio_cancel)(so, cbe) != 0)
+			return (0);
 		break;
 	case JOBST_JOBQSYNC:
 		mtx_lock(&aio_job_mtx);
@@ -1753,15 +1759,22 @@ no_kqueue:
 		SOCKBUF_LOCK(sb);
 		if (((opcode == LIO_READ) && (!soreadable(so))) || ((opcode ==
 		    LIO_WRITE) && (!sowriteable(so)))) {
-			sb->sb_flags |= SB_AIO;
 
-			mtx_lock(&aio_job_mtx);
-			TAILQ_INSERT_TAIL(&so->so_aiojobq, aiocbe, list);
-			mtx_unlock(&aio_job_mtx);
+			if ((*so->so_proto->pr_usrreqs->pru_aio_queue)(so,
+			    aiocbe) == 0) {
+				aiocbe->jobstate = JOBST_JOBQSOCKPRU;
+			} else {
+				sb->sb_flags |= SB_AIO;
+
+				mtx_lock(&aio_job_mtx);
+				TAILQ_INSERT_TAIL(&so->so_aiojobq, aiocbe,
+				    list);
+				mtx_unlock(&aio_job_mtx);
+				aiocbe->jobstate = JOBST_JOBQSOCK;
+			}
 
 			TAILQ_INSERT_TAIL(&ki->kaio_all, aiocbe, allist);
 			TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, aiocbe, plist);
-			aiocbe->jobstate = JOBST_JOBQSOCK;
 			ki->kaio_count++;
 			if (lj)
 				lj->lioj_count++;

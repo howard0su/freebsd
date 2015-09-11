@@ -3092,14 +3092,18 @@ pru_accept_notsupp(struct socket *so, struct sockaddr **nam)
 	return EOPNOTSUPP;
 }
 
-void
-pru_aio_cancel_null(struct socket *so, struct aiocblist *cbe)
+int
+pru_aio_cancel_notsupp(struct socket *so, struct aiocblist *cbe)
 {
+
+	panic("pru_aio_cancel_notsupp called");
 }
 
-void
-pru_aio_queue_null(struct socket *so, struct aiocblist *cbe)
+int
+pru_aio_queue_notsupp(struct socket *so, struct aiocblist *cbe)
 {
+
+	return EOPNOTSUPP;
 }
 
 int

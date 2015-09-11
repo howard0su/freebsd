@@ -135,8 +135,8 @@ protosw_init(struct protosw *pr)
 
 #define DEFAULT(foo, bar)	if ((foo) == NULL)  (foo) = (bar)
 	DEFAULT(pu->pru_accept, pru_accept_notsupp);
-	DEFAULT(pu->pru_aio_cancel, pru_aio_cancel_null);
-	DEFAULT(pu->pru_aio_queue, pru_aio_queue_null);
+	DEFAULT(pu->pru_aio_cancel, pru_aio_cancel_notsupp);
+	DEFAULT(pu->pru_aio_queue, pru_aio_queue_notsupp);
 	DEFAULT(pu->pru_bind, pru_bind_notsupp);
 	DEFAULT(pu->pru_bindat, pru_bindat_notsupp);
 	DEFAULT(pu->pru_connect, pru_connect_notsupp);
