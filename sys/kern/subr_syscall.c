@@ -63,7 +63,7 @@ syscallenter(struct thread *td, struct syscall_args *sa)
 	td->td_pticks = 0;
 	if (td->td_cowgen != p->p_cowgen)
 		thread_cow_update(td);
-	if (p->p_flag & P_TRACED) {
+	if (p->p_flag & P_TRACED || td->td_dbgflags & TDB_USERWR) {
 		traced = 1;
 		PROC_LOCK(p);
 		td->td_dbgflags &= ~TDB_USERWR;
