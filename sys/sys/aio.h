@@ -174,6 +174,8 @@ struct aiocblist {
 
 extern void (*aio_swake)(struct socket *, struct sockbuf *);
 
+void	aio_complete(struct aiocblist *aiocbe, long status, int error);
+
 #endif
 
 #endif
