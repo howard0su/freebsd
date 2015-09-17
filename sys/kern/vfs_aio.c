@@ -1030,6 +1030,29 @@ notification_done:
 	}
 }
 
+void
+aio_complete(struct aiocblist *aiocbe, long status, int error)
+{
+	struct kaioinfo *ki;
+	struct proc *userp;
+
+	aiocbe->_aiocb_private.error = error;
+	aiocbe->_aiocb_private.status = status;
+
+	userp = aiocbe->userp;
+	ki = userp->p_aioinfo;
+
+	mtx_lock(&aio_job_mtx);
+	/* Decrement the active job count. */
+	ki->kaio_active_count--;
+	mtx_unlock(&aio_job_mtx);
+
+	AIO_LOCK(ki);
+	TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
+	aio_bio_done_notify(userp, aiocbe);
+	AIO_UNLOCK(ki);
+}
+
 static void
 aio_switch_vmspace(struct kaiocb *job)
 {
