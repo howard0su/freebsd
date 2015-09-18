@@ -157,12 +157,11 @@ alloc_toepcb(struct port_info *pi, int txqid, int rxqid, int flags)
 	toep->ofld_txq = &sc->sge.ofld_txq[txqid];
 	toep->ofld_rxq = &sc->sge.ofld_rxq[rxqid];
 	toep->ctrlq = &sc->sge.ctrlq[pi->port_id];
-	TAILQ_INIT(&toep->ddp_aiojobq);
-	TASK_INIT(&toep->ddp_requeue_task, 0, aio_ddp_requeue, toep);
 	toep->txsd_total = txsd_total;
 	toep->txsd_avail = txsd_total;
 	toep->txsd_pidx = 0;
 	toep->txsd_cidx = 0;
+	ddp_init_toep(toep);
 
 	return (toep);
 }
