@@ -1052,7 +1052,7 @@ aio_complete(struct aiocblist *aiocbe, long status, int error)
 	aiocbe->uaiocb._aiocb_private.error = error;
 	aiocbe->uaiocb._aiocb_private.status = status;
 
-	userp = aiocbe->userp;
+	userp = aiocbe->userproc;
 	ki = userp->p_aioinfo;
 
 	mtx_lock(&aio_job_mtx);
