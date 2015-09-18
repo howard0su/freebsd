@@ -1049,8 +1049,8 @@ aio_complete(struct aiocblist *aiocbe, long status, int error)
 	struct kaioinfo *ki;
 	struct proc *userp;
 
-	aiocbe->_aiocb_private.error = error;
-	aiocbe->_aiocb_private.status = status;
+	aiocbe->uaiocb._aiocb_private.error = error;
+	aiocbe->uaiocb._aiocb_private.status = status;
 
 	userp = aiocbe->userp;
 	ki = userp->p_aioinfo;
