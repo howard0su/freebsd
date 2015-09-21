@@ -699,6 +699,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 {
 	struct file *fp;
 	struct socket *so;
+	int error;
 
 	AIO_LOCK_ASSERT(ki, MA_OWNED);
 	switch (cbe->jobstate) {
@@ -718,7 +719,8 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 		fp = cbe->fd_file;
 		MPASS(fp->f_type == DTYPE_SOCKET);
 		so = fp->f_data;
-		if ((*so->so_proto->pr_usrreqs->pru_aio_cancel)(so, cbe) != 0)
+		error = (*so->so_proto->pr_usrreqs->pru_aio_cancel)(so, cbe);
+		if (error != 0)
 			return (0);
 		break;
 	case JOBST_JOBQSYNC:
@@ -1041,6 +1043,26 @@ notification_done:
 		ki->kaio_flags &= ~KAIO_WAKEUP;
 		wakeup(&userp->p_aioinfo);
 	}
+}
+
+void
+aio_queue(struct aiocblist *aiocbe)
+{
+	struct kaioinfo *ki;
+	struct aioliojob *lj;
+
+	ki = aiocbe->userproc->p_aioinfo;
+	lj = aiocbe->lio;
+
+	AIO_LOCK(ki);
+	TAILQ_INSERT_TAIL(&ki->kaio_all, aiocbe, allist);
+	TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, aiocbe, plist);
+	aiocbe->jobstate = JOBST_JOBQSOCKPRU; /* XXX: Hack for now */
+	ki->kaio_count++;
+	if (lj)
+		lj->lioj_count++;
+	AIO_UNLOCK(ki);
+	atomic_add_int(&num_queue_count, 1);
 }
 
 void
@@ -1777,33 +1799,28 @@ no_kqueue:
 		 * and unlock the snd sockbuf for no reason.
 		 */
 		so = fp->f_data;
+		error = (*so->so_proto->pr_usrreqs->pru_aio_queue)(so, aiocbe);
+		if (error == 0)
+			goto done;
 		sb = (opcode == LIO_READ) ? &so->so_rcv : &so->so_snd;
-		AIO_LOCK(ki);
 		SOCKBUF_LOCK(sb);
 		if (((opcode == LIO_READ) && (!soreadable(so))) || ((opcode ==
 		    LIO_WRITE) && (!sowriteable(so)))) {
+			sb->sb_flags |= SB_AIO;
 
-			if ((*so->so_proto->pr_usrreqs->pru_aio_queue)(so,
-			    aiocbe) == 0) {
-				aiocbe->jobstate = JOBST_JOBQSOCKPRU;
-			} else {
-				sb->sb_flags |= SB_AIO;
+			mtx_lock(&aio_job_mtx);
+			TAILQ_INSERT_TAIL(&so->so_aiojobq, aiocbe, list);
+			mtx_unlock(&aio_job_mtx);
 
-				mtx_lock(&aio_job_mtx);
-				TAILQ_INSERT_TAIL(&so->so_aiojobq, aiocbe,
-				    list);
-				mtx_unlock(&aio_job_mtx);
-				aiocbe->jobstate = JOBST_JOBQSOCK;
-			}
-
+			AIO_LOCK(ki);
 			TAILQ_INSERT_TAIL(&ki->kaio_all, aiocbe, allist);
 			TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, aiocbe, plist);
+			aiocbe->jobstate = JOBST_JOBQSOCK;
 			ki->kaio_count++;
 			if (lj)
 				lj->lioj_count++;
-			SOCKBUF_UNLOCK(sb);
-			(*so->so_proto->pr_usrreqs->pru_aio_queue)(so, aiocbe);
 			AIO_UNLOCK(ki);
+			SOCKBUF_UNLOCK(sb);
 			atomic_add_int(&num_queue_count, 1);
 			error = 0;
 			goto done;
