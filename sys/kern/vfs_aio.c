@@ -92,7 +92,7 @@ static uint64_t jobseqno;
 #define JOBST_JOBFINISHED	4
 #define JOBST_JOBQBUF		5
 #define JOBST_JOBQSYNC		6
-#define	JOBST_JOBQSOCKPRU	7
+#define	JOBST_JOBQPRIVATE	7
 
 #ifndef MAX_AIO_PER_PROC
 #define MAX_AIO_PER_PROC	32
@@ -715,18 +715,15 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 		mtx_lock(&aio_job_mtx);
 		TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
 		mtx_unlock(&aio_job_mtx);
-	case JOBST_JOBQSOCKPRU:
-		fp = cbe->fd_file;
-		MPASS(fp->f_type == DTYPE_SOCKET);
-		so = fp->f_data;
-		error = (*so->so_proto->pr_usrreqs->pru_aio_cancel)(so, cbe);
-		if (error != 0)
-			return (0);
-		break;
 	case JOBST_JOBQSYNC:
 		mtx_lock(&aio_job_mtx);
 		TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
 		mtx_unlock(&aio_job_mtx);
+		break;
+	case JOBST_JOBQPRIVATE:
+		error = cbe->cancel_fn(cbe);
+		if (error != 0)
+			return (0);
 		break;
 	default:
 		return (0);
@@ -1046,7 +1043,7 @@ notification_done:
 }
 
 void
-aio_queue(struct aiocblist *aiocbe)
+aio_queue(struct aiocblist *aiocbe, aio_cancel_fn *func)
 {
 	struct kaioinfo *ki;
 	struct aioliojob *lj;
@@ -1057,7 +1054,8 @@ aio_queue(struct aiocblist *aiocbe)
 	AIO_LOCK(ki);
 	TAILQ_INSERT_TAIL(&ki->kaio_all, aiocbe, allist);
 	TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, aiocbe, plist);
-	aiocbe->jobstate = JOBST_JOBQSOCKPRU; /* XXX: Hack for now */
+	aiocbe->jobstate = JOBST_JOBQPRIVATE;
+	aiocbe->cancel_fn = func;
 	ki->kaio_count++;
 	if (lj)
 		lj->lioj_count++;
