@@ -715,6 +715,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 		mtx_lock(&aio_job_mtx);
 		TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
 		mtx_unlock(&aio_job_mtx);
+		break;
 	case JOBST_JOBQSYNC:
 		mtx_lock(&aio_job_mtx);
 		TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
