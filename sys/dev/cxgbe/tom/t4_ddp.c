@@ -1946,4 +1946,6 @@ t4_aio_queue_ddp(struct socket *so, struct aiocblist *cbe)
 	SOCKBUF_UNLOCK(sb);
 	return (0);
 }
+
+MODULE_DEPEND(t4_tom, aio, 1, 1, 1);
 #endif
