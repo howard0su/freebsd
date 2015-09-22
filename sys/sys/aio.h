@@ -148,6 +148,8 @@ struct sockbuf;
 #include <sys/event.h>  /* XXX: For knlist */
 #include <sys/signalvar.h>
 
+typedef int (aio_cancel_fn)(struct aiocblist *);
+
 struct aiocblist {
 	TAILQ_ENTRY(aiocblist) list;	/* (b) internal list of for backend */
 	TAILQ_ENTRY(aiocblist) plist;	/* (a) list of jobs for each backend */
@@ -170,11 +172,12 @@ struct aiocblist {
 	ksiginfo_t ksi;			/* (a) realtime signal info */
 	uint64_t seqno;			/* (*) job number */
 	int	pending;		/* (a) number of pending I/O, aio_fsync only */
+	aio_cancel_fn *cancel_fn;
 };
 
 extern void (*aio_swake)(struct socket *, struct sockbuf *);
 
-void	aio_queue(struct aiocblist *aiocbe);
+void	aio_queue(struct aiocblist *aiocbe, aio_cancel_fn *func);
 void	aio_complete(struct aiocblist *aiocbe, long status, int error);
 
 #endif
