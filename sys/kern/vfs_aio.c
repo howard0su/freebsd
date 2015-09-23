@@ -941,6 +941,49 @@ aio_process_rw(struct aiocblist *aiocbe)
 	cb->_aiocb_private.error = error;
 	cb->_aiocb_private.status = cnt;
 	td->td_ucred = td_savedcred;
+
+	/*
+	 * If this request was for a socket, see if we need to queue
+	 * another request.
+	 */
+	if (fp->f_type == DTYPE_SOCKET) {
+		struct aiocblist *cbnext;
+		struct sockbuf *sb;
+		so = fp->f_data;
+
+		if (cb->aio_lio_opcode == LIO_WRITE)
+			sb = &so->so_snd;
+		else
+			sb = &so->so_rcv;
+		SOCKBUF_LOCK(sb);
+		mtx_lock(&aio_job_mtx);
+		TAILQ_FOREACH(cbnext, &so->so_aiojobq, list) {
+			MPASS(cbnext->jobstate == JOBST_JOBQSOCK);
+			if (cbnext->uaiocb.aio_lio_opcode != cb->aio_lio_opcode)
+				continue;
+
+			/*
+			 * If the socket buffer is ready, move this request
+			 * to the run queue.  Otherwise, set SB_AIO to
+			 * trigger another wakeup.
+			 *
+			 * Note that since this request has just completed,
+			 * there is no need to wake up another aio thread
+			 * if we queue a request.
+			 */
+			if ((cbnext->uaiocb.aio_lio_opcode == LIO_WRITE &&
+			    sowriteable(so)) ||
+			    (cbnext->uaiocb.aio_lio_opcode == LIO_READ &&
+			    soreadable(so))) {
+				TAILQ_REMOVE(&so->so_aiojobq, cbnext, list);
+				TAILQ_INSERT_TAIL(&aio_jobs, cbnext, list);
+			} else
+				sb->sb_flags |= SB_AIO;
+			break;
+		}
+		mtx_unlock(&aio_job_mtx);
+		SOCKBUF_UNLOCK(sb);
+	}
 }
 
 static void
@@ -1468,7 +1511,7 @@ unref:
 static void
 aio_swake_cb(struct socket *so, struct sockbuf *sb)
 {
-	struct aiocblist *cb, *cbn;
+	struct aiocblist *cb;
 	int opcode;
 
 	SOCKBUF_LOCK_ASSERT(sb);
@@ -1479,18 +1522,23 @@ aio_swake_cb(struct socket *so, struct sockbuf *sb)
 
 	sb->sb_flags &= ~SB_AIO;
 	mtx_lock(&aio_job_mtx);
-	TAILQ_FOREACH_SAFE(cb, &so->so_aiojobq, list, cbn) {
+	TAILQ_FOREACH(cb, &so->so_aiojobq, list) {
 		if (opcode == cb->uaiocb.aio_lio_opcode) {
 			if (cb->jobstate != JOBST_JOBQSOCK)
 				panic("invalid queue value");
 			/* XXX
 			 * We don't have actual sockets backend yet,
-			 * so we simply move the requests to the generic
+			 * so we simply move the request to the generic
 			 * file I/O backend.
+			 *
+			 * Queue a single request for completion.
+			 * Once it has completed it will queue the next
+			 * request.
 			 */
 			TAILQ_REMOVE(&so->so_aiojobq, cb, list);
 			TAILQ_INSERT_TAIL(&aio_jobs, cb, list);
 			aio_kick_nowait(cb->userproc);
+			break;
 		}
 	}
 	mtx_unlock(&aio_job_mtx);
