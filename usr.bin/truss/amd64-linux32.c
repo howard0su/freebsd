@@ -46,7 +46,7 @@ __FBSDID("$FreeBSD$");
 #include "linux32_syscalls.h"
 
 static int
-amd64_linux32_fetch_args(struct trussinfo *trussinfo)
+amd64_linux32_fetch_args(struct trussinfo *trussinfo, u_int narg)
 {
 	struct reg regs;
 	struct current_syscall *cs;
@@ -66,7 +66,7 @@ amd64_linux32_fetch_args(struct trussinfo *trussinfo)
 	 * number of arguments.	And what does linux do for syscalls
 	 * that have more than five arguments?
 	 */
-	switch (cs->nargs) {
+	switch (narg) {
 	default:
 		cs->args[5] = regs.r_rbp;	/* Unconfirmed */
 	case 5:

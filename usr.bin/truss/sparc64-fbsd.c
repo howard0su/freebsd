@@ -49,7 +49,7 @@ __FBSDID("$FreeBSD$");
 #include "syscalls.h"
 
 static int
-sparc64_fetch_args(struct trussinfo *trussinfo)
+sparc64_fetch_args(struct trussinfo *trussinfo, u_int narg)
 {
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
@@ -80,14 +80,14 @@ sparc64_fetch_args(struct trussinfo *trussinfo)
 		break;
 	}
 
-	for (i = 0; i < cs->nargs && reg < 6; i++, reg++)
+	for (i = 0; i < narg && reg < 6; i++, reg++)
 		cs->args[i] = regs.r_out[reg];
-	if (cs->nargs > i) {
+	if (narg > i) {
 		iorequest.piod_op = PIOD_READ_D;
 		iorequest.piod_offs = (void *)(regs.r_out[6] + SPOFF +
 		    offsetof(struct frame, fr_pad[6]));
 		iorequest.piod_addr = &cs->args[i];
-		iorequest.piod_len = (cs->nargs - i) * sizeof(cs->args[0]);
+		iorequest.piod_len = (narg - i) * sizeof(cs->args[0]);
 		ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 		if (iorequest.piod_len == 0)
 			return (-1);

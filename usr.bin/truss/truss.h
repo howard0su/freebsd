@@ -43,7 +43,7 @@ struct procabi {
 	const char *type;
 	const char **syscallnames;
 	int nsyscalls;
-	int (*fetch_args)(struct trussinfo *);
+	int (*fetch_args)(struct trussinfo *, u_int);
 	int (*fetch_retval)(struct trussinfo *, long *, int *);
 };
 
@@ -59,18 +59,16 @@ struct procabi {
  * of a system call's arguments.  These do not necessarily map one to
  * one.  A system call description may omit individual arguments
  * (padding) or combine adjacent arguments (e.g. when passing an off_t
- * argument on a 32-bit system).  When the 'fetch_args' callback is
- * invoked, 'nargs' contains the number of valid values in the args[]
- * array.  After that callback returns it is changed to store the
- * number of valid values in the s_args[] array.
+ * argument on a 32-bit system).  The nargs member contains the count
+ * of valid pointers in s_args[], not args[].
  */
 struct current_syscall {
 	struct syscall *sc;
 	const char *name;
 	int number;
-	unsigned long *args;
-	int nargs;
-	char **s_args;	/* the printable arguments */
+	unsigned long args[10];
+	unsigned int nargs;
+	char *s_args[10];	/* the printable arguments */
 };
 
 struct threadinfo

@@ -47,7 +47,7 @@ __FBSDID("$FreeBSD$");
 #include "syscalls.h"
 
 static int
-mips_fetch_args(struct trussinfo *trussinfo)
+mips_fetch_args(struct trussinfo *trussinfo, u_int narg)
 {
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
@@ -90,14 +90,14 @@ mips_fetch_args(struct trussinfo *trussinfo)
 #define	MAXREG		A3
 #endif
 
-	for (i = 0; i < cs->nargs && reg <= MAXREG; i++, reg++)
+	for (i = 0; i < narg && reg <= MAXREG; i++, reg++)
 		cs->args[i] = regs.r_regs[reg];
-	if (cs->nargs > i) {
+	if (narg > i) {
 		iorequest.piod_op = PIOD_READ_D;
 		iorequest.piod_offs = (void *)(regs.r_regs[SP] +
 		    4 * sizeof(cs->args[0]));
 		iorequest.piod_addr = &cs->args[i];
-		iorequest.piod_len = (cs->nargs - i) * sizeof(cs->args[0]);
+		iorequest.piod_len = (narg - i) * sizeof(cs->args[0]);
 		ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 		if (iorequest.piod_len == 0)
 			return (-1);

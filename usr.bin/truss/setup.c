@@ -297,31 +297,26 @@ find_exit_thread(struct trussinfo *info, pid_t pid)
 static void
 alloc_syscall(struct threadinfo *t, struct ptrace_lwpinfo *pl)
 {
+	u_int i;
 
 	assert(t->in_syscall == 0);
 	assert(t->cs.number == 0);
 	assert(t->cs.name == NULL);
-	assert(t->cs.args == NULL);
 	assert(t->cs.nargs == 0);
-	assert(t->cs.s_args == NULL);
+	for (i = 0; i < nitems(t->cs.s_args); i++)
+		assert(t->cs.s_args[i] == NULL);
+	memset(t->cs.args, 0, sizeof(t->cs.args));
 	t->cs.number = pl->pl_syscall_code;
-	t->cs.nargs = pl->pl_syscall_narg;
-	if (t->cs.nargs != 0)
-		t->cs.args = calloc(1 + t->cs.nargs, sizeof(t->cs.args[0]));
 	t->in_syscall = 1;
 }
 
 static void
 free_syscall(struct threadinfo *t)
 {
-	int i;
+	u_int i;
 
-	free(t->cs.args);
-	if (t->cs.s_args) {
-		for (i = 0; i < t->cs.nargs; i++)
-			free(t->cs.s_args[i]);
-		free(t->cs.s_args);
-	}
+	for (i = 0; i < t->cs.nargs; i++)
+		free(t->cs.s_args[i]);
 	memset(&t->cs, 0, sizeof(t->cs));
 	t->in_syscall = 0;
 }
@@ -331,11 +326,12 @@ enter_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 {
 	struct threadinfo *t;
 	struct syscall *sc;
-	int i;
+	u_int i, narg;
 
 	t = info->curthread;
 	alloc_syscall(t, pl);
-	if (t->cs.nargs != 0 && t->proc->abi->fetch_args(info) != 0) {
+	narg = MIN(pl->pl_syscall_narg, nitems(t->cs.args));
+	if (narg != 0 && t->proc->abi->fetch_args(info, narg) != 0) {
 		free_syscall(t);
 		return;
 	}
@@ -347,16 +343,17 @@ enter_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 		    t->proc->abi->type, t->cs.number);
 
 	sc = get_syscall(t->cs.name);
-	if (sc)
+	if (sc) {
 		t->cs.nargs = sc->nargs;
-	else {
+		assert(sc->nargs <= nitems(t->cs.s_args));
+	} else {
 #if DEBUG
 		fprintf(stderr, "unknown syscall %s -- setting "
 		    "args to %d\n", t->cs.name, t->cs.nargs);
 #endif
+		t->cs.nargs = narg;
 	}
 
-	t->cs.s_args = calloc(1 + t->cs.nargs, sizeof(char *));
 	t->cs.sc = sc;
 
 	/*
@@ -396,7 +393,8 @@ exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 	struct procinfo *p;
 	struct syscall *sc;
 	long retval[2];
-	int errorp, i;
+	u_int i;
+	int errorp;
 
 	t = info->curthread;
 	if (!t->in_syscall)

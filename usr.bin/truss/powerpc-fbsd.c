@@ -48,7 +48,7 @@ __FBSDID("$FreeBSD$");
 #endif
 
 static int
-powerpc_fetch_args(struct trussinfo *trussinfo)
+powerpc_fetch_args(struct trussinfo *trussinfo, u_int narg)
 {
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
@@ -87,36 +87,34 @@ powerpc_fetch_args(struct trussinfo *trussinfo)
 		break;
 	}
 
-	for (i = 0; i < cs->nargs && reg < NARGREG; i++, reg++) {
+	for (i = 0; i < narg && reg < NARGREG; i++, reg++) {
 #ifdef __powerpc64__
 		cs->args[i] = regs.fixreg[FIRSTARG + reg] & 0xffffffff;
 #else
 		cs->args[i] = regs.fixreg[FIRSTARG + reg];
 #endif
 	}
-	if (cs->nargs > i) {
+	if (narg > i) {
 #ifdef __powerpc64__
-		uint32_t *args32;
+		uint32_t args32[narg - i];
 		int j;
 
-		args32 = calloc(cs->nargs - i, sizeof(uint32_t));
 #endif
 		iorequest.piod_op = PIOD_READ_D;
 		iorequest.piod_offs = (void *)(regs.fixreg[1] + 8);
 #ifdef __powerpc64__
 		iorequest.piod_addr = args32;
-		iorequest.piod_len = (cs->nargs - i) * sizeof(args32[0]);
+		iorequest.piod_len = sizeof(args32)
 #else
 		iorequest.piod_addr = &cs->args[i];
-		iorequest.piod_len = (cs->nargs - i) * sizeof(cs->args[0]);
+		iorequest.piod_len = (narg - i) * sizeof(cs->args[0]);
 #endif
 		ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 		if (iorequest.piod_len == 0)
 			return (-1);
 #ifdef __powerpc64__
-		for (j = 0; j < cs->nargs - i; j++)
+		for (j = 0; j < narg - i; j++)
 			cs->args[i + j] = args32[j];
-		free(args32);
 #endif
 	}
 

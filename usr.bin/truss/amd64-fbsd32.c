@@ -48,7 +48,7 @@ __FBSDID("$FreeBSD$");
 #include "freebsd32_syscalls.h"
 
 static int
-amd64_fbsd32_fetch_args(struct trussinfo *trussinfo)
+amd64_fbsd32_fetch_args(struct trussinfo *trussinfo, u_int narg)
 {
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
@@ -83,18 +83,18 @@ amd64_fbsd32_fetch_args(struct trussinfo *trussinfo)
 		break;
 	}
 
-	args32 = calloc(1 + cs->nargs, sizeof(unsigned int));
+	args32 = calloc(1 + narg, sizeof(unsigned int));
 	iorequest.piod_op = PIOD_READ_D;
 	iorequest.piod_offs = (void *)parm_offset;
 	iorequest.piod_addr = args32;
-	iorequest.piod_len = (1 + cs->nargs) * sizeof(unsigned int);
+	iorequest.piod_len = (1 + narg) * sizeof(unsigned int);
 	ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 	if (iorequest.piod_len == 0) {
 		free(args32);
 		return (-1);
 	}
 
-	for (i = 0; i < cs->nargs + 1; i++)
+	for (i = 0; i < narg + 1; i++)
 		 cs->args[i] = args32[i];
 	free(args32);
 	return (0);
