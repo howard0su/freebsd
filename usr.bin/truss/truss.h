@@ -53,6 +53,16 @@ struct procabi {
  * This is confusingly named.  It holds per-thread state about the
  * currently executing system call.  syscalls.h defines a struct
  * syscall that holds metadata used to format system call arguments.
+ *
+ * NB: args[] stores the raw argument values (e.g. from registers)
+ * passed to the system call.  s_args[] stores a string representation
+ * of a system call's arguments.  These do not necessarily map one to
+ * one.  A system call description may omit individual arguments
+ * (padding) or combine adjacent arguments (e.g. when passing an off_t
+ * argument on a 32-bit system).  When the 'fetch_args' callback is
+ * invoked, 'nargs' contains the number of valid values in the args[]
+ * array.  After that callback returns it is changed to store the
+ * number of valid values in the s_args[] array.
  */
 struct current_syscall {
 	struct syscall *sc;
