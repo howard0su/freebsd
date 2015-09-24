@@ -53,7 +53,7 @@ amd64_fbsd32_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
 	struct current_syscall *cs;
-	unsigned int *args32;
+	unsigned int args32[narg];
 	unsigned long parm_offset;
 	lwpid_t tid;
 	int i;
@@ -83,20 +83,17 @@ amd64_fbsd32_fetch_args(struct trussinfo *trussinfo, u_int narg)
 		break;
 	}
 
-	args32 = calloc(1 + narg, sizeof(unsigned int));
 	iorequest.piod_op = PIOD_READ_D;
 	iorequest.piod_offs = (void *)parm_offset;
 	iorequest.piod_addr = args32;
-	iorequest.piod_len = (1 + narg) * sizeof(unsigned int);
+	iorequest.piod_len = sizeof(args32);
 	ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 	if (iorequest.piod_len == 0) {
-		free(args32);
 		return (-1);
 	}
 
-	for (i = 0; i < narg + 1; i++)
+	for (i = 0; i < narg; i++)
 		 cs->args[i] = args32[i];
-	free(args32);
 	return (0);
 }
 

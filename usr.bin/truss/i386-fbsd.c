@@ -83,7 +83,7 @@ i386_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	iorequest.piod_op = PIOD_READ_D;
 	iorequest.piod_offs = (void *)parm_offset;
 	iorequest.piod_addr = cs->args;
-	iorequest.piod_len = (1 + narg) * sizeof(unsigned long);
+	iorequest.piod_len = narg * sizeof(unsigned long);
 	ptrace(PT_IO, tid, (caddr_t)&iorequest, 0);
 	if (iorequest.piod_len == 0)
 		return (-1);
