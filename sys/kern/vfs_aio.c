@@ -1119,11 +1119,6 @@ aio_complete(struct aiocblist *aiocbe, long status, int error)
 	userp = aiocbe->userproc;
 	ki = userp->p_aioinfo;
 
-	mtx_lock(&aio_job_mtx);
-	/* Decrement the active job count. */
-	ki->kaio_active_count--;
-	mtx_unlock(&aio_job_mtx);
-
 	AIO_LOCK(ki);
 	TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
 	aio_bio_done_notify(userp, aiocbe);
