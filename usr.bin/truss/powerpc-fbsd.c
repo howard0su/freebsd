@@ -53,9 +53,8 @@ powerpc_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	struct ptrace_io_desc iorequest;
 	struct reg regs;
 	struct current_syscall *cs;
-	struct syscall *sc;
 	lwpid_t tid;
-	int i, reg;
+	u_int i, reg;
 
 #if 0
 	/* Account for a 64-bit argument with corresponding alignment. */
@@ -97,14 +96,14 @@ powerpc_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	if (narg > i) {
 #ifdef __powerpc64__
 		uint32_t args32[narg - i];
-		int j;
+		u_int j;
 
 #endif
 		iorequest.piod_op = PIOD_READ_D;
 		iorequest.piod_offs = (void *)(regs.fixreg[1] + 8);
 #ifdef __powerpc64__
 		iorequest.piod_addr = args32;
-		iorequest.piod_len = sizeof(args32)
+		iorequest.piod_len = sizeof(args32);
 #else
 		iorequest.piod_addr = &cs->args[i];
 		iorequest.piod_len = (narg - i) * sizeof(cs->args[0]);

@@ -909,7 +909,7 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 		} u;
 		char *string;
 		size_t len;
-		int first, i;
+		u_int first, i;
 
 		/*
 		 * Only parse argv[] and environment arrays from exec calls
