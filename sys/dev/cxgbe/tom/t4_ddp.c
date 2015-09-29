@@ -1839,6 +1839,7 @@ restart:
 #if 0
 	sb->sb_flags &= ~SB_DDP_INDICATE;  /* XXX: Not sure? */
 #endif
+	db->cancel_pending = 0;
 	db->cbe = cbe;
 	toep->ddp_queueing = NULL;
 	toep->ddp_flags |= buf_flag;
