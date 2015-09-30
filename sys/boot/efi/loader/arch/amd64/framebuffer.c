@@ -43,6 +43,21 @@ static EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 static EFI_GUID pciio_guid = EFI_PCI_IO_PROTOCOL_GUID;
 static EFI_GUID uga_guid = EFI_UGA_DRAW_PROTOCOL_GUID;
 
+static u_int
+efifb_color_depth(struct efi_fb *efifb)
+{
+	uint32_t mask;
+	u_int depth;
+
+	mask = efifb->fb_mask_red | efifb->fb_mask_green |
+	    efifb->fb_mask_blue | efifb->fb_mask_reserved;
+	if (mask == 0)
+		return (0);
+	for (depth = 1; mask != 1; depth++)
+		mask >>= 1;
+	return (depth);
+}
+
 static int
 efifb_mask_from_pixfmt(struct efi_fb *efifb, EFI_GRAPHICS_PIXEL_FORMAT pixfmt,
     EFI_PIXEL_BITMASK *pixinfo)
@@ -92,83 +107,319 @@ efifb_from_gop(struct efi_fb *efifb, EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode,
 	return (result);
 }
 
-static int
-efifb_from_uga(struct efi_fb *efifb, EFI_UGA_DRAW_PROTOCOL *uga)
+static ssize_t
+efifb_uga_find_pixel(EFI_UGA_DRAW_PROTOCOL *uga, u_int line,
+    EFI_PCI_IO_PROTOCOL *pciio, uint64_t addr, uint64_t size)
 {
-	uint8_t *buf;
-	EFI_PCI_IO_PROTOCOL *pciio;
-	EFI_HANDLE handle;
+	EFI_UGA_PIXEL pix0, pix1;
+	uint8_t *data1, *data2;
+	size_t count, maxcount = 1024;
+	ssize_t ofs;
 	EFI_STATUS status;
-	UINTN bufofs, bufsz;
-	uint64_t address, length;
-	uint32_t horiz, vert, depth, refresh;
-	u_int bar;
+	u_int idx;
 
-	status = uga->GetMode(uga, &horiz, &vert, &depth, &refresh);
-        if (EFI_ERROR(status))
-		return (1);
-	efifb->fb_height = vert;
-	efifb->fb_width = horiz;
-	efifb_mask_from_pixfmt(efifb, PixelBlueGreenRedReserved8BitPerColor,
-	    NULL);
-	/* Find all handles that support the UGA protocol. */
+	status = uga->Blt(uga, &pix0, EfiUgaVideoToBltBuffer,
+	    0, line, 0, 0, 1, 1, 0);
+	if (EFI_ERROR(status)) {
+		printf("UGA BLT operation failed (video->buffer)");
+		return (-1);
+	}
+	pix1.Red = ~pix0.Red;
+	pix1.Green = ~pix0.Green;
+	pix1.Blue = ~pix0.Blue;
+	pix1.Reserved = 0;
+
+	data1 = calloc(maxcount, 2);
+	if (data1 == NULL) {
+		printf("Unable to allocate memory");
+		return (-1);
+	}
+	data2 = data1 + maxcount;
+
+	ofs = 0;
+	while (size > 0) {
+		count = min(size, maxcount);
+
+		status = pciio->Mem.Read(pciio, EfiPciIoWidthUint32,
+		    EFI_PCI_IO_PASS_THROUGH_BAR, addr + ofs, count >> 2,
+		    data1);
+		if (EFI_ERROR(status)) {
+			printf("Error reading frame buffer (before)");
+			goto fail;
+		}
+		status = uga->Blt(uga, &pix1, EfiUgaBltBufferToVideo,
+		    0, 0, 0, line, 1, 1, 0);
+		if (EFI_ERROR(status)) {
+			printf("UGA BLT operation failed (modify)");
+			goto fail;
+		}
+		status = pciio->Mem.Read(pciio, EfiPciIoWidthUint32,
+		    EFI_PCI_IO_PASS_THROUGH_BAR, addr + ofs, count >> 2,
+		    data2);
+		if (EFI_ERROR(status)) {
+			printf("Error reading frame buffer (after)");
+			goto fail;
+		}
+		status = uga->Blt(uga, &pix0, EfiUgaBltBufferToVideo,
+		    0, 0, 0, line, 1, 1, 0);
+		if (EFI_ERROR(status)) {
+			printf("UGA BLT operation failed (restore)");
+			goto fail;
+		}
+		for (idx = 0; idx < count; idx++) {
+			if (data1[idx] != data2[idx]) {
+				free(data1);
+				return (ofs + (idx & ~3));
+			}
+		}
+		ofs += count;
+		size -= count;
+	}
+	printf("No change detected in frame buffer");
+
+ fail:
+	printf(" -- error %lu\n", status & ~EFI_ERROR_MASK);
+	free(data1);
+	return (-1);
+}
+
+static EFI_PCI_IO_PROTOCOL *
+efifb_uga_get_pciio(void)
+{
+	EFI_PCI_IO_PROTOCOL *pciio;
+	EFI_HANDLE *buf, *hp;
+	EFI_STATUS status;
+	UINTN bufsz;
+
+	/* Get all handles that support the UGA protocol. */
 	bufsz = 0;
 	status = BS->LocateHandle(ByProtocol, &uga_guid, NULL, &bufsz, NULL);
 	if (status != EFI_BUFFER_TOO_SMALL)
-		return (1);
+		return (NULL);
 	buf = malloc(bufsz);
-	status = BS->LocateHandle(ByProtocol, &uga_guid, NULL, &bufsz,
-	    (EFI_HANDLE *)buf);
+	status = BS->LocateHandle(ByProtocol, &uga_guid, NULL, &bufsz, buf);
 	if (status != EFI_SUCCESS) {
 		free(buf);
-		return (1);
+		return (NULL);
 	}
+	bufsz /= sizeof(EFI_HANDLE);
+
 	/* Get the PCI I/O interface of the first handle that supports it. */
 	pciio = NULL;
-	for (bufofs = 0; bufofs < bufsz; bufofs += sizeof(EFI_HANDLE)) {
-		handle = *(EFI_HANDLE *)(buf + bufofs);
-		status = BS->HandleProtocol(handle, &pciio_guid,
-		    (void **)&pciio);
-		if (status == EFI_SUCCESS)
-			break;
+	for (hp = buf; hp < buf + bufsz; hp++) {
+		status = BS->HandleProtocol(*hp, &pciio_guid, (void **)&pciio);
+		if (status == EFI_SUCCESS) {
+			free(buf);
+			return (pciio);
+		}
 	}
 	free(buf);
+	return (NULL);
+}
+
+static EFI_STATUS
+efifb_uga_locate_framebuffer(EFI_PCI_IO_PROTOCOL *pciio, uint64_t *addrp,
+    uint64_t *sizep)
+{
+	uint8_t *resattr;
+	uint64_t addr, size;
+	EFI_STATUS status;
+	u_int bar;
+
 	if (pciio == NULL)
-		return (1);
+		return (EFI_DEVICE_ERROR);
+
 	/* Attempt to get the frame buffer address (imprecise). */
-	efifb->fb_addr = 0;
-	efifb->fb_size = 0;
+	*addrp = 0;
+	*sizep = 0;
 	for (bar = 0; bar < 6; bar++) {
 		status = pciio->GetBarAttributes(pciio, bar, NULL,
-		    (EFI_HANDLE *)&buf);
+		    (void **)&resattr);
 		if (status != EFI_SUCCESS)
 			continue;
 		/* XXX magic offsets and constants. */
-		if (buf[0] == 0x87 && buf[3] == 0) {
+		if (resattr[0] == 0x87 && resattr[3] == 0) {
 			/* 32-bit address space descriptor (MEMIO) */
-			address = le32dec(buf + 10);
-			length = le32dec(buf + 22);
-		} else if (buf[0] == 0x8a && buf[3] == 0) {
+			addr = le32dec(resattr + 10);
+			size = le32dec(resattr + 22);
+		} else if (resattr[0] == 0x8a && resattr[3] == 0) {
 			/* 64-bit address space descriptor (MEMIO) */
-			address = le64dec(buf + 14);
-			length = le64dec(buf + 38);
+			addr = le64dec(resattr + 14);
+			size = le64dec(resattr + 38);
 		} else {
-			address = 0;
-			length = 0;
+			addr = 0;
+			size = 0;
 		}
-		BS->FreePool(buf);
-		if (address == 0 || length == 0)
+		BS->FreePool(resattr);
+		if (addr == 0 || size == 0)
 			continue;
+
 		/* We assume the largest BAR is the frame buffer. */
-		if (length > efifb->fb_size) {
-			efifb->fb_addr = address;
-			efifb->fb_size = length;
+		if (size > *sizep) {
+			*addrp = addr;
+			*sizep = size;
 		}
 	}
-	if (efifb->fb_addr == 0 || efifb->fb_size == 0)
+	return ((*addrp == 0 || *sizep == 0) ? EFI_DEVICE_ERROR : 0);
+}
+
+static int
+efifb_from_uga(struct efi_fb *efifb, EFI_UGA_DRAW_PROTOCOL *uga)
+{
+	EFI_PCI_IO_PROTOCOL *pciio;
+	char *ev, *p;
+	EFI_STATUS status;
+	ssize_t offset;
+	uint64_t fbaddr, fbsize;
+	uint32_t horiz, vert, stride;
+	uint32_t np, depth, refresh;
+
+	status = uga->GetMode(uga, &horiz, &vert, &depth, &refresh);
+	if (EFI_ERROR(status))
 		return (1);
-	/* TODO determine the stride. */
-	efifb->fb_stride = efifb->fb_width;	/* XXX */
+	efifb->fb_height = vert;
+	efifb->fb_width = horiz;
+	/* Paranoia... */
+	if (efifb->fb_height == 0 || efifb->fb_width == 0)
+		return (1);
+
+	/* The color masks are fixed AFAICT. */
+	efifb_mask_from_pixfmt(efifb, PixelBlueGreenRedReserved8BitPerColor,
+	    NULL);
+
+	/* pciio can be NULL on return! */
+	pciio = efifb_uga_get_pciio();
+
+	/* Try to find the frame buffer. */
+	status = efifb_uga_locate_framebuffer(pciio, &efifb->fb_addr,
+	    &efifb->fb_size);
+	if (EFI_ERROR(status)) {
+		efifb->fb_addr = 0;
+		efifb->fb_size = 0;
+	}
+
+	/*
+	 * There's no reliable way to detect the frame buffer or the
+	 * offset within the frame buffer of the visible region, nor
+	 * the stride. Our only option is to look at the system and
+	 * fill in the blanks based on that. Luckily, UGA was mostly
+	 * only used on Apple hardware. 
+	 */
+	offset = -1;
+	ev = getenv("smbios.system.maker");
+	if (ev != NULL && !strcmp(ev, "Apple Inc.")) {
+		ev = getenv("smbios.system.product");
+		if (ev != NULL && !strcmp(ev, "iMac7,1")) {
+			/* These are the expected values we should have. */
+			horiz = 1680;
+			vert = 1050;
+			fbaddr = 0xc0000000;
+			/* These are the missing bits. */
+			offset = 0x10000;
+			stride = 1728;
+		} else if (ev != NULL && !strcmp(ev, "MacBook3,1")) {
+			/* These are the expected values we should have. */
+			horiz = 1280;
+			vert = 800;
+			fbaddr = 0xc0000000;
+			/* These are the missing bits. */
+			offset = 0x0;
+			stride = 2048;
+		}
+	}
+
+	/*
+	 * If this is hardware we know, make sure that it looks familiar
+	 * before we accept our hardcoded values.
+	 */
+	if (offset >= 0 && efifb->fb_width == horiz &&
+	    efifb->fb_height == vert && efifb->fb_addr == fbaddr) {
+		efifb->fb_addr += offset;
+		efifb->fb_size -= offset;
+		efifb->fb_stride = stride;
+		return (0);
+	} else if (offset >= 0) {
+		printf("Hardware make/model known, but graphics not "
+		    "as expected.\n");
+		printf("Console may not work!\n");
+	}
+
+	/*
+	 * The stride is equal or larger to the width. Often it's the
+	 * next larger power of two. We'll start with that...
+	 */
+	efifb->fb_stride = efifb->fb_width;
+	do {
+		np = efifb->fb_stride & (efifb->fb_stride - 1);
+		if (np) {
+			efifb->fb_stride |= (np - 1);
+			efifb->fb_stride++;
+		}
+	} while (np);
+
+	ev = getenv("hw.efifb.address");
+	if (ev == NULL) {
+		if (efifb->fb_addr == 0) {
+			printf("Please set hw.efifb.address and "
+			    "hw.efifb.stride.\n");
+			return (1);
+		}
+
+		/*
+		 * The visible part of the frame buffer may not start at
+		 * offset 0, so try to detect it. Note that we may not
+		 * always be able to read from the frame buffer, which
+		 * means that we may not be able to detect anything. In
+		 * that case, we would take a long time scanning for a
+		 * pixel change in the frame buffer, which would have it
+		 * appear that we're hanging, so we limit the scan to
+		 * 1/256th of the frame buffer. This number is mostly
+		 * based on PR 202730 and the fact that on a MacBoook,
+		 * where we can't read from the frame buffer the offset
+		 * of the visible region is 0. In short: we want to scan
+		 * enough to handle all adapters that have an offset
+		 * larger than 0 and we want to scan as little as we can
+		 * to not appear to hang when we can't read from the
+		 * frame buffer.
+		 */
+		offset = efifb_uga_find_pixel(uga, 0, pciio, efifb->fb_addr,
+		    efifb->fb_size >> 8);
+		if (offset == -1) {
+			printf("Unable to reliably detect frame buffer.\n");
+		} else if (offset > 0) {
+			efifb->fb_addr += offset;
+			efifb->fb_size -= offset;
+		}
+	} else {
+		offset = 0;
+		efifb->fb_size = efifb->fb_height * efifb->fb_stride * 4;
+		efifb->fb_addr = strtoul(ev, &p, 0);
+		if (*p != '\0')
+			return (1);
+	}
+
+	ev = getenv("hw.efifb.stride");
+	if (ev == NULL) {
+		if (pciio != NULL && offset != -1) {
+			/* Determine the stride. */
+			offset = efifb_uga_find_pixel(uga, 1, pciio,
+			    efifb->fb_addr, horiz * 8);
+			if (offset != -1)
+				efifb->fb_stride = offset >> 2;
+		} else {
+			printf("Unable to reliably detect the stride.\n");
+		}
+	} else {
+		efifb->fb_stride = strtoul(ev, &p, 0);
+		if (*p != '\0')
+			return (1);
+	}
+
+	/*
+	 * We finalized on the stride, so recalculate the size of the
+	 * frame buffer.
+	 */
+	efifb->fb_size = efifb->fb_height * efifb->fb_stride * 4;
 	return (0);
 }
 
@@ -193,18 +444,11 @@ efi_find_framebuffer(struct efi_fb *efifb)
 static void
 print_efifb(int mode, struct efi_fb *efifb, int verbose)
 {
-	uint32_t mask;
 	u_int depth;
 
 	if (mode >= 0)
 		printf("mode %d: ", mode);
-	mask = efifb->fb_mask_red | efifb->fb_mask_green |
-	    efifb->fb_mask_blue | efifb->fb_mask_reserved;
-	if (mask > 0) {
-		for (depth = 1; mask != 1; depth++)
-			mask >>= 1;
-	} else
-		depth = 0;
+	depth = efifb_color_depth(efifb);
 	printf("%ux%ux%u, stride=%u", efifb->fb_width, efifb->fb_height,
 	    depth, efifb->fb_stride);
 	if (verbose) {
