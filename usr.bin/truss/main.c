@@ -182,9 +182,6 @@ main(int ac, char **av)
 		 * process and exit.  If we just created a new process to
 		 * run a command, kill the new process rather than letting
 		 * it run untraced.
-		 *
-		 * XXX: I believe this fetches the ABI before exec so not
-		 * quite what we want?
 		 */
 		if (pid == 0)
 			kill(LIST_FIRST(&trussinfo->proclist)->pid, SIGKILL);
