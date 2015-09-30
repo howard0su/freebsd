@@ -446,7 +446,8 @@ exit_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 	if (pl->pl_flags & PL_FLAG_EXEC) {
 		p->abi = find_abi(p->pid);
 		if (p->abi == NULL) {
-			detach_proc(p->pid);
+			if (ptrace(PT_DETACH, p->pid, (caddr_t)1, 0) < 0)
+				err(1, "Can not detach the process");
 			free_proc(p);
 		}
 	}
