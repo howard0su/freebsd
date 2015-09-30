@@ -56,11 +56,6 @@ powerpc_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	lwpid_t tid;
 	u_int i, reg;
 
-#if 0
-	/* Account for a 64-bit argument with corresponding alignment. */
-	nargs += 2;
-#endif
-
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;
 	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
