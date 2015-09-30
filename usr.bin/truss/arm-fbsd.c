@@ -54,7 +54,7 @@ arm_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	struct reg regs;
 	struct current_syscall *cs;
 	lwpid_t tid;
-	int i, reg, syscall_num;
+	u_int i, reg, syscall_num;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;

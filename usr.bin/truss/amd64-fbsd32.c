@@ -56,7 +56,7 @@ amd64_fbsd32_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	unsigned int args32[narg];
 	unsigned long parm_offset;
 	lwpid_t tid;
-	int i;
+	u_int i;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;

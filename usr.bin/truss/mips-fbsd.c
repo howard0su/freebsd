@@ -53,7 +53,7 @@ mips_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	struct reg regs;
 	struct current_syscall *cs;
 	lwpid_t tid;
-	int i, reg;
+	u_int i, reg;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;
@@ -94,7 +94,7 @@ mips_fetch_args(struct trussinfo *trussinfo, u_int narg)
 		cs->args[i] = regs.r_regs[reg];
 	if (narg > i) {
 		iorequest.piod_op = PIOD_READ_D;
-		iorequest.piod_offs = (void *)(regs.r_regs[SP] +
+		iorequest.piod_offs = (void *)((uintptr_t)regs.r_regs[SP] +
 		    4 * sizeof(cs->args[0]));
 		iorequest.piod_addr = &cs->args[i];
 		iorequest.piod_len = (narg - i) * sizeof(cs->args[0]);

@@ -53,7 +53,7 @@ amd64_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	struct reg regs;
 	struct current_syscall *cs;
 	lwpid_t tid;
-	int i, reg;
+	u_int i, reg;
 
 	tid = trussinfo->curthread->tid;
 	cs = &trussinfo->curthread->cs;
