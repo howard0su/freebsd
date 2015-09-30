@@ -163,11 +163,10 @@ find_abi(pid_t pid)
 
 	SET_FOREACH(pabi, procabi) {
 		if (strcmp((*pabi)->type, progt) == 0)
-			break;
+			return (*pabi);
 	}
-	if (*pabi == NULL)
-		warnx("ABI %s for pid %ld is not supported", progt, (long)pid);
-	return (*pabi);
+	warnx("ABI %s for pid %ld is not supported", progt, (long)pid);
+	return (NULL);
 }
 
 static void
