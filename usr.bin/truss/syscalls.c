@@ -972,7 +972,13 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 	case Quad: {
 		unsigned long long ll;
 
-		ll = *(unsigned long long *)(args + sc->offset);
+#if _BYTE_ORDER == _LITTLE_ENDIAN
+		ll = (unsigned long long)args[sc->offset + 1] << 32 |
+		    args[sc->offset];
+#else
+		ll = (unsigned long long)args[sc->offset] << 32 |
+		    args[sc->offset + 1];
+#endif
 		fprintf(fp, "0x%llx", ll);
 		break;
 	}
