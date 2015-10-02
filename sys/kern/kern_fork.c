@@ -1049,9 +1049,9 @@ fork_return(struct thread *td, struct trapframe *frame)
 			    p->p_pid, p->p_oppid);
 			proc_reparent(p, dbg);
 			sx_xunlock(&proctree_lock);
-			td->td_dbgflags |= TDB_CHILD;
+			td->td_dbgflags |= TDB_CHILD | TDB_SCX;
 			ptracestop(td, SIGSTOP);
-			td->td_dbgflags &= ~TDB_CHILD;
+			td->td_dbgflags &= ~(TDB_CHILD | TDB_SCX);
 		} else {
 			/*
 			 * ... otherwise clear the request.
