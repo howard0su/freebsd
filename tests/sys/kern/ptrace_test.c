@@ -410,12 +410,15 @@ ATF_TC_BODY(ptrace__parent_sees_exit_after_unrelated_debugger, tc)
  * debugger is attached to it.
  */
 static __dead2 void
-follow_fork_parent(void)
+follow_fork_parent(bool use_vfork)
 {
 	pid_t fpid, wpid;
 	int status;
 
-	CHILD_REQUIRE((fpid = fork()) != -1);
+	if (use_vfork)
+		CHILD_REQUIRE((fpid = vfork()) != -1);
+	else
+		CHILD_REQUIRE((fpid = fork()) != -1);
 
 	if (fpid == 0)
 		/* Child */
@@ -504,7 +507,7 @@ ATF_TC_BODY(ptrace__follow_fork_both_attached, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -560,7 +563,7 @@ ATF_TC_BODY(ptrace__follow_fork_child_detached, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -611,7 +614,7 @@ ATF_TC_BODY(ptrace__follow_fork_parent_detached, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -693,7 +696,7 @@ ATF_TC_BODY(ptrace__follow_fork_both_attached_unrelated_debugger, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		attach_fork_parent(cpipe);
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -761,7 +764,7 @@ ATF_TC_BODY(ptrace__follow_fork_child_detached_unrelated_debugger, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		attach_fork_parent(cpipe);
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -824,7 +827,7 @@ ATF_TC_BODY(ptrace__follow_fork_parent_detached_unrelated_debugger, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		attach_fork_parent(cpipe);
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -971,7 +974,7 @@ ATF_TC_BODY(ptrace__new_child_pl_syscall_code_fork, tc)
 	ATF_REQUIRE((fpid = fork()) != -1);
 	if (fpid == 0) {
 		trace_me();
-		follow_fork_parent();
+		follow_fork_parent(false);
 	}
 
 	/* Parent process. */
@@ -1020,6 +1023,69 @@ ATF_TC_BODY(ptrace__new_child_pl_syscall_code_fork, tc)
 	ATF_REQUIRE(errno == ECHILD);
 }
 
+/*
+ * Verify that pl_syscall_code in struct ptrace_lwpinfo for a new
+ * child process created via vfork() reports the correct value.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__new_child_pl_syscall_code_vfork);
+ATF_TC_BODY(ptrace__new_child_pl_syscall_code_vfork, tc)
+{
+	struct ptrace_lwpinfo pl[2];
+	pid_t children[2], fpid, wpid;
+	int status;
+
+	ATF_REQUIRE((fpid = fork()) != -1);
+	if (fpid == 0) {
+		trace_me();
+		follow_fork_parent(true);
+	}
+
+	/* Parent process. */
+	children[0] = fpid;
+
+	/* The first wait() should report the stop from SIGSTOP. */
+	wpid = waitpid(children[0], &status, 0);
+	ATF_REQUIRE(wpid == children[0]);
+	ATF_REQUIRE(WIFSTOPPED(status));
+	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+
+	ATF_REQUIRE(ptrace(PT_FOLLOW_FORK, children[0], NULL, 1) != -1);
+
+	/* Continue the child ignoring the SIGSTOP. */
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+
+	/* Wait for both halves of the fork event to get reported. */
+	children[1] = handle_fork_events(children[0], pl);
+	ATF_REQUIRE(children[1] > 0);
+
+	ATF_REQUIRE((pl[0].pl_flags & PL_FLAG_SCX) != 0);
+	ATF_REQUIRE((pl[1].pl_flags & PL_FLAG_SCX) != 0);
+	ATF_REQUIRE(pl[0].pl_syscall_code == SYS_vfork);
+	ATF_REQUIRE(pl[0].pl_syscall_code == pl[1].pl_syscall_code);
+	ATF_REQUIRE(pl[0].pl_syscall_narg == pl[1].pl_syscall_narg);
+
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[0], (caddr_t)1, 0) != -1);
+	ATF_REQUIRE(ptrace(PT_CONTINUE, children[1], (caddr_t)1, 0) != -1);
+
+	/*
+	 * The child can't exit until the grandchild reports status, so the
+	 * grandchild should report its exit first to the debugger.
+	 */
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[1]);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 2);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == children[0]);
+	ATF_REQUIRE(WIFEXITED(status));
+	ATF_REQUIRE(WEXITSTATUS(status) == 1);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -1037,6 +1103,7 @@ ATF_TP_ADD_TCS(tp)
 	    ptrace__follow_fork_parent_detached_unrelated_debugger);
 	ATF_TP_ADD_TC(tp, ptrace__getppid);
 	ATF_TP_ADD_TC(tp, ptrace__new_child_pl_syscall_code_fork);
+	ATF_TP_ADD_TC(tp, ptrace__new_child_pl_syscall_code_vfork);
 
 	return (atf_no_error());
 }
