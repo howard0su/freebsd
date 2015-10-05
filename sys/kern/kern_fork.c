@@ -57,6 +57,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 #include <sys/procdesc.h>
 #include <sys/pioctl.h>
+#include <sys/ptrace.h>
 #include <sys/racct.h>
 #include <sys/resourcevar.h>
 #include <sys/sched.h>
@@ -1067,9 +1068,10 @@ fork_return(struct thread *td, struct trapframe *frame)
 		 * process.  Report a system call exit event.
 		 */
 		PROC_LOCK(p);
-		_STOPEVENT(p, S_SCX, td->td_dbg_sc_code);
 		td->td_dbgflags |= TDB_SCX;
-		ptracestop(td, SIGTRAP);
+		_STOPEVENT(p, S_SCX, td->td_dbg_sc_code);
+		if ((p->p_stops & S_PT_SCX) != 0)
+			ptracestop(td, SIGTRAP);
 		td->td_dbgflags &= ~TDB_SCX;
 		PROC_UNLOCK(p);
 	}
