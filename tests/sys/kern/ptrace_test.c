@@ -1114,7 +1114,6 @@ ATF_TC_BODY(ptrace__new_child_pl_syscall_code_thread, tc)
 
 		CHILD_REQUIRE(pthread_create(&thread, NULL, simple_thread,
 			NULL) == 0);
-		usleep(2 * 1000 * 1000);
 		CHILD_REQUIRE(pthread_join(thread, NULL) == 0);
 		exit(1);
 	}
