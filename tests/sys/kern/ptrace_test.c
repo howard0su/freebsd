@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/user.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1086,6 +1087,98 @@ ATF_TC_BODY(ptrace__new_child_pl_syscall_code_vfork, tc)
 	ATF_REQUIRE(errno == ECHILD);
 }
 
+static void *
+simple_thread(void *arg __unused)
+{
+
+	pthread_exit(NULL);
+}
+
+/*
+ * Verify that pl_syscall_code in struct ptrace_lwpinfo for a new
+ * thread reports the correct value.
+ */
+ATF_TC_WITHOUT_HEAD(ptrace__new_child_pl_syscall_code_thread);
+ATF_TC_BODY(ptrace__new_child_pl_syscall_code_thread, tc)
+{
+	struct ptrace_lwpinfo pl;
+	pid_t fpid, wpid;
+	lwpid_t main;
+	int status;
+
+	ATF_REQUIRE((fpid = fork()) != -1);
+	if (fpid == 0) {
+		pthread_t thread;
+
+		trace_me();
+
+		CHILD_REQUIRE(pthread_create(&thread, NULL, simple_thread,
+			NULL) == 0);
+		usleep(2 * 1000 * 1000);
+		CHILD_REQUIRE(pthread_join(thread, NULL) == 0);
+		exit(1);
+	}
+
+	/* The first wait() should report the stop from SIGSTOP. */
+	wpid = waitpid(fpid, &status, 0);
+	ATF_REQUIRE(wpid == fpid);
+	ATF_REQUIRE(WIFSTOPPED(status));
+	ATF_REQUIRE(WSTOPSIG(status) == SIGSTOP);
+
+	ATF_REQUIRE(ptrace(PT_LWPINFO, wpid, (caddr_t)&pl,
+	    sizeof(pl)) != -1);
+	main = pl.pl_lwpid;
+
+	/*
+	 * Continue the child ignoring the SIGSTOP and tracing all
+	 * system call exits.
+	 */
+	ATF_REQUIRE(ptrace(PT_TO_SCX, fpid, (caddr_t)1, 0) != -1);
+
+	/*
+	 * Wait for the new thread to arrive.  pthread_create() might
+	 * invoke any number of system calls.  For now we just wait
+	 * for the new thread to arrive and make sure it reports a
+	 * valid system call code.  If ptrace grows thread event
+	 * reporting then this test can be made more precise.
+	 */
+	for (;;) {
+		wpid = waitpid(fpid, &status, 0);
+		ATF_REQUIRE(wpid == fpid);
+		ATF_REQUIRE(WIFSTOPPED(status));
+		ATF_REQUIRE(WSTOPSIG(status) == SIGTRAP);
+		
+		ATF_REQUIRE(ptrace(PT_LWPINFO, wpid, (caddr_t)&pl,
+		    sizeof(pl)) != -1);
+		ATF_REQUIRE((pl.pl_flags & PL_FLAG_SCX) != 0);
+		ATF_REQUIRE(pl.pl_syscall_code != 0);
+		if (pl.pl_lwpid != main)
+			/* New thread seen. */
+			break;
+
+		ATF_REQUIRE(ptrace(PT_CONTINUE, fpid, (caddr_t)1, 0) == 0);
+	}
+
+	/* Wait for the child to exit. */
+	ATF_REQUIRE(ptrace(PT_CONTINUE, fpid, (caddr_t)1, 0) == 0);
+	for (;;) {
+		wpid = waitpid(fpid, &status, 0);
+		ATF_REQUIRE(wpid == fpid);
+		if (WIFEXITED(status))
+			break;
+		
+		ATF_REQUIRE(WIFSTOPPED(status));
+		ATF_REQUIRE(WSTOPSIG(status) == SIGTRAP);
+		ATF_REQUIRE(ptrace(PT_CONTINUE, fpid, (caddr_t)1, 0) == 0);
+	}
+		
+	ATF_REQUIRE(WEXITSTATUS(status) == 1);
+
+	wpid = wait(&status);
+	ATF_REQUIRE(wpid == -1);
+	ATF_REQUIRE(errno == ECHILD);
+}
+
 ATF_TP_ADD_TCS(tp)
 {
 
@@ -1104,6 +1197,7 @@ ATF_TP_ADD_TCS(tp)
 	ATF_TP_ADD_TC(tp, ptrace__getppid);
 	ATF_TP_ADD_TC(tp, ptrace__new_child_pl_syscall_code_fork);
 	ATF_TP_ADD_TC(tp, ptrace__new_child_pl_syscall_code_vfork);
+	ATF_TP_ADD_TC(tp, ptrace__new_child_pl_syscall_code_thread);
 
 	return (atf_no_error());
 }
