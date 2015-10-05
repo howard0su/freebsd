@@ -1031,8 +1031,8 @@ fork_return(struct thread *td, struct trapframe *frame)
 {
 	struct proc *p, *dbg;
 
+	p = td->td_proc;
 	if (td->td_dbgflags & TDB_STOPATFORK) {
-		p = td->td_proc;
 		sx_xlock(&proctree_lock);
 		PROC_LOCK(p);
 		if ((p->p_pptr->p_flag & (P_TRACED | P_FOLLOWFORK)) ==
@@ -1060,6 +1060,17 @@ fork_return(struct thread *td, struct trapframe *frame)
 			td->td_dbgflags &= ~TDB_STOPATFORK;
 			cv_broadcast(&p->p_dbgwait);
 		}
+		PROC_UNLOCK(p);
+	} else if (p->p_flag & P_TRACED) {
+ 		/*
+		 * This is the start of a new thread in a traced
+		 * process.  Report a system call exit event.
+		 */
+		PROC_LOCK(p);
+		_STOPEVENT(p, S_SCX, td->td_dbg_sc_code);
+		td->td_dbgflags |= TDB_SCX;
+		ptracestop(td, SIGTRAP);
+		td->td_dbgflags &= ~TDB_SCX;
 		PROC_UNLOCK(p);
 	}
 
