@@ -2531,6 +2531,7 @@ stopme:
 		}
 	}
 	PROC_SUNLOCK(p);
+	/* XXX: Clear TDB_XSIG in case P_TRACED was never set? */
 	return (td->td_xsig);
 }
 
