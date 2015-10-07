@@ -306,7 +306,7 @@ struct ptrace_lwpinfo {
 	sigset_t pl_siglist;
 	siginfo_t pl_siginfo;
 	char	pl_tdname[MAXCOMLEN + 1];
-	int	pl_child_pid;
+	pid_t	pl_child_pid;
 	u_int	pl_syscall_code;
 	u_int	pl_syscall_narg;
 };
