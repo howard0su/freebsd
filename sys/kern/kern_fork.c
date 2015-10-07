@@ -1075,9 +1075,10 @@ fork_return(struct thread *td, struct trapframe *frame)
 		PROC_LOCK(p);
 		td->td_dbgflags |= TDB_SCX;
 		_STOPEVENT(p, S_SCX, td->td_dbg_sc_code);
-		if ((p->p_stops & S_PT_SCX) != 0)
+		if ((p->p_stops & S_PT_SCX) != 0 ||
+		    (td->td_dbgflags & TDB_BORN) != 0)
 			ptracestop(td, SIGTRAP);
-		td->td_dbgflags &= ~TDB_SCX;
+		td->td_dbgflags &= ~(TDB_SCX | TDB_BORN);
 		PROC_UNLOCK(p);
 	}
 
