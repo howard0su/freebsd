@@ -216,7 +216,7 @@ syscallret(struct thread *td, int error, struct syscall_args *sa)
 		 * returns, do it now too.
 		 */
 		if (traced &&
-		    ((td->td_dbgflags & (TDB_EXEC | TDB_FORK)) != 0 ||
+		    ((td->td_dbgflags & (TDB_FORK | TDB_EXEC)) != 0 ||
 		    (p->p_stops & S_PT_SCX) != 0))
 			ptracestop(td, SIGTRAP);
 		td->td_dbgflags &= ~(TDB_SCX | TDB_EXEC | TDB_FORK);
