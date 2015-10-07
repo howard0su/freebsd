@@ -1067,7 +1067,7 @@ fork_return(struct thread *td, struct trapframe *frame)
 			cv_broadcast(&p->p_dbgwait);
 		}
 		PROC_UNLOCK(p);
-	} else if (p->p_flag & P_TRACED) {
+	} else if (p->p_flag & P_TRACED || td->td_dbgflags & TDB_BORN) {
  		/*
 		 * This is the start of a new thread in a traced
 		 * process.  Report a system call exit event.
