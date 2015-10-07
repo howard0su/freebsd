@@ -950,6 +950,9 @@ kern_ptrace(struct thread *td, int req, pid_t pid, void *addr, int data)
 		break;
 
 	case PT_LWP_EVENTS:
+		CTR3(KTR_PTRACE, "PT_LWP_EVENTS: pid %d %s -> %s", p->p_pid,
+		    p->p_flag2 & P2_LWP_EVENTS ? "enabled" : "disabled",
+		    data ? "enabled" : "disabled");
 		if (data)
 			p->p_flag2 |= P2_LWP_EVENTS;
 		else
