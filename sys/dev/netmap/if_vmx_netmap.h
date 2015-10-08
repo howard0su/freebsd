@@ -211,6 +211,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 
 		nic_i = rxc->vxcr_next;
 		nm_i = netmap_idx_n2k(kring, nic_i);
+		printf("Starting with nic_i %d, nm_i %d\n", nic_i, nm_i);
 		for(;;) {
 			//struct netmap_slot *slot = &ring->slot[nm_i];
 
@@ -220,6 +221,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				break;
 			}
 
+			printf("gen matched for nic_i %d\n", nic_i);
 			rmb();
 			if (++rxc->vxcr_next == rxc->vxcr_ndesc) {
 				rxc->vxcr_next = 0;
