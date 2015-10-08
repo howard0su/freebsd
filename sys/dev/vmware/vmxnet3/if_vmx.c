@@ -275,6 +275,9 @@ DRIVER_MODULE(vmx, pci, vmxnet3_driver, vmxnet3_devclass, 0, 0);
 
 MODULE_DEPEND(vmx, pci, 1, 1, 1);
 MODULE_DEPEND(vmx, ether, 1, 1, 1);
+#ifdef DEV_NETMAP
+MODULE_DEPEND(vmx, netmap, 1, 1, 1);
+#endif /* DEV_NETMAP */
 
 #define VMXNET3_VMWARE_VENDOR_ID	0x15AD
 #define VMXNET3_VMWARE_DEVICE_ID	0x07B0
@@ -1842,6 +1845,7 @@ vmxnet3_txq_eof(struct vmxnet3_txqueue *txq)
 
 #ifdef DEV_NETMAP
 	if (netmap_tx_irq(ifp, txq->vxtxq_id))
+		/* XXX: vtnet disables interrupts on the queue here. */
 		return;
 #endif /* DEV_NETMAP */
 
@@ -2422,6 +2426,7 @@ vmxnet3_stop(struct vmxnet3_softc *sc)
 	vmxnet3_disable_all_intrs(sc);
 	vmxnet3_write_cmd(sc, VMXNET3_CMD_DISABLE);
 
+	/* XXX: I think you can skip this in the netmap case? */
 	vmxnet3_stop_rendezvous(sc);
 
 #ifdef DEV_NETMAP
@@ -2482,11 +2487,9 @@ vmxnet3_rxinit(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rxq)
 	struct ifnet *ifp;
 	struct vmxnet3_rxring *rxr;
 	struct vmxnet3_comp_ring *rxc;
-#ifdef DEV_NETMAP
-	struct netmap_adapter *na = NA(sc->vmx_ifp);
-	struct netmap_slot *slot;
-#endif /* DEV_NETMAP */
 	int i, populate, idx, frame_size, error;
+
+	/* XXX: This is repeated for every queue but shouldn't be. */
 
 	ifp = sc->vmx_ifp;
 	frame_size = ETHER_ALIGN + sizeof(struct ether_vlan_header) +
@@ -2524,31 +2527,7 @@ vmxnet3_rxinit(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rxq)
 		bzero(rxr->vxrxr_rxd,
 		    rxr->vxrxr_ndesc * sizeof(struct vmxnet3_rxdesc));
 
-#ifdef DEV_NETMAP
-		slot = netmap_reset(na, NR_RX, rxq->vxrxq_id, 0);
-#endif
 		for (idx = 0; idx < rxr->vxrxr_ndesc; idx++) {
-#ifdef DEV_NETMAP
-			if (slot) {
-				struct vmxnet3_rxdesc *rxd;
-
-				/* slot sj is mapped to the j-th NIC-ring entry */
-				int sj = netmap_idx_n2k(&na->rx_rings[rxq->vxrxq_id], idx);
-				uint64_t paddr;
-				void *addr;
-
-				addr = PNMB(na, slot + sj, &paddr);
-				netmap_load_map(na, rxr->vxrxr_rxtag,
-					rxr->vxrxr_rxbuf[idx].vrxb_dmamap, addr);
-				/* Update descriptor */
-				rxd = &rxr->vxrxr_rxd[idx];
-				rxd->addr = paddr;
-				rxd->len = NETMAP_BUF_SIZE(na);
-				rxd->gen = rxr->vxrxr_gen;
-				rxr->vxrxr_fill++;
-				continue;
-			}
-#endif /* DEV_NETMAP */
 			error = vmxnet3_newbuf(sc, rxr);
 			if (error)
 				return (error);
@@ -2583,6 +2562,10 @@ vmxnet3_reinit_queues(struct vmxnet3_softc *sc)
 	for (q = 0; q < sc->vmx_ntxqueues; q++)
 		vmxnet3_txinit(sc, &sc->vmx_txq[q]);
 
+#ifdef DEV_NETMAP
+	if (vmxnet3_netmap_init_rx_buffers(sc))
+		return (0);
+#endif
 	for (q = 0; q < sc->vmx_nrxqueues; q++) {
 		error = vmxnet3_rxinit(sc, &sc->vmx_rxq[q]);
 		if (error) {

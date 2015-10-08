@@ -328,6 +328,74 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 	return 0;
 }
 
+static int
+vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
+{
+	struct ifnet *ifp = sc->vmx_ifp;
+	struct netmap_adapter* na = NA(ifp);
+	unsigned int r;
+
+	if (!nm_native_on(na))
+		return 0;
+
+	for (r = 0; r < na->num_rx_rings; r++) {
+		struct vmxnet3_rxqueue *rxq = &sc->vmx_rxq[r];
+		struct vmxnet3_rxring *rxr;
+		struct vmxnet3_comp_ring *rxc;
+		struct vmxnet3_rxdesc *rxd;
+	        struct netmap_slot* slot;
+		uint64_t paddr;
+		void *addr;
+		int j;
+
+		/* Clear both rings. */
+		for (j = 0; j < VMXNET3_RXRINGS_PERQ; j++) {
+			rxr = &rxq->vxrxq_cmd_ring[j];
+			rxr->vxrxr_fill = 0;
+			rxr->vxrxr_gen = 0;
+			bzero(rxr->vxrxr_rxd,
+			    rxr->vxrxr_ndesc * sizeof(struct vmxnet3_rxdesc));
+		}
+
+		/* Choose the ring based on the buffer size. */
+		if (NETMAP_BUF_SIZE(na) > MCLBYTES)
+			rxr = &rxq->vxrxq_cmd_ring[1];
+		else
+			rxr = &rxq->vxrxq_cmd_ring[0];
+
+		rxr->vxrxr_fill = 0;
+		rxr->vxrxr_gen = VMXNET3_INIT_GEN;
+
+		slot = netmap_reset(na, NR_RX, r, 0);
+		if (!slot) {
+			D("strange, null netmap ring %d", r);
+			return 0;
+		}
+
+		/* XXX: Do we need the same num_rx_desc - 1 hack as vtnet? */
+		for (j = 0; j < na->num_rx_desc; j++) {
+			addr = PNMB(na, &slot[j], &paddr);
+			netmap_load_map(na, rxr->vxrxr_rxtag,
+			    rxr->vxrxr_rxbuf[j].vrxb_dmamap, addr);
+
+			/* Update descriptor */
+			rxd = &rxr->vxrxr_rxd[j];
+			rxd->addr = paddr;
+			rxd->len = NETMAP_BUF_SIZE(na);
+			rxd->gen = rxr->vxrxr_gen;
+			rxr->vxrxr_fill++;
+		}
+
+		rxc = &rxq->vxrxq_comp_ring;
+		rxc->vxcr_next = 0;
+		rxc->vxcr_gen = VMXNET3_INIT_GEN;
+		bzero(rxc->vxcr_u.rxcd,
+		    rxc->vxcr_ndesc * sizeof(struct vmxnet3_rxcompdesc));
+	}
+
+	return 1;
+}
+
 static void
 vmxnet3_netmap_attach(struct SOFTC_T *sc)
 {
@@ -346,7 +414,9 @@ vmxnet3_netmap_attach(struct SOFTC_T *sc)
         na.num_tx_rings = sc->vmx_max_ntxqueues;
         netmap_attach(&na);
 
+#if 0
 	netmap_attach(&na);
+#endif
 
         D("vmxnet3 attached txq=%d, txd=%d rxq=%d, rxd=%d",
 			na.num_tx_rings, na.num_tx_desc,
