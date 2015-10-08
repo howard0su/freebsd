@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 
 #include <net/ethernet.h>
 #include <net/if.h>
+#include <net/if_var.h>
 #include <net/if_arp.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
@@ -261,6 +262,10 @@ static device_method_t vmxnet3_methods[] = {
 	DEVMETHOD_END
 };
 
+#ifdef DEV_NETMAP
+#include <dev/netmap/if_vmx_netmap.h>
+#endif /* DEV_NETMAP */
+
 static driver_t vmxnet3_driver = {
 	"vmx", vmxnet3_methods, sizeof(struct vmxnet3_softc)
 };
@@ -342,6 +347,10 @@ vmxnet3_attach(device_t dev)
 		goto fail;
 	}
 
+#ifdef DEV_NETMAP
+	vmxnet3_netmap_attach(sc);
+#endif /* DEV_NETMAP */
+
 	vmxnet3_setup_sysctl(sc);
 #ifndef VMXNET3_LEGACY_TX
 	vmxnet3_start_taskqueue(sc);
@@ -385,6 +394,9 @@ vmxnet3_detach(device_t dev)
 		sc->vmx_vlan_detach = NULL;
 	}
 
+#ifdef DEV_NETMAP
+	netmap_detach(ifp);
+#endif
 #ifndef VMXNET3_LEGACY_TX
 	vmxnet3_free_taskqueue(sc);
 #endif
@@ -1825,10 +1837,16 @@ vmxnet3_txq_eof(struct vmxnet3_txqueue *txq)
 
 	sc = txq->vxtxq_sc;
 	ifp = sc->vmx_ifp;
-	txr = &txq->vxtxq_cmd_ring;
-	txc = &txq->vxtxq_comp_ring;
 
 	VMXNET3_TXQ_LOCK_ASSERT(txq);
+
+#ifdef DEV_NETMAP
+	if (netmap_tx_irq(ifp, txq->vxtxq_id))
+		return;
+#endif /* DEV_NETMAP */
+
+	txr = &txq->vxtxq_cmd_ring;
+	txc = &txq->vxtxq_comp_ring;
 
 	for (;;) {
 		txcd = &txc->vxcr_u.txcd[txc->vxcr_next];
@@ -2094,6 +2112,11 @@ vmxnet3_rxq_eof(struct vmxnet3_rxqueue *rxq)
 	rxc = &rxq->vxrxq_comp_ring;
 
 	VMXNET3_RXQ_LOCK_ASSERT(rxq);
+
+#ifdef DEV_NETMAP
+	if (netmap_rx_irq(ifp, rxq->vxrxq_id, &length))
+		return;
+#endif /* DEV_NETMAP */
 
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
 		return;
@@ -2401,10 +2424,16 @@ vmxnet3_stop(struct vmxnet3_softc *sc)
 
 	vmxnet3_stop_rendezvous(sc);
 
-	for (q = 0; q < sc->vmx_ntxqueues; q++)
-		vmxnet3_txstop(sc, &sc->vmx_txq[q]);
-	for (q = 0; q < sc->vmx_nrxqueues; q++)
-		vmxnet3_rxstop(sc, &sc->vmx_rxq[q]);
+#ifdef DEV_NETMAP
+	if (!nm_native_on(NA(ifp))) {
+#endif
+		for (q = 0; q < sc->vmx_ntxqueues; q++)
+			vmxnet3_txstop(sc, &sc->vmx_txq[q]);
+		for (q = 0; q < sc->vmx_nrxqueues; q++)
+			vmxnet3_rxstop(sc, &sc->vmx_rxq[q]);
+#ifdef DEV_NETMAP
+	}
+#endif
 
 	vmxnet3_write_cmd(sc, VMXNET3_CMD_RESET);
 }
@@ -2414,11 +2443,29 @@ vmxnet3_txinit(struct vmxnet3_softc *sc, struct vmxnet3_txqueue *txq)
 {
 	struct vmxnet3_txring *txr;
 	struct vmxnet3_comp_ring *txc;
+#ifdef DEV_NETMAP
+	struct netmap_adapter *na = NA(sc->vmx_ifp);
+	struct netmap_slot *slot;
+#endif /* DEV_NETMAP */
+
+#ifdef DEV_NETMAP
+	slot = netmap_reset(na, NR_TX, txq->vxtxq_id, 0);
+#endif /* DEV_NETMAP */
 
 	txr = &txq->vxtxq_cmd_ring;
 	txr->vxtxr_head = 0;
 	txr->vxtxr_next = 0;
 	txr->vxtxr_gen = VMXNET3_INIT_GEN;
+#ifdef DEV_NETMAP
+	if (slot) {
+		for (int i = 0; i < txr->vxtxr_ndesc; i++) {
+			int si = netmap_idx_n2k(&na->tx_rings[txq->vxtxq_id], i);
+			/* no need to set the address */
+			netmap_load_map(na, txr->vxtxr_txtag, 
+				txr->vxtxr_txbuf[i].vtxb_dmamap, NMB(na, slot + si));
+		}
+	}
+#endif /* DEV_NETMAP */
 	bzero(txr->vxtxr_txd,
 	    txr->vxtxr_ndesc * sizeof(struct vmxnet3_txdesc));
 
@@ -2435,6 +2482,10 @@ vmxnet3_rxinit(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rxq)
 	struct ifnet *ifp;
 	struct vmxnet3_rxring *rxr;
 	struct vmxnet3_comp_ring *rxc;
+#ifdef DEV_NETMAP
+	struct netmap_adapter *na = NA(sc->vmx_ifp);
+	struct netmap_slot *slot;
+#endif /* DEV_NETMAP */
 	int i, populate, idx, frame_size, error;
 
 	ifp = sc->vmx_ifp;
@@ -2473,7 +2524,31 @@ vmxnet3_rxinit(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rxq)
 		bzero(rxr->vxrxr_rxd,
 		    rxr->vxrxr_ndesc * sizeof(struct vmxnet3_rxdesc));
 
+#ifdef DEV_NETMAP
+		slot = netmap_reset(na, NR_RX, rxq->vxrxq_id, 0);
+#endif
 		for (idx = 0; idx < rxr->vxrxr_ndesc; idx++) {
+#ifdef DEV_NETMAP
+			if (slot) {
+				struct vmxnet3_rxdesc *rxd;
+
+				/* slot sj is mapped to the j-th NIC-ring entry */
+				int sj = netmap_idx_n2k(&na->rx_rings[rxq->vxrxq_id], idx);
+				uint64_t paddr;
+				void *addr;
+
+				addr = PNMB(na, slot + sj, &paddr);
+				netmap_load_map(na, rxr->vxrxr_rxtag,
+					rxr->vxrxr_rxbuf[idx].vrxb_dmamap, addr);
+				/* Update descriptor */
+				rxd = &rxr->vxrxr_rxd[idx];
+				rxd->addr = paddr;
+				rxd->len = NETMAP_BUF_SIZE(na);
+				rxd->gen = rxr->vxrxr_gen;
+				rxr->vxrxr_fill++;
+				continue;
+			}
+#endif /* DEV_NETMAP */
 			error = vmxnet3_newbuf(sc, rxr);
 			if (error)
 				return (error);
@@ -2604,6 +2679,13 @@ vmxnet3_init(void *xsc)
 	struct vmxnet3_softc *sc;
 
 	sc = xsc;
+
+#ifdef DEV_NETMAP
+	if (!NA(sc->vmx_ifp)) {
+		D("try to attach again");
+		vmxnet3_netmap_attach(sc);
+	}
+#endif /* DEV_NETMAP */
 
 	VMXNET3_CORE_LOCK(sc);
 	vmxnet3_init_locked(sc);
