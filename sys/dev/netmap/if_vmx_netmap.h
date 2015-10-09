@@ -228,8 +228,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				rxc->vxcr_gen ^= 1;
 			}
 
-			printf("rxcd: len %d, qid %d, rxd_idx %d\n", rxcd->len,
-			    rxcd->qid, rxcd->rxd_idx);
+			printf("rxcd: len %d, qid %d, rxd_idx %d, sop %d, eop %d\n", rxcd->len,
+			    rxcd->qid, rxcd->rxd_idx, rxcd->sop, rxcd->eop);
 			len = rxcd->len;
 			if (rxcd->qid < sc->vmx_nrxqueues)
 				rxr = &rxq->vxrxq_cmd_ring[0];
@@ -388,8 +388,9 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			rxd = &rxr->vxrxr_rxd[j];
 			rxd->addr = paddr;
 			rxd->len = NETMAP_BUF_SIZE(na);
+			rxd->btype = VMXNET3_BTYPE_HEAD;
 			rxd->gen = rxr->vxrxr_gen;
-			rxr->vxrxr_fill++;
+			vmxnet3_rxr_increment_fill(rxr);
 		}
 
 		rxc = &rxq->vxrxq_comp_ring;
