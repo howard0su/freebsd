@@ -277,20 +277,26 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			void *addr = PNMB(na, slot, &paddr);
 
 			if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
-				return netmap_ring_reinit(kring);
+				if (netmap_ring_reinit(kring))
+					return -1;
 
 			rxcd = &rxc->vxcr_u.rxcd[nic_i];
-                        len = rxcd->len;
                         if (rxcd->qid < sc->vmx_nrxqueues)
                                 rxr = &rxq->vxrxq_cmd_ring[0];
                         else
                                 rxr = &rxq->vxrxq_cmd_ring[1];
                         rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
 			rxd->gen = rxr->vxrxr_gen;
+			printf("RX: requeueing nic_i %d, qid %d, gen -> %d\n",
+			    nic_i, rxcd->qid, rxd->gen);
+			vmxnet3_rxr_increment_fill(rxr);
 
 			if (slot->flags & NS_BUF_CHANGED) {
 				netmap_reload_map(na, rxr->vxrxr_rxtag,
 					rxr->vxrxr_spare_dmap, addr);
+#if 0
+				rxd->addr = paddr;
+#endif
 				slot->flags &= ~NS_BUF_CHANGED;
 			}
 			if (__predict_false(rxq->vxrxq_rs->update_rxhead)) {
