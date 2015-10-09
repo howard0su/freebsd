@@ -221,7 +221,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				break;
 			}
 
-			printf("gen matched for nic_i %d\n", nic_i);
+			printf("gen matched for nic_i %d (%d)\n", nic_i, rxcd->gen);
 			rmb();
 			if (++rxc->vxcr_next == rxc->vxcr_ndesc) {
 				rxc->vxcr_next = 0;
