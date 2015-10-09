@@ -197,7 +197,6 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (head > lim)
 		return netmap_ring_reinit(kring);
 
-	printf("Being called RX \n");
 	/*
 	 * First part: import newly received packets.
 	 * Only accept our
@@ -211,25 +210,20 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 
 		nic_i = rxc->vxcr_next;
 		nm_i = netmap_idx_n2k(kring, nic_i);
-		printf("Starting with nic_i %d, nm_i %d\n", nic_i, nm_i);
 		for(;;) {
 			//struct netmap_slot *slot = &ring->slot[nm_i];
 
 			rxcd = &rxc->vxcr_u.rxcd[nic_i];
 			if (rxcd->gen != rxc->vxcr_gen) {
-				printf("Different gen %x %x\n", rxcd->gen, rxc->vxcr_gen);
 				break;
 			}
 
-			printf("gen matched for nic_i %d (%d)\n", nic_i, rxcd->gen);
 			rmb();
 			if (++rxc->vxcr_next == rxc->vxcr_ndesc) {
 				rxc->vxcr_next = 0;
 				rxc->vxcr_gen ^= 1;
 			}
 
-			printf("rxcd: len %d, qid %d, rxd_idx %d, sop %d, eop %d\n", rxcd->len,
-			    rxcd->qid, rxcd->rxd_idx, rxcd->sop, rxcd->eop);
 			len = rxcd->len;
 			if (rxcd->qid < sc->vmx_nrxqueues)
 				rxr = &rxq->vxrxq_cmd_ring[0];
@@ -243,8 +237,6 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			 * up with the host now.
 			 */
 			if (__predict_false(rxr->vxrxr_fill != rxcd->rxd_idx)) {
-				printf("vxrxr_fill (%d) != rxd_idx (%d)\n",
-				    rxr->vxrxr_fill, rxcd->rxd_idx);
 				while (rxr->vxrxr_fill != rxcd->rxd_idx) {
 					rxr->vxrxr_rxd[rxr->vxrxr_fill].gen =
 						rxr->vxrxr_gen;
@@ -253,7 +245,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			}
 
 			if (rxcd->error) { /* XXX */
-				printf("Errror reading\n");
+				printf("Error reading\n");
 				continue;
 			}
 
@@ -264,7 +256,6 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				PNMB(na, slot + sj, &rxd->addr));
 			*/
 
-			printf("Proceced 1 packet\n");
 			nic_i = rxc->vxcr_next;
 			ring->slot[nm_i].len = len;
 			ring->slot[nm_i].flags = slot_flags;
@@ -273,9 +264,6 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 		kring->nr_hwtail = nm_i;
 		kring->nr_kflags &= ~NKR_PENDINTR;
 	}
-        printf("[B] h %d c %d hwcur %d hwtail %d\n",
-		ring->head, ring->cur, kring->nr_hwcur,
-			      kring->nr_hwtail);
 
 	/*
 	 * Second part: skip past packets that userspace has released.
