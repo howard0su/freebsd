@@ -228,6 +228,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				rxc->vxcr_gen ^= 1;
 			}
 
+			printf("rxcd: len %d, qid %d, rxd_idx %d\n", rxcd->len,
+			    rxcd->qid, rxcd->rxd_idx);
 			len = rxcd->len;
 			if (rxcd->qid < sc->vmx_nrxqueues)
 				rxr = &rxq->vxrxq_cmd_ring[0];
@@ -241,6 +243,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			 * up with the host now.
 			 */
 			if (__predict_false(rxr->vxrxr_fill != rxcd->rxd_idx)) {
+				printf("vxrxr_fill (%d) != rxd_idx (%d)\n",
+				    rxr->vxrxr_fill, rxcd->rxd_idx);
 				while (rxr->vxrxr_fill != rxcd->rxd_idx) {
 					rxr->vxrxr_rxd[rxr->vxrxr_fill].gen =
 						rxr->vxrxr_gen;
