@@ -209,6 +209,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 		//uint32_t stop_i = nm_prev(kring->nr_hwcur, lim);
 
 		nm_i = kring->nr_hwtail;
+		nic_i = netmap_idx_n2k(kring, nm_i);
 		for(;;) {
 			//struct netmap_slot *slot = &ring->slot[nm_i];
 
@@ -216,8 +217,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			if (rxcd->gen != rxc->vxcr_gen) {
 				break;
 			}
-			printf("RX: rxcd[%d]: rxd_idx %d (vxcr_next %d)\n",
-			    nic_i, rxcd->rxd_idx, rxc->vxcr_next);
+			printf("RX: rxcd[%d]: rxd_idx %d (nic_i %d)\n",
+			    rxc->vxcr_next, rxcd->rxd_idx, nic_i);
 
 			rmb();
 			if (++rxc->vxcr_next == rxc->vxcr_ndesc) {
@@ -235,8 +236,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				KASSERT(NETMAP_BUF_SIZE(na) > MCLBYTES,
 				    ("cmd_ring mismatch"));
 			}
-			KASSERT(nm_i == netmap_idx_n2k(kring, rxcd->rxd_idx),
-			    ("nm_i mismatch"));
+			KASSERT(nic_i == rxcd->rxd_idx, ("nic_i mismatch"));
 			rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
 
 #if 0
@@ -268,7 +268,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			 * of the previous packet in the rxr.
 			 *
 			 * Actually, we can probably detect this by seeing
-			 * if nm_i doesn't match rxd_idx (the KASSERT above).
+			 * if nic_i doesn't match rxd_idx (the KASSERT above).
 			 */
 #endif
 			if (rxcd->error) { /* XXX */
@@ -286,6 +286,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			ring->slot[nm_i].len = len;
 			ring->slot[nm_i].flags = slot_flags;
 			nm_i = nm_next(nm_i, lim);
+			nic_i = nm_next(nic_i, lim);
 
 		nextp:
 			if (__predict_false(rxq->vxrxq_rs->update_rxhead)) {
