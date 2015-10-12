@@ -289,7 +289,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
                                 rxr = &rxq->vxrxq_cmd_ring[1];
                         rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
 			rxd->gen = rxr->vxrxr_gen;
-			printf("RX: rxd[%d]: gen %d rxr fill %d",
+			printf("RX: rxd[%d]: gen %d rxr fill %d\n",
 			    nic_i, rxd->gen, rxr->vxrxr_fill);
 			vmxnet3_rxr_increment_fill(rxr);
 
@@ -386,7 +386,7 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			rxd->len = NETMAP_BUF_SIZE(na);
 			rxd->btype = VMXNET3_BTYPE_HEAD;
 			rxd->gen = rxr->vxrxr_gen;
-			printf("INIT: rxd[%d]: gen %d rxr fill %d",
+			printf("INIT: rxd[%d]: gen %d rxr fill %d\n",
 			    j, rxd->gen, rxr->vxrxr_fill);
 			vmxnet3_rxr_increment_fill(rxr);
 		}
