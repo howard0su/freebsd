@@ -217,7 +217,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			if (rxcd->gen != rxc->vxcr_gen) {
 				break;
 			}
-			printf("RX: rxcd[%d]: rxd_idx %d (nic_i %d)\n",
+			printf("RX COMP: rxcd[%d]: rxd_idx %d (nic_i %d)\n",
 			    rxc->vxcr_next, rxcd->rxd_idx, nic_i);
 
 			rmb();
@@ -328,7 +328,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				rxr = &rxq->vxrxq_cmd_ring[0];
                         rxd = &rxr->vxrxr_rxd[nic_i];
 			rxd->gen = rxr->vxrxr_gen;
-			printf("RX: rxd[%d]: gen %d rxr fill %d\n",
+			printf("RX REQ: rxd[%d]: gen %d rxr fill %d\n",
 			    nic_i, rxd->gen, rxr->vxrxr_fill);
 			vmxnet3_rxr_increment_fill(rxr);
 
@@ -402,8 +402,12 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			return 0;
 		}
 
-		/* XXX: Do we need the same num_rx_desc - 1 hack as vtnet? */
-		for (j = 0; j < na->num_rx_desc; j++) {
+		/*
+		 * Leave one slot free as otherwise netmap seems to get
+		 * confused and not queue more buffers for RX if it
+		 * receives a full ring.
+		 */
+		for (j = 0; j < na->num_rx_desc - 1; j++) {
 			addr = PNMB(na, &slot[j], &paddr);
 			netmap_load_map(na, rxr->vxrxr_rxtag,
 			    rxr->vxrxr_rxbuf[j].vrxb_dmamap, addr);
