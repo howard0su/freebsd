@@ -230,6 +230,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			else
 				rxr = &rxq->vxrxq_cmd_ring[1];
 			rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
+			printf("RX: rxcd[%d]: rxd_idx %d (vxcr_next %d)\n",
+			    nic_i, rxcd->rxd_idx, rxc->vxcr_next);
 
 			/*
 			 * The host may skip descriptors. We detect this when this
@@ -287,8 +289,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
                                 rxr = &rxq->vxrxq_cmd_ring[1];
                         rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
 			rxd->gen = rxr->vxrxr_gen;
-			printf("RX: requeueing nic_i %d, qid %d, gen -> %d\n",
-			    nic_i, rxcd->qid, rxd->gen);
+			printf("RX: rxd[%d]: gen %d rxr fill %d",
+			    nic_i, rxd->gen, rxr->vxrxr_fill);
 			vmxnet3_rxr_increment_fill(rxr);
 
 			if (slot->flags & NS_BUF_CHANGED) {
@@ -384,12 +386,15 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			rxd->len = NETMAP_BUF_SIZE(na);
 			rxd->btype = VMXNET3_BTYPE_HEAD;
 			rxd->gen = rxr->vxrxr_gen;
+			printf("INIT: rxd[%d]: gen %d rxr fill %d",
+			    j, rxd->gen, rxr->vxrxr_fill);
 			vmxnet3_rxr_increment_fill(rxr);
 		}
 
 		rxc = &rxq->vxrxq_comp_ring;
 		rxc->vxcr_next = 0;
 		rxc->vxcr_gen = VMXNET3_INIT_GEN;
+		printf("INIT: rxc gen %d\n", rxc->vxcr_gen);
 		bzero(rxc->vxcr_u.rxcd,
 		    rxc->vxcr_ndesc * sizeof(struct vmxnet3_rxcompdesc));
 	}
