@@ -326,7 +326,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			 * netmap will treat a full ring as an empty
 			 * ring.
 			 */
-			if (nm_next(nm_i) == kring->hr_hwtail)
+			if (nm_next(nm_i, lim) == kring->nr_hwtail)
 				break;
 
 			if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
