@@ -321,6 +321,14 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			uint64_t paddr;
 			void *addr = PNMB(na, slot, &paddr);
 
+			/*
+			 * Always leave a gap before hwtail.  Otherwise
+			 * netmap will treat a full ring as an empty
+			 * ring.
+			 */
+			if (nm_next(nm_i) == kring->hr_hwtail)
+				break;
+
 			if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
 				if (netmap_ring_reinit(kring))
 					return -1;
@@ -348,7 +356,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			nm_i = nm_next(nm_i, lim);
 			nic_i = nm_next(nic_i, lim);
 		}
-		kring->nr_hwcur = head;
+		kring->nr_hwcur = nm_i;
 	}
 
 	/* tell userspace that there might be new packets. */
@@ -406,7 +414,7 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 		}
 
 		/* XXX: Do we need the same num_rx_desc - 1 hack as vtnet? */
-		for (j = 0; j < na->num_rx_desc; j++) {
+		for (j = 0; j < na->num_rx_desc - 1; j++) {
 			addr = PNMB(na, &slot[j], &paddr);
 			netmap_load_map(na, rxr->vxrxr_rxtag,
 			    rxr->vxrxr_rxbuf[j].vrxb_dmamap, addr);
