@@ -104,7 +104,6 @@ vmxnet3_rxr_increment_fill(struct vmxnet3_rxring *rxr)
 	if (++rxr->vxrxr_fill == rxr->vxrxr_ndesc) {
 		rxr->vxrxr_fill = 0;
 		rxr->vxrxr_gen ^= 1;
-		printf("RXR: gen -> %d\n", rxr->vxrxr_gen);
 	}
 }
 

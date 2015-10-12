@@ -217,8 +217,10 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			if (rxcd->gen != rxc->vxcr_gen) {
 				break;
 			}
+#if 0
 			printf("RX COMP: rxcd[%d]: rxd_idx %d (nic_i %d)\n",
 			    rxc->vxcr_next, rxcd->rxd_idx, nic_i);
+#endif
 
 			rmb();
 			if (++rxc->vxcr_next == rxc->vxcr_ndesc) {
@@ -306,7 +308,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 		kring->nr_hwtail = nm_i;
 		kring->nr_kflags &= ~NKR_PENDINTR;
 	}
-        printf("[B] h %d c %d hwcur %d hwtail %d\n",
+        ND("[B] h %d c %d hwcur %d hwtail %d",
 		ring->head, ring->cur, kring->nr_hwcur,
 			      kring->nr_hwtail);
 
@@ -339,8 +341,10 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				rxr = &rxq->vxrxq_cmd_ring[0];
                         rxd = &rxr->vxrxr_rxd[nic_i];
 			rxd->gen = rxr->vxrxr_gen;
+#if 0
 			printf("RX REQ: rxd[%d]: gen %d rxr fill %d\n",
 			    nic_i, rxd->gen, rxr->vxrxr_fill);
+#endif
 			vmxnet3_rxr_increment_fill(rxr);
 
 			if (slot->flags & NS_BUF_CHANGED) {
@@ -362,7 +366,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 	/* tell userspace that there might be new packets. */
 	nm_rxsync_finalize(kring);
 
-        printf("[C] h %d c %d t %d hwcur %d hwtail %d\n",
+        ND("[C] h %d c %d t %d hwcur %d hwtail %d",
 		ring->head, ring->cur, ring->tail,
 		kring->nr_hwcur, kring->nr_hwtail);
 
@@ -413,8 +417,7 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			return 0;
 		}
 
-		/* XXX: Do we need the same num_rx_desc - 1 hack as vtnet? */
-		for (j = 0; j < na->num_rx_desc - 1; j++) {
+		for (j = 0; j < na->num_rx_desc; j++) {
 			addr = PNMB(na, &slot[j], &paddr);
 			netmap_load_map(na, rxr->vxrxr_rxtag,
 			    rxr->vxrxr_rxbuf[j].vrxb_dmamap, addr);
@@ -425,15 +428,19 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			rxd->len = NETMAP_BUF_SIZE(na);
 			rxd->btype = VMXNET3_BTYPE_HEAD;
 			rxd->gen = rxr->vxrxr_gen;
+#if 0
 			printf("INIT: rxd[%d]: gen %d rxr fill %d\n",
 			    j, rxd->gen, rxr->vxrxr_fill);
+#endif
 			vmxnet3_rxr_increment_fill(rxr);
 		}
 
 		rxc = &rxq->vxrxq_comp_ring;
 		rxc->vxcr_next = 0;
 		rxc->vxcr_gen = VMXNET3_INIT_GEN;
+#if 0
 		printf("INIT: rxc gen %d\n", rxc->vxcr_gen);
+#endif
 		bzero(rxc->vxcr_u.rxcd,
 		    rxc->vxcr_ndesc * sizeof(struct vmxnet3_rxcompdesc));
 	}
