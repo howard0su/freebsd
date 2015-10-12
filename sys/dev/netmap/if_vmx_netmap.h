@@ -208,15 +208,16 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 		uint16_t slot_flags = kring->nkr_slot_flags;
 		//uint32_t stop_i = nm_prev(kring->nr_hwcur, lim);
 
-		nic_i = rxc->vxcr_next;
-		nm_i = netmap_idx_n2k(kring, nic_i);
+		nm_i = kring->nr_hwtail;
 		for(;;) {
 			//struct netmap_slot *slot = &ring->slot[nm_i];
 
-			rxcd = &rxc->vxcr_u.rxcd[nic_i];
+			rxcd = &rxc->vxcr_u.rxcd[rxc->vxcr_next];
 			if (rxcd->gen != rxc->vxcr_gen) {
 				break;
 			}
+			printf("RX: rxcd[%d]: rxd_idx %d (vxcr_next %d)\n",
+			    nic_i, rxcd->rxd_idx, rxc->vxcr_next);
 
 			rmb();
 			if (++rxc->vxcr_next == rxc->vxcr_ndesc) {
@@ -225,13 +226,18 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			}
 
 			len = rxcd->len;
-			if (rxcd->qid < sc->vmx_nrxqueues)
+			if (rxcd->qid < sc->vmx_nrxqueues) {
+				KASSERT(NETMAP_BUF_SIZE(na) <= MCLBYTES,
+				    ("cmd_ring mismatch"));
 				rxr = &rxq->vxrxq_cmd_ring[0];
-			else
+			} else {
 				rxr = &rxq->vxrxq_cmd_ring[1];
+				KASSERT(NETMAP_BUF_SIZE(na) > MCLBYTES,
+				    ("cmd_ring mismatch"));
+			}
+			KASSERT(nm_i == netmap_idx_n2k(kring, rxcd->rxd_idx),
+			    ("nm_i mismatch"));
 			rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
-			printf("RX: rxcd[%d]: rxd_idx %d (vxcr_next %d)\n",
-			    nic_i, rxcd->rxd_idx, rxc->vxcr_next);
 
 #if 0
 			/*
@@ -260,12 +266,14 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			 * To detect this case we would need to track an
 			 * extra copy of 'fill' that tracks the rxd_idx
 			 * of the previous packet in the rxr.
+			 *
+			 * Actually, we can probably detect this by seeing
+			 * if nm_i doesn't match rxd_idx (the KASSERT above).
 			 */
 #endif
-
 			if (rxcd->error) { /* XXX */
 				printf("Error reading\n");
-				continue;
+				goto nextp;
 			}
 
 			/* slot sj is mapped to the j-th NIC-ring entry */
@@ -275,10 +283,24 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				PNMB(na, slot + sj, &rxd->addr));
 			*/
 
-			nic_i = rxc->vxcr_next;
 			ring->slot[nm_i].len = len;
 			ring->slot[nm_i].flags = slot_flags;
 			nm_i = nm_next(nm_i, lim);
+
+		nextp:
+			if (__predict_false(rxq->vxrxq_rs->update_rxhead)) {
+				int idx, qid = rxcd->qid;
+				bus_size_t r;
+
+				idx = (rxcd->rxd_idx + 1) % rxr->vxrxr_ndesc;
+				if (qid >= sc->vmx_nrxqueues) {
+					qid -= sc->vmx_nrxqueues;
+					r = VMXNET3_BAR0_RXH2(qid);
+				} else
+					r = VMXNET3_BAR0_RXH1(qid);
+				vmxnet3_write_bar0(sc, r, idx);
+				printf("Synched ring head\n");
+			}
 		}
 		kring->nr_hwtail = nm_i;
 		kring->nr_kflags &= ~NKR_PENDINTR;
@@ -299,12 +321,11 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				if (netmap_ring_reinit(kring))
 					return -1;
 
-			rxcd = &rxc->vxcr_u.rxcd[nic_i];
-                        if (rxcd->qid < sc->vmx_nrxqueues)
-                                rxr = &rxq->vxrxq_cmd_ring[0];
-                        else
-                                rxr = &rxq->vxrxq_cmd_ring[1];
-                        rxd = &rxr->vxrxr_rxd[rxcd->rxd_idx];
+			if (NETMAP_BUF_SIZE(na) > MCLBYTES)
+				rxr = &rxq->vxrxq_cmd_ring[1];
+			else
+				rxr = &rxq->vxrxq_cmd_ring[0];
+                        rxd = &rxr->vxrxr_rxd[nic_i];
 			rxd->gen = rxr->vxrxr_gen;
 			printf("RX: rxd[%d]: gen %d rxr fill %d\n",
 			    nic_i, rxd->gen, rxr->vxrxr_fill);
@@ -319,19 +340,6 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 				KASSERT(rxd->addr == paddr, ("paddr changed"));
 #endif
 				slot->flags &= ~NS_BUF_CHANGED;
-			}
-			if (__predict_false(rxq->vxrxq_rs->update_rxhead)) {
-				int idx, qid = rxcd->qid;
-				bus_size_t r;
-
-				idx = (rxcd->rxd_idx + 1) % rxr->vxrxr_ndesc;
-				if (qid >= sc->vmx_nrxqueues) {
-					qid -= sc->vmx_nrxqueues;
-					r = VMXNET3_BAR0_RXH2(qid);
-				} else
-					r = VMXNET3_BAR0_RXH1(qid);
-				vmxnet3_write_bar0(sc, r, idx);
-				printf("Synched ring head\n");
 			}
 			nm_i = nm_next(nm_i, lim);
 			nic_i = nm_next(nic_i, lim);
