@@ -233,6 +233,7 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 			printf("RX: rxcd[%d]: rxd_idx %d (vxcr_next %d)\n",
 			    nic_i, rxcd->rxd_idx, rxc->vxcr_next);
 
+#if 0
 			/*
 			 * The host may skip descriptors. We detect this when this
 			 * descriptor does not match the previous fill index. Catch
@@ -245,6 +246,22 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 					vmxnet3_rxr_increment_fill(rxr);
 				}
 			}
+#else
+			/*
+			 * XXX: If the host skips the descriptor we need to
+			 * note that in the slot flags and move on to the next
+			 * slot.  Maybe a length of zero would work?  Not
+			 * sure how to detect this case.  Also, this implies
+			 * that the vxcr index could get out of sync from
+			 * the rxd_idx.  If that's true, then we should only
+			 * be treating 'nm_i' as the rxd_idx and use
+			 * vxcr_next directly to walk the rxc list.
+			 *
+			 * To detect this case we would need to track an
+			 * extra copy of 'fill' that tracks the rxd_idx
+			 * of the previous packet in the rxr.
+			 */
+#endif
 
 			if (rxcd->error) { /* XXX */
 				printf("Error reading\n");
@@ -298,6 +315,8 @@ vmxnet3_netmap_rxsync(struct netmap_kring *kring, int flags)
 					rxr->vxrxr_spare_dmap, addr);
 #if 0
 				rxd->addr = paddr;
+#else
+				KASSERT(rxd->addr == paddr, ("paddr changed"));
 #endif
 				slot->flags &= ~NS_BUF_CHANGED;
 			}
