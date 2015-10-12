@@ -402,12 +402,8 @@ vmxnet3_netmap_init_rx_buffers(struct SOFTC_T *sc)
 			return 0;
 		}
 
-		/*
-		 * Leave one slot free as otherwise netmap seems to get
-		 * confused and not queue more buffers for RX if it
-		 * receives a full ring.
-		 */
-		for (j = 0; j < na->num_rx_desc - 1; j++) {
+		/* XXX: Do we need the same num_rx_desc - 1 hack as vtnet? */
+		for (j = 0; j < na->num_rx_desc; j++) {
 			addr = PNMB(na, &slot[j], &paddr);
 			netmap_load_map(na, rxr->vxrxr_rxtag,
 			    rxr->vxrxr_rxbuf[j].vrxb_dmamap, addr);
