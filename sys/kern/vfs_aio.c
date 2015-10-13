@@ -1801,7 +1801,6 @@ no_kqueue:
 			goto done;
 		}
 		SOCKBUF_UNLOCK(sb);
-		AIO_UNLOCK(ki);
 	}
 
 	if ((error = aio_qphysio(p, job)) == 0)
