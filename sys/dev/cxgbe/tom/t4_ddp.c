@@ -1130,13 +1130,13 @@ select_ddp_buffer(struct adapter *sc, struct toepcb *toep, vm_page_t *pages,
 	db = alloc_ddp_buffer(td, pages, npages, db_off, db_len);
 	if (db == NULL) {
 		vm_page_unhold_pages(pages, npages);
-		atomic_sub_long(&ddp_held_pages, npages);
+		ddp_held_pages -= npages;
 		free(pages, M_CXGBE);
 		return (-1);
 	}
 	if (write_page_pods(sc, toep, db) != 0) {
 		vm_page_unhold_pages(pages, npages);
-		atomic_sub_long(&ddp_held_pages, npages);
+		ddp_held_pages -= npages;
 		free_ddp_buffer(td, db);
 		return (-1);
 	}
@@ -1169,9 +1169,9 @@ wire_ddp_buffer(struct ddp_buffer *db)
 		p = db->pages[i];
 		vm_page_lock(p);
 		vm_page_wire(p);
-		atomic_add_long(&ddp_wired_pages, 1);
+		ddp_wired_pages++;
 		vm_page_unhold(p);
-		atomic_sub_long(&ddp_held_pages, 1);
+		ddp_held_pages--;
 		vm_page_unlock(p);
 	}
 }
@@ -1186,7 +1186,7 @@ unwire_ddp_buffer(struct ddp_buffer *db)
 		p = db->pages[i];
 		vm_page_lock(p);
 		vm_page_unwire(p, PQ_INACTIVE);
-		atomic_sub_long(&ddp_wired_pages, 1);
+		ddp_wired_pages--;
 		vm_page_unlock(p);
 	}
 }
@@ -1636,7 +1636,6 @@ hold_aio(struct aiocblist *aiocbe, vm_page_t **ppages, int *pnpages,
 
 	*ppages = pp;
 	*pnpages = n;
-	atomic_add_long(&ddp_held_pages, n);
 	return (0);
 }
 
@@ -1750,12 +1749,13 @@ restart:
 	}
 
 	SOCKBUF_LOCK(sb);
+	ddp_held_pages += npages;
 
 	if (so->so_error && sbavail(sb) == 0) {
 		error = so->so_error;
 		so->so_error = 0;
 		vm_page_unhold_pages(pages, npages);
-		atomic_sub_long(&ddp_held_pages, npages);
+		ddp_held_pages -= npages;
 		aio_complete(cbe, -1, error);
 		toep->ddp_queueing = NULL;
 		goto restart;
@@ -1763,7 +1763,7 @@ restart:
 
 	if (sb->sb_state & SBS_CANTRCVMORE && sbavail(sb) == 0) {
 		vm_page_unhold_pages(pages, npages);
-		atomic_sub_long(&ddp_held_pages, npages);
+		ddp_held_pages -= npages;
 		if (toep->ddp_active_count != 0) {
 			TAILQ_INSERT_HEAD(&toep->ddp_aiojobq, cbe, list);
 			toep->ddp_waiting_count++;
@@ -1822,7 +1822,7 @@ restart:
 			 */
 			SOCKBUF_UNLOCK(sb);
 			vm_page_unhold_pages(pages, npages);
-			atomic_sub_long(&ddp_held_pages, npages);
+			ddp_held_pages -= npages;
 
 			/* Notify protocol that we drained some data. */
 			if (so->so_proto->pr_flags & PR_WANTRCVD) {
@@ -1844,7 +1844,7 @@ restart:
 		 */
 		if ((toep->ddp_flags & (DDP_ON | DDP_SC_REQ)) != DDP_ON) {
 			vm_page_unhold_pages(pages, npages);
-			atomic_sub_long(&ddp_held_pages, npages);
+			ddp_held_pages -= npages;
 			TAILQ_INSERT_HEAD(&toep->ddp_aiojobq, cbe, list);
 			toep->ddp_waiting_count++;
 			toep->ddp_queueing = NULL;
@@ -1926,7 +1926,7 @@ restart:
 		toep->ddp_waiting_count++;
 		toep->ddp_queueing = NULL;
 		vm_page_unhold_pages(db->pages, db->npages);
-		atomic_sub_long(&ddp_held_pages, db->npages);
+		ddp_held_pages -= db->npages;
 		SOCKBUF_UNLOCK(sb);
 		printf("%s: mk_update_tcb_for_ddp failed\n", __func__);
 		return;
