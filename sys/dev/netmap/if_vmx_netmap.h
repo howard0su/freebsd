@@ -462,8 +462,8 @@ vmxnet3_netmap_attach(struct SOFTC_T *sc)
         na.nm_txsync = vmxnet3_netmap_txsync;
         na.nm_rxsync = vmxnet3_netmap_rxsync;
         na.nm_register = vmxnet3_netmap_reg;
-        na.num_rx_rings = sc->vmx_max_nrxqueues;
-        na.num_tx_rings = sc->vmx_max_ntxqueues;
+        na.num_rx_rings = sc->vmx_nrxqueues;
+        na.num_tx_rings = sc->vmx_ntxqueues;
         netmap_attach(&na);
 
 #if 0
