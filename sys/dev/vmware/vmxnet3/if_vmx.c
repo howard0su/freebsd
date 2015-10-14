@@ -595,31 +595,22 @@ vmxnet3_alloc_msix_interrupts(struct vmxnet3_softc *sc)
 
 	dev = sc->vmx_dev;
 
-	if (sc->vmx_flags & VMXNET3_FLAG_NO_MSIX) {
-		device_printf(dev, "MSIX disabled\n");
+	if (sc->vmx_flags & VMXNET3_FLAG_NO_MSIX)
 		return (1);
-	}
 
 	/* Allocate an additional vector for the events interrupt. */
 	required = sc->vmx_max_nrxqueues + sc->vmx_max_ntxqueues + 1;
 
 	nmsix = pci_msix_count(dev);
-	if (nmsix < required) {
-		device_printf(dev,
-		    "not enough MSI-X vectors (avail %d, required %d)\n", nmsix,
-		    required);
+	if (nmsix < required)
 		return (1);
-	}
 
 	cnt = required;
 	if (pci_alloc_msix(dev, &cnt) == 0 && cnt >= required) {
 		sc->vmx_nintrs = required;
 		return (0);
-	} else {
-		device_printf(dev, "failed to allocate %d MSI-X vectors\n",
-		    required);
+	} else
 		pci_release_msi(dev);
-	}
 
 	/* BMV TODO Fallback to sharing MSIX vectors if possible. */
 
@@ -826,29 +817,24 @@ vmxnet3_alloc_interrupts(struct vmxnet3_softc *sc)
 
 	sc->vmx_intr_type = config & 0x03;
 	sc->vmx_intr_mask_mode = (config >> 2) & 0x03;
-	device_printf(dev, "initial interrupt type: %d\n", sc->vmx_intr_type);
 
 	switch (sc->vmx_intr_type) {
 	case VMXNET3_IT_AUTO:
-		device_printf(dev, "This should be case zero\n");
 		sc->vmx_intr_type = VMXNET3_IT_MSIX;
 		/* FALLTHROUGH */
 	case VMXNET3_IT_MSIX:
-		device_printf(dev, "Trying MSI-X\n");
 		error = vmxnet3_alloc_msix_interrupts(sc);
 		if (error == 0)
 			break;
 		sc->vmx_intr_type = VMXNET3_IT_MSI;
 		/* FALLTHROUGH */
 	case VMXNET3_IT_MSI:
-		device_printf(dev, "Trying MSI\n");
 		error = vmxnet3_alloc_msi_interrupts(sc);
 		if (error == 0)
 			break;
 		sc->vmx_intr_type = VMXNET3_IT_LEGACY;
 		/* FALLTHROUGH */
 	case VMXNET3_IT_LEGACY:
-		device_printf(dev, "Trying INTx\n");
 		error = vmxnet3_alloc_legacy_interrupts(sc);
 		if (error == 0)
 			break;
