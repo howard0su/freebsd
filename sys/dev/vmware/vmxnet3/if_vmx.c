@@ -830,21 +830,25 @@ vmxnet3_alloc_interrupts(struct vmxnet3_softc *sc)
 
 	switch (sc->vmx_intr_type) {
 	case VMXNET3_IT_AUTO:
+		device_printf(dev, "This should be case zero\n");
 		sc->vmx_intr_type = VMXNET3_IT_MSIX;
 		/* FALLTHROUGH */
 	case VMXNET3_IT_MSIX:
+		device_printf(dev, "Trying MSI-X\n");
 		error = vmxnet3_alloc_msix_interrupts(sc);
 		if (error == 0)
 			break;
 		sc->vmx_intr_type = VMXNET3_IT_MSI;
 		/* FALLTHROUGH */
 	case VMXNET3_IT_MSI:
+		device_printf(dev, "Trying MSI\n");
 		error = vmxnet3_alloc_msi_interrupts(sc);
 		if (error == 0)
 			break;
 		sc->vmx_intr_type = VMXNET3_IT_LEGACY;
 		/* FALLTHROUGH */
 	case VMXNET3_IT_LEGACY:
+		device_printf(dev, "Trying INTx\n");
 		error = vmxnet3_alloc_legacy_interrupts(sc);
 		if (error == 0)
 			break;
