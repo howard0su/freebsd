@@ -817,6 +817,7 @@ vmxnet3_alloc_interrupts(struct vmxnet3_softc *sc)
 
 	sc->vmx_intr_type = config & 0x03;
 	sc->vmx_intr_mask_mode = (config >> 2) & 0x03;
+	device_printf(dev, "initial interrupt type: %d\n", sc->vmx_intr_type);
 
 	switch (sc->vmx_intr_type) {
 	case VMXNET3_IT_AUTO:
