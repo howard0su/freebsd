@@ -595,22 +595,31 @@ vmxnet3_alloc_msix_interrupts(struct vmxnet3_softc *sc)
 
 	dev = sc->vmx_dev;
 
-	if (sc->vmx_flags & VMXNET3_FLAG_NO_MSIX)
+	if (sc->vmx_flags & VMXNET3_FLAG_NO_MSIX) {
+		device_printf(dev, "MSIX disabled\n");
 		return (1);
+	}
 
 	/* Allocate an additional vector for the events interrupt. */
 	required = sc->vmx_max_nrxqueues + sc->vmx_max_ntxqueues + 1;
 
 	nmsix = pci_msix_count(dev);
-	if (nmsix < required)
+	if (nmsix < required) {
+		device_printf(dev,
+		    "not enough MSI-X vectors (avail %d, required %d)\n", nmsix,
+		    required);
 		return (1);
+	}
 
 	cnt = required;
 	if (pci_alloc_msix(dev, &cnt) == 0 && cnt >= required) {
 		sc->vmx_nintrs = required;
 		return (0);
-	} else
+	} else {
+		device_printf(dev, "failed to allocate %d MSI-X vectors\n",
+		    required);
 		pci_release_msi(dev);
+	}
 
 	/* BMV TODO Fallback to sharing MSIX vectors if possible. */
 
