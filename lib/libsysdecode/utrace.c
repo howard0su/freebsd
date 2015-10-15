@@ -34,8 +34,9 @@ __FBSDID("$FreeBSD$");
 #include <dlfcn.h>
 #include <stdio.h>
 #include <strings.h>
+#include <sysdecode.h>
 
-int kdump_print_utrace(FILE *, void *, size_t, int);
+#include "local.h"
 
 #define	UTRACE_DLOPEN_START		1
 #define	UTRACE_DLOPEN_STOP		2
@@ -61,7 +62,7 @@ struct utrace_rtld {
 };
 
 static void
-print_utrace_rtld(FILE *fp, void *p, size_t len, int decimal)
+print_utrace_rtld(FILE *fp, void *p, size_t len)
 {
 	struct utrace_rtld *ut = p;
 	unsigned char *cp;
@@ -141,7 +142,7 @@ print_utrace_rtld(FILE *fp, void *p, size_t len, int decimal)
 		len -= 4;
 		fprintf(fp, "RTLD: %zu ", len);
 		while (len--)
-			if (decimal)
+			if (_sd_int_format == DECIMAL)
 				fprintf(fp, " %d", *cp++);
 			else
 				fprintf(fp, " %02x", *cp++);
@@ -170,11 +171,11 @@ print_utrace_malloc(FILE *fp, void *p)
 }
 
 int
-kdump_print_utrace(FILE *fp, void *p, size_t len, int decimal)
+sysdecode_utrace(FILE *fp, void *p, size_t len)
 {
 
 	if (len >= 8 && bcmp(p, "RTLD", 4) == 0) {
-		print_utrace_rtld(fp, p, len, decimal);
+		print_utrace_rtld(fp, p, len);
 		return (1);
 	}
 

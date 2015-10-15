@@ -83,6 +83,7 @@ extern int errno;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sysdecode.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -116,7 +117,6 @@ void ktrfaultend(struct ktr_faultend *);
 void limitfd(int fd);
 void usage(void);
 void ioctlname(unsigned long, int);
-int kdump_print_utrace(FILE *, void *, size_t, int);
 
 #define	TIMESTAMP_NONE		0x0
 #define	TIMESTAMP_ABSOLUTE	0x1
@@ -336,6 +336,8 @@ main(int argc, char *argv[])
 
 	strerror_init();
 	localtime_init();
+	sysdecode_set_int_format(decimal ? DECIMAL : HEXADECIMAL);
+	sysdecode_set_flags_format(KDUMP);
 #ifdef HAVE_LIBCAPSICUM
 	if (resolv != 0) {
 		if (cappwdgrp_setup(&cappwd, &capgrp) < 0) {
@@ -1541,7 +1543,7 @@ ktruser(int len, void *p)
 {
 	unsigned char *cp;
 
-	if (kdump_print_utrace(stdout, p, len, decimal)) {
+	if (sysdecode_utrace(stdout, p, len)) {
 		printf("\n");
 		return;
 	}
