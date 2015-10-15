@@ -7,6 +7,8 @@ LIB=	sysdecode
 SRCS=	errno.c ioctl.c syscallnames.c utrace.c
 INCS=	sysdecode.h
 
+#CFLAGS+= -I${.CURDIR} -I${.CURDIR}/../libc/gen/
+
 CFLAGS+= -I${.CURDIR}/../../sys
 
 MAN+=	sysdecode.3 \
@@ -15,6 +17,9 @@ MAN+=	sysdecode.3 \
 	sysdecode_syscallnames.3 \
 	sysdecode_utrace.3
 MLINKS+= sysdecode_abi_to_freebsd_errno.3 sysdecode_freebsd_to_abi_errno.3
+
+#MAN+=	sysdecode_get_flags_format.3
+#MLINKS+=sysdecode_get_flags_format.3 sysdecode_set_flags_format.3
 
 CLEANFILES= ioctl.c
 

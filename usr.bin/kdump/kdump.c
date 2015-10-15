@@ -302,6 +302,7 @@ main(int argc, char *argv[])
 
 	strerror_init();
 	localtime_init();
+	sysdecode_set_flags_format(KDUMP);
 #ifdef HAVE_LIBCAPSICUM
 	if (resolv != 0) {
 		if (cappwdgrp_setup(&cappwd, &capgrp) < 0) {

@@ -22,33 +22,34 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
-#ifndef __SYSDECODE_H__
-#define	__SYSDECODE_H__
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD$");
 
-enum sysdecode_abi {
-	SYSDECODE_ABI_UNKNOWN = 0,
-	SYSDECODE_ABI_FREEBSD,
-	SYSDECODE_ABI_FREEBSD32,
-	SYSDECODE_ABI_LINUX,
-	SYSDECODE_ABI_LINUX32,
-	SYSDECODE_ABI_CLOUDABI64
-};
+#include <errno.h>
+#include <sysdecode.h>
 
-enum sysdecode_flags_format {
-	KDUMP = 1,
-	TRUSS
-};
+#include "local.h"
 
-int	sysdecode_abi_to_freebsd_errno(enum sysdecode_abi _abi, int _error);
-int	sysdecode_freebsd_to_abi_errno(enum sysdecode_abi _abi, int _error);
-enum sysdecode_flags_format sysdecode_get_flags_format(void);
-const char *sysdecode_ioctlname(unsigned long _val);
-int	sysdecode_set_flags_format(enum sysdecode_flags_format _format);
-const char *sysdecode_syscallname(enum sysdecode_abi _abi, unsigned int _code);
-int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len);
+enum sysdecode_flags_format _sd_flags_format;
 
-#endif /* !__SYSDECODE_H__ */
+enum sysdecode_flags_format
+sysdecode_get_flags_format(void)
+{
+
+	return (_sd_flags_format);
+}
+
+int
+sysdecode_set_flags_format(enum sysdecode_flags_format format)
+{
+
+	switch (format) {
+	case KDUMP:
+	case TRUSS:
+		_sd_flags_format = format;
+		return (0);
+	}
+	return (EINVAL);
+}

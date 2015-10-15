@@ -145,6 +145,8 @@ main(int ac, char **av)
 	    (pid != 0 && ac != 0))
 		usage();
 
+	sysdecode_set_flags_format(TRUSS);
+
 	if (fname != NULL) { /* Use output file */
 		/*
 		 * Set close-on-exec ('e'), so that the output file is not
