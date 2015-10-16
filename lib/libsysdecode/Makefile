@@ -4,7 +4,7 @@
 
 LIB=	sysdecode
 
-SRCS=	utrace.c
+SRCS=	format.c utrace.c
 INCS=	sysdecode.h
 
 #CFLAGS+= -I${.CURDIR} -I${.CURDIR}/../libc/gen/
