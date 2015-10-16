@@ -4,7 +4,7 @@
 
 LIB=	sysdecode
 
-SRCS=	errno.c ioctl.c syscallnames.c utrace.c
+SRCS=	errno.c format.c ioctl.c syscallnames.c utrace.c
 INCS=	sysdecode.h
 
 #CFLAGS+= -I${.CURDIR} -I${.CURDIR}/../libc/gen/
