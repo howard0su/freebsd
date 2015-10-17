@@ -4,8 +4,10 @@
 
 LIB=	sysdecode
 
-SRCS=	ioctl.c utrace.c
+SRCS=	ioctl.c syscallnames.c utrace.c
 INCS=	sysdecode.h
+
+CFLAGS+= -I${.CURDIR}/../../sys
 
 MAN+=	sysdecode.3 \
 	sysdecode_ioctlname.3 \

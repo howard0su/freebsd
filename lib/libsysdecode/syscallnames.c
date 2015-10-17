@@ -22,24 +22,76 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $FreeBSD$
  */
 
-#ifndef __SYSDECODE_H__
-#define	__SYSDECODE_H__
+#include <sys/cdefs.h>
+__FBSDID("$FreeBSD$");
 
-const char *sysdecode_freebsd(unsigned int _code);
+/*
+ * Map system call codes to names for the supported ABIs on each
+ * platform.  Rather than regnerating system call name tables locally
+ * during the build, use the generated tables in the kernel source
+ * tree.
+ */
+
+#include <sysdecode.h>
+
+static
+#include <kern/syscalls.c>
+
+const char *
+sysdecode_freebsd(unsigned int code)
+{
+
+	if (code < nitems(syscallnames))
+		return (syscallnames[code]);
+	return (NULL);
+}
+
 #if defined(__amd64__) || defined(__powerpc64__)
-const char *sysdecode_freebsd32(unsigned int _code);
-#endif
-const char *sysdecode_ioctlname(unsigned long _val);
-#if defined(__amd64__) || defined(__i386__)
-const char *sysdecode_linux(unsigned int _code);
-#if defined(__amd64__)
-const char *sysdecode_linux32(unsigned int _code);
-#endif
-#endif
-int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len);
+static
+#include <compat/freebsd32/freebsd32_syscalls.c>
 
-#endif /* !__SYSDECODE_H__ */
+const char *
+sysdecode_freebsd32(unsigned int code)
+{
+
+	if (code < nitems(freebsd32_syscallnames))
+		return (freebsd32_syscallnames[code]);
+	return (NULL);
+}
+#endif
+
+#if defined(__amd64__) || defined(__i386__)
+
+static
+#ifdef __amd64__
+#include <amd64/linux/linux_syscalls.c>
+#else
+#include <i386/linux/linux_syscalls.c>
+#endif
+
+const char *
+sysdecode_linux(unsigned int code)
+{
+
+	if (code < nitems(linux_syscallnames))
+		return (linux_syscallnames[code]);
+	return (NULL);
+}
+#endif
+
+#ifdef __amd64__
+
+static
+#include <amd64/linux32/linux32_syscalls.c>
+
+const char *
+sysdecode_linux32(unsigned int code)
+{
+
+	if (code < nitems(linux32_syscallnames))
+		return (linux32_syscallnames[code]);
+	return (NULL);
+}
+#endif
