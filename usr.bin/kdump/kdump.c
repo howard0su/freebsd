@@ -1344,7 +1344,6 @@ ktrsysret(struct ktr_sysret *ktr, u_int flags)
 {
 	register_t ret = ktr->ktr_retval;
 	int error = ktr->ktr_error;
-	int code = ktr->ktr_code;
 
 	syscallname(ktr->ktr_code, flags);
 	printf(" ");
@@ -1858,7 +1857,7 @@ linux_ktrsyscall(struct ktr_syscall *ktr, u_int sv_flags)
 	int narg = ktr->ktr_narg;
 	register_t *ip;
 
-	syscallname(ktr->ktr_code, flags);
+	syscallname(ktr->ktr_code, sv_flags);
 	ip = &ktr->ktr_args[0];
 	if (narg) {
 		char c = '(';
@@ -1873,10 +1872,9 @@ void
 linux_ktrsysret(struct ktr_sysret *ktr, u_int sv_flags)
 {
 	register_t ret = ktr->ktr_retval;
-	unsigned code = ktr->ktr_code;
 	int error = ktr->ktr_error;
 
-	syscallname(ktr->ktr_code, flags);
+	syscallname(ktr->ktr_code, sv_flags);
 	printf(" ");
 
 	if (error == 0) {

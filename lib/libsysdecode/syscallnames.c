@@ -34,6 +34,8 @@ __FBSDID("$FreeBSD$");
  * tree.
  */
 
+#include <sys/param.h>
+#include <stdio.h>
 #include <sysdecode.h>
 
 static
