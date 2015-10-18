@@ -147,8 +147,6 @@ static struct ktr_header ktr_header;
 void linux_ktrsyscall(struct ktr_syscall *, u_int);
 void linux_ktrsysret(struct ktr_sysret *, u_int);
 
-#include <linux_syscalls.c>
-
 /*
  * from linux.h
  * Linux syscalls return negative errno's, we do positive and map them
