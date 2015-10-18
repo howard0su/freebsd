@@ -64,8 +64,21 @@ sysdecode_freebsd32(unsigned int code)
 }
 #endif
 
-#if defined(__amd64__) || defined(__i386__)
+#ifdef __amd64__
+static
+#include <sys/compat/cloudabi64/cloudabi64_syscalls.c>
 
+const char *
+sysdecode_cloudabi64(unsigned int code)
+{
+
+	if (code < nitems(cloudabi64_syscallnames))
+		return (cloudabi64_syscallnames[code]);
+	return (NULL);
+}
+#endif
+
+#if defined(__amd64__) || defined(__i386__)
 static
 #ifdef __amd64__
 #include <amd64/linux/linux_syscalls.c>
@@ -84,7 +97,6 @@ sysdecode_linux(unsigned int code)
 #endif
 
 #ifdef __amd64__
-
 static
 #include <amd64/linux32/linux32_syscalls.c>
 

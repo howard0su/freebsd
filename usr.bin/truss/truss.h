@@ -41,8 +41,7 @@ struct trussinfo;
 
 struct procabi {
 	const char *type;
-	const char **syscallnames;
-	int nsyscalls;
+	const char *(*syscall_name)(u_int);
 	int (*fetch_args)(struct trussinfo *, u_int);
 	int (*fetch_retval)(struct trussinfo *, long *, int *);
 };

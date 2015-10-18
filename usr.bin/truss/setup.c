@@ -335,8 +335,7 @@ enter_syscall(struct trussinfo *info, struct ptrace_lwpinfo *pl)
 		return;
 	}
 
-	if (t->cs.number >= 0 && t->cs.number < t->proc->abi->nsyscalls)
-		t->cs.name = t->proc->abi->syscallnames[t->cs.number];
+	t->cs.name = t->proc->abi->syscall_name(t->cs.number);
 	if (t->cs.name == NULL)
 		fprintf(info->outfile, "-- UNKNOWN %s SYSCALL %d --\n",
 		    t->proc->abi->type, t->cs.number);
