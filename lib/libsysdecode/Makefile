@@ -13,6 +13,20 @@ MAN+=	sysdecode.3 \
 	sysdecode_ioctlname.3 \
 	sysdecode_utrace.3
 
+.if ${MACHINE} == "amd64"
+#MAN+=	sysdecode_cloudabi64.3
+.endif
+.if ${MACHINE} == "amd64" || ${MACHINE} == "powerpc64"
+#MAN+=	sysdecode_freebsd32.3
+.endif
+.if ${MACHINE} == "amd64" || ${MACHINE} == "i386"
+#MAN+=	sysdecode_linux.3
+.endif
+.if ${MACHINE} == "amd64"
+#MAN+=	sysdecode_linux32.3
+.endif
+#MAN+=	sysdecode_freebsd.3
+
 CLEANFILES= ioctl.c
 
 .if defined(COMPAT_32BIT)
