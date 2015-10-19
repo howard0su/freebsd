@@ -1338,7 +1338,7 @@ ktrsysret(struct ktr_sysret *ktr, u_int sv_flags)
 	else if (error == EJUSTRETURN)
 		printf("JUSTRETURN");
 	else {
-		switch (flags & SV_ABI_MASK) {
+		switch (sv_flags & SV_ABI_MASK) {
 #if defined(__amd64__) || defined(__i386__)
 		case SV_ABI_LINUX:
 			error = sysdecode_freebsd_to_linux_errno(error);
