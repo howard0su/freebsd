@@ -2076,7 +2076,7 @@ print_syscall_ret(struct trussinfo *trussinfo, int errorp, long *retval)
 	fflush(trussinfo->outfile);
 	if (errorp)
 		fprintf(trussinfo->outfile, " ERR#%ld '%s'\n", retval[0],
-		    strerror(retval[0]));
+		    t->proc->abi->strerror(retval[0]));
 #ifndef __LP64__
 	else if (sc->ret_type == 2) {
 		off_t off;

@@ -112,7 +112,8 @@ static struct procabi i386_freebsd = {
 	"FreeBSD ELF32",
 	SYSDECODE_ABI_FREEBSD,
 	i386_fetch_args,
-	i386_fetch_retval
+	i386_fetch_retval,
+	strerror
 };
 
 PROCABI(i386_freebsd);
@@ -121,7 +122,8 @@ static struct procabi i386_freebsd_aout = {
 	"FreeBSD a.out",
 	SYSDECODE_ABI_FREEBSD,
 	i386_fetch_args,
-	i386_fetch_retval
+	i386_fetch_retval,
+	strerror
 };
 
 PROCABI(i386_freebsd_aout);

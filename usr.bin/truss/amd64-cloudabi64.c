@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD$");
 
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <sysdecode.h>
 
 #include "cloudabi.h"
@@ -83,16 +84,23 @@ amd64_cloudabi64_fetch_retval(struct trussinfo *trussinfo, long *retval,
 	retval[0] = regs.r_rax;
 	retval[1] = regs.r_rdx;
 	*errorp = (regs.r_rflags & PSL_C) != 0;
-	if (*errorp)
-		retval[0] = cloudabi_convert_errno(retval[0]);
 	return (0);
+}
+
+static const char *
+amd64_cloudabi64_strerror(int error)
+{
+
+	return (strerror(cloudabi_convert_errno(error));
+	return ("Unknown Error");
 }
 
 static struct procabi amd64_cloudabi64 = {
 	"CloudABI ELF64",
 	SYSDECODE_ABI_CLOUDABI64,
 	amd64_cloudabi64_fetch_args,
-	amd64_cloudabi64_fetch_retval
+	amd64_cloudabi64_fetch_retval,
+	amd64_cloudabi64_strerror
 };
 
 PROCABI(amd64_cloudabi64);

@@ -44,6 +44,7 @@ struct procabi {
 	enum sysdecode_abi abi;
 	int (*fetch_args)(struct trussinfo *, u_int);
 	int (*fetch_retval)(struct trussinfo *, long *, int *);
+	const char *(*strerror)(int);
 };
 
 #define	PROCABI(abi)	DATA_SET(procabi, abi)

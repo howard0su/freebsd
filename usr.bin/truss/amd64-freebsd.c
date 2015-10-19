@@ -123,7 +123,8 @@ static struct procabi amd64_freebsd = {
 	"FreeBSD ELF64",
 	SYSDECODE_ABI_FREEBSD,
 	amd64_fetch_args,
-	amd64_fetch_retval
+	amd64_fetch_retval,
+	strerror
 };
 
 PROCABI(amd64_freebsd);

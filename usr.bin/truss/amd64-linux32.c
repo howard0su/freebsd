@@ -40,6 +40,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/psl.h>
 
 #include <stdio.h>
+#include <string.h>
 #include <sysdecode.h>
 
 #include "truss.h"
@@ -104,7 +105,6 @@ amd64_linux32_fetch_retval(struct trussinfo *trussinfo, long *retval,
 {
 	struct reg regs;
 	lwpid_t tid;
-	size_t i;
 
 	tid = trussinfo->curthread->tid;
 	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
@@ -117,25 +117,28 @@ amd64_linux32_fetch_retval(struct trussinfo *trussinfo, long *retval,
 	*errorp = !!(regs.r_rflags & PSL_C);
 	if (*errorp)
 		retval[0] = (int)retval[0];
-
-	if (*errorp) {
-		for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
-			if (retval[0] == bsd_to_linux_errno[i]) {
-				retval[0] = i;
-				return (0);
-			}
-		}
-
-		/* XXX: How to handle unknown errors? */
-	}
 	return (0);
+}
+
+static const char *
+amd64_linux32_strerror(int error)
+{
+	size_t i;
+
+	for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
+		if (error == bsd_to_linux_errno[i]) {
+			return (strerror(i));
+		}
+	}
+	return ("Unknown Error");
 }
 
 static struct procabi amd64_linux32 = {
 	"Linux ELF32",
 	SYSDECODE_ABI_LINUX32,
 	amd64_linux32_fetch_args,
-	amd64_linux32_fetch_retval
+	amd64_linux32_fetch_retval,
+	amd64_linux32_strerror
 };
 
 PROCABI(amd64_linux32);

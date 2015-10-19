@@ -40,6 +40,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/psl.h>
 
 #include <stdio.h>
+#include <string.h>
 #include <sysdecode.h>
 
 #include "truss.h"
@@ -103,7 +104,6 @@ i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 {
 	struct reg regs;
 	lwpid_t tid;
-	size_t i;
 
 	tid = trussinfo->curthread->tid;
 	if (ptrace(PT_GETREGS, tid, (caddr_t)&regs, 0) < 0) {
@@ -114,25 +114,28 @@ i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 	retval[0] = regs.r_eax;
 	retval[1] = regs.r_edx;
 	*errorp = !!(regs.r_eflags & PSL_C);
-
-	if (*errorp) {
-		for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
-			if (retval[0] == bsd_to_linux_errno[i]) {
-				retval[0] = i;
-				return (0);
-			}
-		}
-
-		/* XXX: How to handle unknown errors? */
-	}
 	return (0);
+}
+
+static const char *
+i386_linux_strerror(int error)
+{
+	size_t i;
+
+	for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
+		if (error == bsd_to_linux_errno[i]) {
+			return (strerror(i));
+		}
+	}
+	return ("Unknown Error");
 }
 
 static struct procabi i386_linux = {
 	"Linux ELF",
 	SYSDECODE_ABI_LINUX,
 	i386_linux_fetch_args,
-	i386_linux_fetch_retval
+	i386_linux_fetch_retval,
+	i386_linux_strerror
 };
 
 PROCABI(i386_linux);
