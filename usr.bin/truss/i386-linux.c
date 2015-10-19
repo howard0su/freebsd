@@ -84,21 +84,6 @@ i386_linux_fetch_args(struct trussinfo *trussinfo, u_int narg)
 	return (0);
 }
 
-/*
- * Linux syscalls return negative errno's, we do positive and map them
- */
-static const int bsd_to_linux_errno[] = {
-	-0,  -1,  -2,  -3,  -4,  -5,  -6,  -7,  -8,  -9,
-	-10, -35, -12, -13, -14, -15, -16, -17, -18, -19,
-	-20, -21, -22, -23, -24, -25, -26, -27, -28, -29,
-	-30, -31, -32, -33, -34, -11,-115,-114, -88, -89,
-	-90, -91, -92, -93, -94, -95, -96, -97, -98, -99,
-	-100,-101,-102,-103,-104,-105,-106,-107,-108,-109,
-	-110,-111, -40, -36,-112,-113, -39, -11, -87,-122,
-	-116, -66,  -6,  -6,  -6,  -6,  -6, -37, -38,  -9,
-	-6,
-};
-
 static int
 i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 {
@@ -120,14 +105,11 @@ i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 static const char *
 i386_linux_strerror(int error)
 {
-	size_t i;
 
-	for (i = 0; i < nitems(bsd_to_linux_errno); i++) {
-		if (error == bsd_to_linux_errno[i]) {
-			return (strerror(i));
-		}
-	}
-	return ("Unknown Error");
+	error = sysdecode_linux_to_freebsd_errno(error);
+	if (error == INT_MAX)
+		return ("Unknown error");
+	return (strerror(error));
 }
 
 static struct procabi i386_linux = {

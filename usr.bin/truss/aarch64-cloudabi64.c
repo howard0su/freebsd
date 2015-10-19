@@ -31,12 +31,10 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/armreg.h>
 
-#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysdecode.h>
 
-#include "cloudabi.h"
 #include "truss.h"
 
 static int
@@ -82,8 +80,10 @@ static const char *
 aarch64_cloudabi64_strerror(int error)
 {
 
-	return (strerror(cloudabi_convert_errno(error));
-	return ("Unknown Error");
+	error = sysdecode_cloudabi_to_freebsd_errno(error);
+	if (error == INT_MAX)
+		return ("Unknown error");
+	return (strerror(error));
 }
 
 static struct procabi aarch64_cloudabi64 = {
