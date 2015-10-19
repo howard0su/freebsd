@@ -144,7 +144,6 @@ static struct ktr_header ktr_header;
 
 #if defined(__amd64__) || defined(__i386__)
 
-void linux_ktrsyscall(struct ktr_syscall *, u_int);
 void linux_ktrsysret(struct ktr_sysret *, u_int);
 
 /*
@@ -391,13 +390,7 @@ main(int argc, char *argv[])
 		drop_logged = 0;
 		switch (ktr_header.ktr_type) {
 		case KTR_SYSCALL:
-#if defined(__amd64__) || defined(__i386__)
-			if ((sv_flags & SV_ABI_MASK) == SV_ABI_LINUX)
-				linux_ktrsyscall((struct ktr_syscall *)m,
-				    sv_flags);
-			else
-#endif
-				ktrsyscall((struct ktr_syscall *)m, sv_flags);
+			ktrsyscall((struct ktr_syscall *)m, sv_flags);
 			break;
 		case KTR_SYSRET:
 #if defined(__amd64__) || defined(__i386__)
@@ -1853,23 +1846,6 @@ ktrfaultend(struct ktr_faultend *ktr)
 }
 
 #if defined(__amd64__) || defined(__i386__)
-void
-linux_ktrsyscall(struct ktr_syscall *ktr, u_int sv_flags)
-{
-	int narg = ktr->ktr_narg;
-	register_t *ip;
-
-	syscallname(ktr->ktr_code, sv_flags);
-	ip = &ktr->ktr_args[0];
-	if (narg) {
-		char c = '(';
-		while (narg > 0)
-			print_number(ip, narg, c);
-		putchar(')');
-	}
-	putchar('\n');
-}
-
 void
 linux_ktrsysret(struct ktr_sysret *ktr, u_int sv_flags)
 {
