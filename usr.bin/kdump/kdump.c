@@ -697,17 +697,21 @@ syscallname(u_int code, u_int flags)
 {
 	const char *name;
 
-	switch (flags & SV_ABI_MASK) {
-	case SV_ABI_FREEBSD:
+	if (flags == 0)
 		name = sysdecode_freebsd(code);
-		break;
+	else {
+		switch (flags & SV_ABI_MASK) {
+		case SV_ABI_FREEBSD:
+			name = sysdecode_freebsd(code);
+			break;
 #if defined(__amd64__) || defined(__i386__)
-	case SV_ABI_LINUX:
-		name = sysdecode_linux(code);
-		break;
+		case SV_ABI_LINUX:
+			name = sysdecode_linux(code);
+			break;
 #endif
-	default:
-		name = NULL;
+		default:
+			name = NULL;
+		}
 	}
 
 	if (name == NULL)
