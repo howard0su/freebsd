@@ -686,14 +686,14 @@ ioctlname(unsigned long val)
 }
 
 static void
-syscallname(u_int code, u_int flags)
+syscallname(u_int code, u_int sv_flags)
 {
 	const char *name;
 
-	if (flags == 0)
+	if (sv_flags == 0)
 		name = sysdecode_freebsd(code);
 	else {
-		switch (flags & SV_ABI_MASK) {
+		switch (sv_flags & SV_ABI_MASK) {
 		case SV_ABI_FREEBSD:
 			name = sysdecode_freebsd(code);
 			break;
@@ -717,18 +717,19 @@ syscallname(u_int code, u_int flags)
 }
 
 void
-ktrsyscall(struct ktr_syscall *ktr, u_int flags)
+ktrsyscall(struct ktr_syscall *ktr, u_int sv_flags)
 {
 	int narg = ktr->ktr_narg;
 	register_t *ip;
 	intmax_t arg;
 
-	syscallname(ktr->ktr_code, flags);
+	syscallname(ktr->ktr_code, sv_flags);
 	ip = &ktr->ktr_args[0];
 	if (narg) {
 		char c = '(';
 		if (fancy &&
-		    (flags == 0 || (flags & SV_ABI_MASK) == SV_ABI_FREEBSD)) {
+		    (sv_flags == 0 ||
+		    (sv_flags & SV_ABI_MASK) == SV_ABI_FREEBSD)) {
 			switch (ktr->ktr_code) {
 			case SYS_bindat:
 			case SYS_connectat:
@@ -1335,12 +1336,12 @@ ktrsyscall(struct ktr_syscall *ktr, u_int flags)
 }
 
 void
-ktrsysret(struct ktr_sysret *ktr, u_int flags)
+ktrsysret(struct ktr_sysret *ktr, u_int sv_flags)
 {
 	register_t ret = ktr->ktr_retval;
 	int error = ktr->ktr_error;
 
-	syscallname(ktr->ktr_code, flags);
+	syscallname(ktr->ktr_code, sv_flags);
 	printf(" ");
 
 	if (error == 0) {
