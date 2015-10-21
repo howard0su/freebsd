@@ -979,9 +979,6 @@ validate_exec_list(struct drm_i915_gem_exec_object2 *exec, int count,
 			(*map)[i] = NULL;
 			return (-EFAULT);
 		}
-		if ((*maplen)[i] != page_count)
-			printf("i915: page count mismatch: %d vs %d\n",
-			    (*maplen)[i], page_count);
 	}
 
 	return 0;
