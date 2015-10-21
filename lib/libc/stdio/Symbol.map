@@ -114,10 +114,6 @@ FBSD_1.1 {
 };
 
 FBSD_1.3 {
-	fclose;
-	fdopen;
-	fopen;
-	freopen;
 	asprintf_l;
 	fprintf_l;
 	fwprintf_l;
@@ -163,7 +159,11 @@ FBSD_1.3 {
 };
 
 FBSD_1.4 {
+	fclose;
 	fdclose;
+	fdopen;
+	fopen;
+	freopen;
 };
 
 FBSDprivate_1.0 {
