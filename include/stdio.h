@@ -144,7 +144,9 @@ struct __sFILE {
 	int	_fl_count;	/* recursive lock count */
 	int	_orientation;	/* orientation for fwide() */
 	__mbstate_t _mbstate;	/* multibyte conversion state */
+#ifdef STDIO_INTERNALS
 	int	_file;		/* fileno, if Unix descriptor, else -1 */
+#endif
 };
 #ifndef _STDFILE_DECLARED
 #define _STDFILE_DECLARED
