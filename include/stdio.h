@@ -112,7 +112,7 @@ struct __sFILE {
 	int	_r;		/* (*) read space left for getc() */
 	int	_w;		/* (*) write space left for putc() */
 	short	_flags;		/* (*) flags, below; this FILE is free if 0 */
-	short	_file;		/* (*) fileno, if Unix descriptor, else -1 */
+	short	_ofile;		/* (*) compat fileno for old binaries */
 	struct	__sbuf _bf;	/* (*) the buffer (at least 1 byte, if !NULL) */
 	int	_lbfsize;	/* (*) 0 or -_bf._size, for inline putc */
 
@@ -144,6 +144,7 @@ struct __sFILE {
 	int	_fl_count;	/* recursive lock count */
 	int	_orientation;	/* orientation for fwide() */
 	__mbstate_t _mbstate;	/* multibyte conversion state */
+	int	_file;		/* fileno, if Unix descriptor, else -1 */
 };
 #ifndef _STDFILE_DECLARED
 #define _STDFILE_DECLARED
@@ -484,16 +485,11 @@ extern int __isthreaded;
 #define	__sfeof(p)	(((p)->_flags & __SEOF) != 0)
 #define	__sferror(p)	(((p)->_flags & __SERR) != 0)
 #define	__sclearerr(p)	((void)((p)->_flags &= ~(__SERR|__SEOF)))
-#define	__sfileno(p)	((p)->_file)
 
 
 #define	feof(p)		(!__isthreaded ? __sfeof(p) : (feof)(p))
 #define	ferror(p)	(!__isthreaded ? __sferror(p) : (ferror)(p))
 #define	clearerr(p)	(!__isthreaded ? __sclearerr(p) : (clearerr)(p))
-
-#if __POSIX_VISIBLE
-#define	fileno(p)	(!__isthreaded ? __sfileno(p) : (fileno)(p))
-#endif
 
 #define	getc(fp)	(!__isthreaded ? __sgetc(fp) : (getc)(fp))
 #define	putc(x, fp)	(!__isthreaded ? __sputc(x, fp) : (putc)(x, fp))
@@ -509,7 +505,6 @@ extern int __isthreaded;
 #define	feof_unlocked(p)	__sfeof(p)
 #define	ferror_unlocked(p)	__sferror(p)
 #define	clearerr_unlocked(p)	__sclearerr(p)
-#define	fileno_unlocked(p)	__sfileno(p)
 #endif
 #if __POSIX_VISIBLE >= 199506
 #define	getc_unlocked(fp)	__sgetc(fp)

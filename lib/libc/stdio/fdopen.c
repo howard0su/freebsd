@@ -52,18 +52,6 @@ fdopen(int fd, const char *mode)
 	FILE *fp;
 	int flags, oflags, fdflags, tmp;
 
-	/*
-	 * File descriptors are a full int, but _file is only a short.
-	 * If we get a valid file descriptor that is greater than
-	 * SHRT_MAX, then the fd will get sign-extended into an
-	 * invalid file descriptor.  Handle this case by failing the
-	 * open.
-	 */
-	if (fd > SHRT_MAX) {
-		errno = EMFILE;
-		return (NULL);
-	}
-
 	if ((flags = __sflags(mode, &oflags)) == 0)
 		return (NULL);
 
@@ -94,6 +82,10 @@ fdopen(int fd, const char *mode)
 	if ((oflags & O_APPEND) && !(fdflags & O_APPEND))
 		fp->_flags |= __SAPP;
 	fp->_file = fd;
+	if (fd > SHRT_MAX)
+		fp->_ofile = -1;
+	else
+		fp->_ofile = fd;
 	fp->_cookie = fp;
 	fp->_read = __sread;
 	fp->_write = __swrite;
@@ -101,3 +93,25 @@ fdopen(int fd, const char *mode)
 	fp->_close = __sclose;
 	return (fp);
 }
+
+FILE *
+fdopen_ofile(fd, mode)
+	int fd;
+	const char *mode;
+{
+
+	/*
+	 * File descriptors are a full int, but _ofile is only a short.
+	 * If we get a valid file descriptor that is greater than
+	 * SHRT_MAX, then the fd will get sign-extended into an
+	 * invalid file descriptor.  Handle this case by failing the
+	 * open.
+	 */
+	if (fd > SHRT_MAX) {
+		errno = EMFILE;
+		return (NULL);
+	}
+	return (fdopen(fd, mode));
+}
+
+__sym_compat(fdopen, fdopen_ofile, FBSD_1.0);

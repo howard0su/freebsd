@@ -215,7 +215,7 @@ static int
 __sbprintf(FILE *fp, locale_t locale, const wchar_t *fmt, va_list ap)
 {
 	int ret;
-	FILE fake;
+	FILE fake = FAKE_FILE;
 	unsigned char buf[BUFSIZ];
 
 	/* XXX This is probably not needed. */

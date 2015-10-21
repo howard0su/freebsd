@@ -128,6 +128,7 @@ __fgetwc(FILE *fp, locale_t locale)
 #define	FAKE_FILE {				\
 	._file = -1,				\
 	._fl_mutex = PTHREAD_MUTEX_INITIALIZER, \
+	._ofile = -1,				\
 }
 
 /*

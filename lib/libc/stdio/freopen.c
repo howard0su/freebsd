@@ -54,9 +54,9 @@ __FBSDID("$FreeBSD$");
  * ANSI is written such that the original file gets closed if at
  * all possible, no matter what.
  */
-FILE *
-freopen(const char * __restrict file, const char * __restrict mode,
-    FILE * __restrict fp)
+static FILE *
+freopen_internal(const char * __restrict file, const char * __restrict mode,
+    FILE * __restrict fp, int ofile)
 {
 	int f;
 	int dflags, flags, isopen, oflags, sverrno, wantfd;
@@ -212,13 +212,13 @@ finish:
 	}
 
 	/*
-	 * File descriptors are a full int, but _file is only a short.
+	 * File descriptors are a full int, but _ofile is only a short.
 	 * If we get a valid file descriptor that is greater than
 	 * SHRT_MAX, then the fd will get sign-extended into an
 	 * invalid file descriptor.  Handle this case by failing the
 	 * open.
 	 */
-	if (f > SHRT_MAX) {
+	if (f > SHRT_MAX && ofile) {
 		fp->_flags = 0;		/* set it free */
 		FUNLOCKFILE(fp);
 		errno = EMFILE;
@@ -227,6 +227,10 @@ finish:
 
 	fp->_flags = flags;
 	fp->_file = f;
+	if (f > SHRT_MAX)
+		fp->_ofile = -1;
+	else
+		fp->_ofile = f;
 	fp->_cookie = fp;
 	fp->_read = __sread;
 	fp->_write = __swrite;
@@ -245,3 +249,21 @@ finish:
 	FUNLOCKFILE(fp);
 	return (fp);
 }
+
+FILE *
+freopen(const char * __restrict file, const char * __restrict mode,
+    FILE * __restrict fp)
+{
+
+	return (freopen_internal(file, mode, fp, 0));
+}
+
+FILE *
+freopen_ofile(const char * __restrict file, const char * __restrict mode,
+    FILE * __restrict fp)
+{
+
+	return (freopen_internal(file, mode, fp, 1));
+}
+
+__sym_compat(freopen, freopen_ofile, FBSD_1.0);

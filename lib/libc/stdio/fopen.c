@@ -48,8 +48,9 @@ __FBSDID("$FreeBSD$");
 
 #include "local.h"
 
-FILE *
-fopen(const char * __restrict file, const char * __restrict mode)
+static FILE *
+fopen_internal(const char * __restrict file, const char * __restrict mode,
+    int ofile)
 {
 	FILE *fp;
 	int f;
@@ -64,19 +65,23 @@ fopen(const char * __restrict file, const char * __restrict mode)
 		return (NULL);
 	}
 	/*
-	 * File descriptors are a full int, but _file is only a short.
+	 * File descriptors are a full int, but _ofile is only a short.
 	 * If we get a valid file descriptor that is greater than
 	 * SHRT_MAX, then the fd will get sign-extended into an
 	 * invalid file descriptor.  Handle this case by failing the
 	 * open.
 	 */
-	if (f > SHRT_MAX) {
+	if (f > SHRT_MAX && ofile) {
 		fp->_flags = 0;			/* release */
 		_close(f);
 		errno = EMFILE;
 		return (NULL);
 	}
 	fp->_file = f;
+	if (f > SHRT_MAX)
+		fp->_ofile = -1;
+	else
+		fp->_ofile = f;
 	fp->_flags = flags;
 	fp->_cookie = fp;
 	fp->_read = __sread;
@@ -95,3 +100,19 @@ fopen(const char * __restrict file, const char * __restrict mode)
 		(void)_sseek(fp, (fpos_t)0, SEEK_END);
 	return (fp);
 }
+
+FILE *
+fopen(const char * __restrict file, const char * __restrict mode)
+{
+
+	return (fopen_internal(file, mode, 0));
+}
+
+FILE *
+fopen_ofile(const char * __restrict file, const char * __restrict mode)
+{
+
+	return (fopen_internal(file, mode, 1));
+}
+
+__sym_compat(fopen, fopen_ofile, FBSD_1.0);

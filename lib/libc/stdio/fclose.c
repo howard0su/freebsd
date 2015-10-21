@@ -65,6 +65,7 @@ cleanfile(FILE *fp, bool c)
 	if (HASLB(fp))
 		FREELB(fp);
 	fp->_file = -1;
+	fp->_ofile = -1;
 	fp->_r = fp->_w = 0;	/* Mess up if reaccessed. */
 
 	/*

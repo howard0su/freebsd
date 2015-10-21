@@ -49,11 +49,6 @@ vdprintf(int fd, const char * __restrict fmt, va_list ap)
 	unsigned char buf[BUFSIZ];
 	int ret;
 
-	if (fd > SHRT_MAX) {
-		errno = EMFILE;
-		return (EOF);
-	}
-
 	f._p = buf;
 	f._w = sizeof(buf);
 	f._flags = __SWR;

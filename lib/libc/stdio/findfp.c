@@ -56,6 +56,7 @@ int	__sdidinit;
 #define	std(flags, file) {		\
 	._flags = (flags),		\
 	._file = (file),		\
+	._ofile = (file),		\
 	._cookie = __sF + (file),	\
 	._close = __sclose,		\
 	._read = __sread,		\
@@ -147,6 +148,7 @@ found:
 	fp->_bf._size = 0;
 	fp->_lbfsize = 0;	/* not line buffered */
 	fp->_file = -1;		/* no file */
+	fp->_ofile = -1;
 /*	fp->_cookie = <any>; */	/* caller sets cookie, _read/_write etc */
 	fp->_ub._base = NULL;	/* no ungetc buffer */
 	fp->_ub._size = 0;

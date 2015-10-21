@@ -10,7 +10,6 @@ FBSD_1.0 {
 	clearerr;
 	fclose;
 	fcloseall;
-	fdopen;
 	feof;
 	ferror;
 	fflush;
@@ -27,7 +26,6 @@ FBSD_1.0 {
 	__stdoutp;
 	__stderrp;
 	f_prealloc;	/* deprecated??? */
-	fopen;
 	fprintf;
 	fpurge;
 	fputc;
@@ -35,7 +33,6 @@ FBSD_1.0 {
 	fputwc;
 	fputws;
 	fread;
-	freopen;
 	fscanf;
 	fseek;
 	fseeko;
@@ -118,6 +115,9 @@ FBSD_1.1 {
 };
 
 FBSD_1.3 {
+	fdopen;
+	fopen;
+	freopen;
 	asprintf_l;
 	fprintf_l;
 	fwprintf_l;

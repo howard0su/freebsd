@@ -50,7 +50,7 @@ fileno(FILE *fp)
 	int fd;
 
 	FLOCKFILE(fp);
-	fd = __sfileno(fp);
+	fd = fp->_file;
 	FUNLOCKFILE(fp);
 
 	return (fd);
@@ -60,5 +60,5 @@ int
 fileno_unlocked(FILE *fp)
 {
 
-	return (__sfileno(fp));
+	return (fp->_file);
 }
