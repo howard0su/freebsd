@@ -8,7 +8,6 @@ FBSD_1.0 {
 	funlockfile;
 	asprintf;
 	clearerr;
-	fclose;
 	fcloseall;
 	feof;
 	ferror;
@@ -115,6 +114,7 @@ FBSD_1.1 {
 };
 
 FBSD_1.3 {
+	fclose;
 	fdopen;
 	fopen;
 	freopen;

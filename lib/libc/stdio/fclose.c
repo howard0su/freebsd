@@ -137,3 +137,20 @@ fclose(FILE *fp)
 
 	return (r);
 }
+
+int
+fclose_ofile(FILE *fp)
+{
+
+	/*
+	 * Older versions of Perl used to set _file to -1 directly
+	 * to prevent the underlying fd from being closed.  Detect
+	 * this by looking for a mismatch between _ofile and _file
+	 * and force _file to -1 if _ofile is -1.
+	 */
+	if (fp->_ofile != fp->_file)
+		fp->_file = fp->_ofile;
+	return (fclose(fp));
+}
+
+__sym_compat(fclose, fclose_ofile, FBSD_1.0);
