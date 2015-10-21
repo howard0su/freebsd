@@ -144,7 +144,8 @@ struct __sFILE {
 	int	_fl_count;	/* recursive lock count */
 	int	_orientation;	/* orientation for fwide() */
 	__mbstate_t _mbstate;	/* multibyte conversion state */
-#ifdef STDIO_INTERNALS
+/* XXX: PERL_CORE is a temporary hack. */
+#if defined(STDIO_INTERNALS) || defined(PERL_CORE)
 	int	_file;		/* fileno, if Unix descriptor, else -1 */
 #endif
 };
