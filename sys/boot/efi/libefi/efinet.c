@@ -101,6 +101,8 @@ efinet_match(struct netif *nif, void *machdep_hint)
 {
 	struct devdesc *dev = machdep_hint;
 
+	printf("efinet_match: d_unit %d, nif_unit %d\n", dev->d_unit,
+	    nif->nif_unit);
 	if (dev->d_unit - 1 == nif->nif_unit)
 		return (1);
 	return(0);
@@ -293,6 +295,9 @@ efinet_dev_init()
 		dif->dif_nsel = 1;
 		dif->dif_stats = &stats[i];
 		dif->dif_private = efi_find_handle(&efinet_dev, i);
+		/* XXX */
+		printf("efinet: adding net%d: handle %p\n",
+		    i, dif->dif_private);
 	}
 
 	return (0);

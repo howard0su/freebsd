@@ -108,6 +108,10 @@ main(int argc, CHAR16 *argv[])
 	efi_handle_lookup(img->DeviceHandle, &currdev.d_dev, &currdev.d_unit);
 	currdev.d_type = currdev.d_dev->dv_type;
 
+	/* XXX */
+	printf("currdev handle %p, d_name %s, d_unit %d\n", img->DeviceHandle,
+	    currdev.d_dev->dv_name, currdev.d_unit);
+
 	/*
 	 * Disable the watchdog timer. By default the boot manager sets
 	 * the timer to 5 minutes before invoking a boot option. If we
