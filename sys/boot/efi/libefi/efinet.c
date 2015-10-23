@@ -103,7 +103,7 @@ efinet_match(struct netif *nif, void *machdep_hint)
 
 	printf("efinet_match: d_unit %d, nif_unit %d\n", dev->d_unit,
 	    nif->nif_unit);
-	if (dev->d_unit - 1 == nif->nif_unit)
+	if (dev->d_unit == nif->nif_unit)
 		return (1);
 	return(0);
 }
