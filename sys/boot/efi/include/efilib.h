@@ -38,12 +38,18 @@ extern struct devsw efipart_dev;
 extern struct devsw efinet_dev;
 extern struct netif_driver efinetif;
 
+void efi_cons_putstring(CHAR16 *s);
+
 void *efi_get_table(EFI_GUID *tbl);
 void efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table);
 
 int efi_register_handles(struct devsw *, EFI_HANDLE *, EFI_HANDLE *, int);
 EFI_HANDLE efi_find_handle(struct devsw *, int);
 int efi_handle_lookup(EFI_HANDLE, struct devsw **, int *);
+
+EFI_DEVICE_PATH *efi_lookup_devpath(EFI_HANDLE);
+CHAR16 *efi_devpath_name(EFI_DEVICE_PATH *);
+void efi_free_devpath_name(CHAR16 *);
 
 int efi_status_to_errno(EFI_STATUS);
 time_t efi_time(EFI_TIME *);

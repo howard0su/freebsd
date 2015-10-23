@@ -3,7 +3,7 @@
 LIB=	efi
 INTERNALLIB=
 
-SRCS=	delay.c efi_console.c efinet.c efipart.c errno.c handles.c \
+SRCS=	delay.c devpath.c efi_console.c efinet.c efipart.c errno.c handles.c \
 	libefi.c time.c
 
 .if ${MACHINE_CPUARCH} == "aarch64"

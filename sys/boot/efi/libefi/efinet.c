@@ -306,13 +306,18 @@ efinet_dev_init()
 static void
 efinet_dev_print(int verbose)
 {
-	char line[80];
+	CHAR16 *text;
 	EFI_HANDLE h;
 	int unit;
 
 	for (unit = 0, h = efi_find_handle(&efinet_dev, 0);
 	    h != NULL; h = efi_find_handle(&efinet_dev, ++unit)) {
-		sprintf(line, "    %s%d:\n", efinet_dev.dv_name, unit);
-		pager_output(line);
+		printf("    %s%d:", efinet_dev.dv_name, unit);
+		text = efi_devpath_name(efi_lookup_devpath(h));
+		if (text != NULL) {
+			printf("    ");
+			efi_cons_putstring(text);
+		}
+		pager_output("\n");
 	}
 }

@@ -51,6 +51,13 @@ efi_cons_init(int arg)
 }
 
 void
+efi_cons_putstring(CHAR16 *s)
+{
+
+	conout->OutputString(conout, s);
+}
+
+void
 efi_cons_putchar(int c)
 {
 	CHAR16 buf[2];
