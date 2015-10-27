@@ -1777,6 +1777,7 @@ restart:
 		error = so->so_error;
 		so->so_error = 0;
 		vm_page_unhold_pages(pages, npages);
+		free(pages, M_CXGBE);
 		ddp_held_pages -= npages;
 		aio_complete(cbe, -1, error);
 		toep->ddp_queueing = NULL;
@@ -1786,6 +1787,7 @@ restart:
 
 	if (sb->sb_state & SBS_CANTRCVMORE && sbavail(sb) == 0) {
 		vm_page_unhold_pages(pages, npages);
+		free(pages, M_CXGBE);
 		ddp_held_pages -= npages;
 		if (toep->ddp_active_count != 0) {
 			TAILQ_INSERT_HEAD(&toep->ddp_aiojobq, cbe, list);
@@ -1858,6 +1860,7 @@ restart:
 			 * request.
 			 */
 			vm_page_unhold_pages(pages, npages);
+			free(pages, M_CXGBE);
 			ddp_held_pages -= npages;
 			aio_complete(cbe, copied, 0);
 			ddp_aio_copied++;
@@ -1873,6 +1876,7 @@ restart:
 		 */
 		if ((toep->ddp_flags & (DDP_ON | DDP_SC_REQ)) != DDP_ON) {
 			vm_page_unhold_pages(pages, npages);
+			free(pages, M_CXGBE);
 			ddp_held_pages -= npages;
 			TAILQ_INSERT_HEAD(&toep->ddp_aiojobq, cbe, list);
 			toep->ddp_waiting_count++;
