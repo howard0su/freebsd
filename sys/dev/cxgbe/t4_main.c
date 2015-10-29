@@ -581,10 +581,10 @@ t5_attribute_workaround(device_t dev)
 
 	/*
 	 * The T5 chips do not properly echo the No Snoop and Relaxed
-	 * Ordering attributes when replying to a TLP.  As a
-	 * workaround, find the parent root port and disable No Snoop
-	 * and Relaxed Ordering.  Note that this affects all devices
-	 * under this root port.
+	 * Ordering attributes when replying to a TLP from a Root
+	 * Port.  As a workaround, find the parent Root Port and
+	 * disable No Snoop and Relaxed Ordering.  Note that this
+	 * affects all devices under this root port.
 	 */
 	root_port = pci_find_pcie_root_port(dev);
 	if (root_port == NULL) {
