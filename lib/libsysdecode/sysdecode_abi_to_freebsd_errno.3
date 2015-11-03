@@ -26,43 +26,69 @@
 .\" $FreeBSD$
 .\"
 .Dd January 30, 2016
-.Dt sysdecode_syscallnames 3
+.Dt sysdecode_abi_to_freebsd_errno 3
 .Os
 .Sh NAME
-.Nm sysdecode_syscallnames
-.Nd lookup name of system calls
+.Nm sysdecode_abi_to_freebsd_errno ,
+.Nm sysdecode_freebsd_to_abi_errno
+.Nd translate error numbers between process ABIs
 .Sh LIBRARY
 .Lb libsysdecode
 .Sh SYNOPSIS
-.Ft const char *
-.Fn sysdecode_syscallnames "enum sysdecode_abi abi" "unsigned int code"
+.Ft int
+.Fn sysdecode_abi_to_freebsd_errno "enum sysdecode_abi abi" "int error"
+.Ft int
+.Fn sysdecode_freebsd_to_abi_errno "enum sysdecode_abi abi" "int error"
 .Sh DESCRIPTION
-This function returns a pointer to the name of a system call identified by
-.Fa code
+The
+.Fn sysdecode_abi_to_freebsd_errno
+function returns the native
+.Xr errno 3
+value that corresponds to the error indicated by
+.Fa error
 for the process ABI
 .Fa abi .
 If
-.Fa code
-specifies an unknown system call or
+.Fa error
+does not identify a valid error for
+.Fa abi ,
+.Dv INT_MAX
+is returned.
+.Pp
+The
+.Fn sysdecode_freebsd_to_abi_errno
+function the error value for the process ABI
 .Fa abi
-is an unsupported ABI,
-.Nm
-returns
-.Dv NULL .
+that corresponds to the native
+.Xr errno 3
+value
+.Fa error .
+If
+.Fa error
+does not identify a valid
+.Xr errno 3
+error,
+.Dv INT_MAX
+is returned.
+.Pp
+Note that the mappings between native
+.Xr errno 3
+values and errors for other ABIs are not exhaustive.
+If a mapping does not exist,
+these functions return
+.Dv INT_MAX .
+In addition, multiple error values in one ABI may map to a single
+error in another ABI.
+.Sh RETURN VALUES
+These functions return an error value on success or
+.Dv INT_MAX
+if
+.Fa error
+is not valid.
 .Pp
 For the list of supported ABIs,
 see
 .Xr sysdecode 3 .
-.Sh RETURN VALUES
-The
-.Nm
-function returns a pointer to a string on success or
-.Dv NULL
-if either
-.Fa code
-or
-.Fa ABI
-is invalid .
 .Sh SEE ALSO
 .Xr sysdecode 3 ,
-.Xr sysdecode_abi_to_freebsd_errno 3
+.Xr sysdecode_syscallnames 3
