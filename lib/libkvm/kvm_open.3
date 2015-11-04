@@ -200,10 +200,11 @@ the address should be set in
 and the function should return zero.
 If the function is not able to resolve the name to an address,
 it should return a non-zero value.
-Native kernel images use an internal function to resolve symbol names,
-so this argument may be set to
+When opening a native kernel image,
+.Fa resolver
+may be set to
 .Dv NULL
-when the kernel image is a native image.
+to use an internal function to resolve symbol names.
 Non-native kernel images
 .Pq such as when cross-debugging a crash dump
 require a valid

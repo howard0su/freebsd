@@ -75,7 +75,7 @@ kvm_fdnlist(kvm_t *kd, struct kvm_nlist *list)
 	kvaddr_t addr;
 	int error, nfail;
 
-	if (kd->arch->ka_native(kd)) {
+	if (kd->resolve_symbol == NULL) {
 		struct nlist *nl;
 		int count, i;
 
