@@ -122,7 +122,7 @@ _aarch64_minidump_initvtop(kvm_t *kd)
 		return (-1);
 	}
 	if (pread(kd->pmfd, bitmap, vmst->hdr.bitmapsize, off) !=
-	    vmst->hdr.bitmapsize) {
+	    (ssize_t)vmst->hdr.bitmapsize) {
 		_kvm_err(kd, kd->program,
 		    "cannot read %d bytes for page bitmap",
 		    vmst->hdr.bitmapsize);
@@ -215,7 +215,7 @@ _aarch64_minidump_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	}
 
 invalid:
-	_kvm_err(kd, 0, "invalid address (0x%lx)", va);
+	_kvm_err(kd, 0, "invalid address (0x%jx)", (uintmax_t)va);
 	return (0);
 }
 
