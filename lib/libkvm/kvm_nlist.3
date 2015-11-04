@@ -71,9 +71,9 @@ fields are filled in.
 These fields are set
 to 0 if the symbol is not found.
 .Pp
-For live kernels the
+The
 .Xr kldsym 2
-system call is used to locate the symbol.
+system call is used to locate symbols in live kernels.
 This is a less than perfect
 emulation of the nlist values but has the advantage of being aware of kernel
 modules and is reasonably fast.
@@ -81,7 +81,7 @@ modules and is reasonably fast.
 The
 .Fn kvm_nlist2
 function retrieves the symbol table entries indicated by the name list argument
-.Fa \&nl .
+.Fa nl .
 This argument points to an array of
 .Vt "struct kvm_nlist"
 structures,
