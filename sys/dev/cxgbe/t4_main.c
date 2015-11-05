@@ -841,8 +841,12 @@ t4_attach(device_t dev)
 	sc->intr_count = iaq.nirq;
 
 	s = &sc->sge;
-	s->nrxq = (n10g * iaq.nrxq10g + n1g * iaq.nrxq1g) * num_vis;
-	s->ntxq = (n10g * iaq.ntxq10g + n1g * iaq.ntxq1g) * num_vis;
+	s->nrxq = n10g * iaq.nrxq10g + n1g * iaq.nrxq1g;
+	s->ntxq = n10g * iaq.ntxq10g + n1g * iaq.ntxq1g;
+	if (num_vis > 1) {
+		s->nrxq += (n10g + n1g) * (num_vis - 1);
+		s->ntxq += (n10g + n1g) * (num_vis - 1);
+	}
 	s->neq = s->ntxq + s->nrxq;	/* the free list in an rxq is an eq */
 	s->neq += sc->params.nports + 1;/* ctrl queues: 1 per port + 1 mgmt */
 	s->niq = s->nrxq + 1;		/* 1 extra for firmware event queue */
@@ -928,12 +932,12 @@ t4_attach(device_t dev)
 			vi->first_txq = tqidx;
 			if (is_10G_port(pi) || is_40G_port(pi)) {
 				vi->flags |= iaq.intr_flags_10g & INTR_RXQ;
-				vi->nrxq = iaq.nrxq10g;
-				vi->ntxq = iaq.ntxq10g;
+				vi->nrxq = j == 0 ? iaq.nrxq10g : 1;
+				vi->ntxq = j == 0 ? iaq.ntxq10g : 1;
 			} else {
 				vi->flags |= iaq.intr_flags_1g & INTR_RXQ;
-				vi->nrxq = iaq.nrxq1g;
-				vi->ntxq = iaq.ntxq1g;
+				vi->nrxq = j == 0 ? iaq.nrxq1g : 1;
+				vi->ntxq = j == 0 ? iaq.ntxq1g : 1;
 			}
 
 			if (vi->ntxq > 1)
@@ -2242,9 +2246,10 @@ restart:
 		 * netmap).
 		 */
 		iaq->nirq = T4_EXTRA_INTR;
-		iaq->nirq += n10g * (nrxq10g * num_vis + nofldrxq10g +
-		    nnmrxq10g);
-		iaq->nirq += n1g * (nrxq1g * num_vis + nofldrxq1g + nnmrxq1g);
+		iaq->nirq += n10g * (nrxq10g + nofldrxq10g + nnmrxq10g);
+		iaq->nirq += n10g * (num_vis - 1);
+		iaq->nirq += n1g * (nrxq1g + nofldrxq1g + nnmrxq1g);
+		iaq->nirq += n1g * (num_vis - 1);
 		if (iaq->nirq <= navail &&
 		    (itype != INTR_MSI || powerof2(iaq->nirq))) {
 			iaq->intr_flags_10g = INTR_ALL;
@@ -2264,7 +2269,8 @@ restart:
 		iaq->nirq = T4_EXTRA_INTR;
 		if (nrxq10g >= nofldrxq10g) {
 			iaq->intr_flags_10g = INTR_RXQ;
-			iaq->nirq += n10g * nrxq10g * num_vis;
+			iaq->nirq += n10g * nrxq10g;
+			iaq->nirq += n10g * (num_vis - 1);
 #ifdef DEV_NETMAP
 			iaq->nnmrxq10g = min(nnmrxq10g, nrxq10g);
 #endif
@@ -2277,7 +2283,8 @@ restart:
 		}
 		if (nrxq1g >= nofldrxq1g) {
 			iaq->intr_flags_1g = INTR_RXQ;
-			iaq->nirq += n1g * nrxq1g * num_vis;
+			iaq->nirq += n1g * nrxq1g;
+			iaq->nirq += n1g * (num_vis - 1);
 #ifdef DEV_NETMAP
 			iaq->nnmrxq1g = min(nnmrxq1g, nrxq1g);
 #endif
