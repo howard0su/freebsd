@@ -1614,38 +1614,24 @@ static uint64_t
 vi_get_counter(struct ifnet *ifp, ift_counter c)
 {
 	struct vi_info *vi = ifp->if_softc;
-#ifdef USE_PF_STATS
-	struct fw_vi_stats_pf *s = &vi->stats;
-#else
 	struct fw_vi_stats_vf *s = &vi->stats;
-#endif
 
 	vi_refresh_stats(vi->pi->adapter, vi);
 
 	switch (c) {
 	case IFCOUNTER_IPACKETS:
-#ifdef USE_PF_STATS
-		return (s->rx_pf_frames);
-#else
 		return (s->rx_bcast_frames + s->rx_mcast_frames +
 		    s->rx_ucast_frames);
-#endif
 	case IFCOUNTER_IERRORS:
 		return (s->rx_err_frames);
 	case IFCOUNTER_OPACKETS:
 		return (s->tx_bcast_frames + s->tx_mcast_frames +
 		    s->tx_ucast_frames + s->tx_offload_frames);
-#ifndef USE_PF_STATS
 	case IFCOUNTER_OERRORS:
 		return (s->tx_drop_frames);
-#endif
 	case IFCOUNTER_IBYTES:
-#ifdef USE_PF_STATS
-		return (s->rx_pf_bytes);
-#else
 		return (s->rx_bcast_bytes + s->rx_mcast_bytes +
 		    s->rx_ucast_bytes);
-#endif
 	case IFCOUNTER_OBYTES:
 		return (s->tx_bcast_bytes + s->tx_mcast_bytes +
 		    s->tx_ucast_bytes + s->tx_offload_bytes);
@@ -4696,11 +4682,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	struct fw_vi_stats_cmd c;
 	struct timeval tv;
 	const struct timeval interval = {0, 250000};	/* 250ms */
-#ifdef USE_PF_STATS
-	struct fw_vi_stats_pf fwstats;
-#else
 	struct fw_vi_stats_vf fwstats;
-#endif
 	__be64 *statsp;
 	size_t len;
 	int offset, rc, todo;
@@ -4719,13 +4701,8 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	len = offsetof(struct fw_vi_stats_cmd, u) +
 	    sizeof(struct fw_vi_stats_ctl);
 	len = roundup(len, 16);
-#ifdef USE_PF_STATS	
-	for (offset = 0; offset < VI_PF_NUM_STATS; offset += 6) {
-		todo = imin(6, VI_PF_NUM_STATS - offset);
-#else
 	for (offset = 0; offset < VI_VF_NUM_STATS; offset += 6) {
 		todo = imin(6, VI_VF_NUM_STATS - offset);
-#endif
 		memset(&c, 0, sizeof(c));
 		c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_STATS_CMD) |
 		    F_FW_CMD_REQUEST | F_FW_CMD_READ |
@@ -4749,15 +4726,9 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	vi->stats.tx_mcast_frames = be64toh(fwstats.tx_mcast_frames);
 	vi->stats.tx_ucast_bytes = be64toh(fwstats.tx_ucast_bytes);
 	vi->stats.tx_ucast_frames = be64toh(fwstats.tx_ucast_frames);
-#ifndef USE_PF_STATS
 	vi->stats.tx_drop_frames = be64toh(fwstats.tx_drop_frames);
-#endif
 	vi->stats.tx_offload_bytes = be64toh(fwstats.tx_offload_bytes);
 	vi->stats.tx_offload_frames = be64toh(fwstats.tx_offload_frames);
-#ifdef USE_PF_STATS
-	vi->stats.rx_pf_bytes = be64toh(fwstats.rx_pf_bytes);
-	vi->stats.rx_pf_frames = be64toh(fwstats.rx_pf_frames);
-#endif
 	vi->stats.rx_bcast_bytes = be64toh(fwstats.rx_bcast_bytes);
 	vi->stats.rx_bcast_frames = be64toh(fwstats.rx_bcast_frames);
 	vi->stats.rx_mcast_bytes = be64toh(fwstats.rx_mcast_bytes);

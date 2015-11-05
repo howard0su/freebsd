@@ -256,11 +256,7 @@ struct vi_info {
 
 	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
 	struct timeval last_refreshed;
-#ifdef USE_PF_STATS
-	struct fw_vi_stats_pf stats;
-#else
 	struct fw_vi_stats_vf stats;
-#endif
 };
 
 struct port_info {
