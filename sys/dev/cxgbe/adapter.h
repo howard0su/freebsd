@@ -768,9 +768,6 @@ struct adapter {
 	struct tid_info tids;
 
 	uint16_t doorbells;
-#if 0
-	int open_device_map;
-#endif
 #ifdef TCP_OFFLOAD
 	int offload_map;	/* ports with IFCAP_TOE enabled */
 	int active_ulds;	/* ULDs activated on this adapter */

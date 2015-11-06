@@ -3476,16 +3476,8 @@ cxgbe_init_synchronized(struct vi_info *vi)
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 
-#if 0
-	if (isset(&sc->open_device_map, pi->port_id)) {
-		KASSERT(ifp->if_drv_flags & IFF_DRV_RUNNING,
-		    ("mismatch between open_device_map and if_drv_flags"));
-		return (0);	/* already running */
-	}
-#else
 	if (ifp->if_drv_flags & IFF_DRV_RUNNING)
 		return (0);	/* already running */
-#endif
 
 	if (!(sc->flags & FULL_INIT_DONE) &&
 	    ((rc = adapter_full_init(sc)) != 0))
@@ -3528,9 +3520,6 @@ cxgbe_init_synchronized(struct vi_info *vi)
 	}
 
 	/* all ok */
-#if 0
-	setbit(&sc->open_device_map, pi->port_id);
-#endif
 	PORT_LOCK(pi);
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	pi->up_vis++;
@@ -3609,10 +3598,6 @@ cxgbe_uninit_synchronized(struct vi_info *vi)
 		return (0);
 	}
 	PORT_UNLOCK(pi);
-
-#if 0
-	clrbit(&sc->open_device_map, pi->port_id);
-#endif
 
 	pi->link_cfg.link_ok = 0;
 	pi->link_cfg.speed = 0;

@@ -496,7 +496,7 @@ destroy_server(struct adapter *sc, struct listen_ctx *lctx)
 /*
  * Start a listening server by sending a passive open request to HW.
  *
- * Can't take adapter lock here and access to sc->flags, sc->open_device_map,
+ * Can't take adapter lock here and access to sc->flags,
  * sc->offload_map, if_capenable are all race prone.
  */
 int
