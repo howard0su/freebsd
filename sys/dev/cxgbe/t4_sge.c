@@ -3529,7 +3529,7 @@ alloc_txq(struct vi_info *vi, struct sge_txq *txq, int idx,
 	txq->ifp = vi->ifp;
 	txq->gl = sglist_alloc(TX_SGL_SEGS, M_WAITOK);
 	txq->cpl_ctrl0 = htobe32(V_TXPKT_OPCODE(CPL_TX_PKT) |
-	    V_TXPKT_INTF(pi->tx_chan) | V_TXPKT_PF(sc->pf));
+	    V_TXPKT_INTF(pi->tx_chan) | V_TXPKT_VF(vi->viid));
 	txq->sdesc = malloc(eq->sidx * sizeof(struct tx_sdesc), M_CXGBE,
 	    M_ZERO | M_WAITOK);
 
