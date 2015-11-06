@@ -180,9 +180,11 @@ enum {
 	HOLD_LOCK	= (1 << 0),
 	SLEEP_OK	= (1 << 1),
 	INTR_OK		= (1 << 2),
+	ALREADY_LOCKED	= (1 << 3),
 
 	/* flags understood by end_synchronized_op */
 	LOCK_HELD	= HOLD_LOCK,
+	KEEP_LOCK	= ALREADY_LOCKED,
 };
 
 enum {
@@ -257,6 +259,8 @@ struct vi_info {
 	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
 	struct timeval last_refreshed;
 	struct fw_vi_stats_vf stats;
+
+	struct callout tick;
 };
 
 struct port_info {

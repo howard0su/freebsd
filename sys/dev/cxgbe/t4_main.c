@@ -417,6 +417,7 @@ static void reg_block_dump(struct adapter *, uint8_t *, unsigned int,
 static void t4_get_regs(struct adapter *, struct t4_regdump *, uint8_t *);
 static void vi_refresh_stats(struct adapter *, struct vi_info *);
 static void cxgbe_refresh_stats(struct adapter *, struct port_info *);
+static void vi_tick(void *);
 static void cxgbe_tick(void *);
 static void cxgbe_vlan_config(void *, struct ifnet *, uint16_t);
 static int cpl_not_handled(struct sge_iq *, const struct rss_header *,
@@ -1154,6 +1155,7 @@ cxgbe_vi_attach(device_t dev, struct vi_info *vi)
 	struct sbuf *sb;
 
 	vi->xact_addr_filt = -1;
+	callout_init_mtx(&vi->tick, &vi->pi->adapter->sc_lock, 0);
 
 	/* Allocate an ifnet and set it up */
 	ifp = if_alloc(IFT_ETHER);
@@ -1269,6 +1271,7 @@ cxgbe_vi_detach(struct vi_info *vi)
 
 	/* Let detach proceed even if these fail. */
 	cxgbe_uninit_synchronized(vi);
+	callout_drain(&vi->tick);
 	vi_full_uninit(vi);
 
 	ifmedia_removeall(&vi->media);
@@ -1307,12 +1310,8 @@ cxgbe_detach(device_t dev)
 		t4_tracer_port_detach(sc);
 	}
 
-	PORT_LOCK(pi);
-	callout_stop(&pi->tick);
-	PORT_UNLOCK(pi);
-	callout_drain(&pi->tick);
-
 	cxgbe_vi_detach(&pi->vi[0]);
+	callout_drain(&pi->tick);
 
 	ADAPTER_LOCK(sc);
 	CLR_BUSY(sc);
@@ -1619,8 +1618,6 @@ vi_get_counter(struct ifnet *ifp, ift_counter c)
 {
 	struct vi_info *vi = ifp->if_softc;
 	struct fw_vi_stats_vf *s = &vi->stats;
-
-	vi_refresh_stats(vi->pi->adapter, vi);
 
 	switch (c) {
 	case IFCOUNTER_IPACKETS:
@@ -3408,7 +3405,10 @@ begin_synchronized_op(struct adapter *sc, struct vi_info *vi, int flags,
 	else
 		pri = 0;
 
-	ADAPTER_LOCK(sc);
+	if (flags & ALREADY_LOCKED)
+		ADAPTER_LOCK_ASSERT_OWNED(sc);
+	else
+		ADAPTER_LOCK(sc);
 	for (;;) {
 
 		if (vi && IS_DOOMED(vi)) {
@@ -3440,7 +3440,7 @@ begin_synchronized_op(struct adapter *sc, struct vi_info *vi, int flags,
 #endif
 
 done:
-	if (!(flags & HOLD_LOCK) || rc)
+	if (!(flags & ALREADY_LOCKED) && (!(flags & HOLD_LOCK) || rc))
 		ADAPTER_UNLOCK(sc);
 
 	return (rc);
@@ -3461,7 +3461,8 @@ end_synchronized_op(struct adapter *sc, int flags)
 	KASSERT(IS_BUSY(sc), ("%s: controller not busy.", __func__));
 	CLR_BUSY(sc);
 	wakeup(&sc->flags);
-	ADAPTER_UNLOCK(sc);
+	if (!(flags & KEEP_LOCK))
+		ADAPTER_UNLOCK(sc);
 }
 
 static int
@@ -3534,9 +3535,15 @@ cxgbe_init_synchronized(struct vi_info *vi)
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	pi->up_vis++;
 
-	if (pi->up_vis == 1)
-		callout_reset(&pi->tick, hz, cxgbe_tick, pi);
-	PORT_UNLOCK(pi);
+	if (pi->nvi > 1) {
+		PORT_UNLOCK(pi);
+		ADAPTER_LOCK(sc);
+		callout_reset(&vi->tick, hz, vi_tick, vi);
+		ADAPTER_UNLOCK(sc);
+	} else {
+		callout_reset(&pi->tick, hz, cxgbe_tick, pi);	
+		PORT_UNLOCK(pi);
+	}
 done:
 	if (rc != 0)
 		cxgbe_uninit_synchronized(vi);
@@ -3583,7 +3590,14 @@ cxgbe_uninit_synchronized(struct vi_info *vi)
 		TXQ_UNLOCK(txq);
 	}
 
+	if (pi->nvi > 1) {
+		ADAPTER_LOCK(sc);
+		callout_stop(&vi->tick);
+		ADAPTER_UNLOCK(sc);
+	}
 	PORT_LOCK(pi);
+	if (pi->nvi == 1)
+		callout_stop(&pi->tick);
 	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 		PORT_UNLOCK(pi);
 		return (0);
@@ -4684,8 +4698,6 @@ static void
 vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 {
 	struct fw_vi_stats_cmd c;
-	struct timeval tv;
-	const struct timeval interval = {0, 250000};	/* 250ms */
 	struct fw_vi_stats_vf fwstats;
 	__be64 *statsp;
 	size_t len;
@@ -4694,12 +4706,8 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	if (!(vi->flags & VI_INIT_DONE))
 		return;
 
-	getmicrotime(&tv);
-	timevalsub(&tv, &interval);
-	if (timevalcmp(&tv, &vi->last_refreshed, <))
-		return;
-
-	if (begin_synchronized_op(sc, vi, HOLD_LOCK, "vistats") != 0)
+	if (begin_synchronized_op(sc, vi, HOLD_LOCK | ALREADY_LOCKED,
+	    "vistats") != 0)
 		return;
 	statsp = (__be64 *)&fwstats;
 	len = offsetof(struct fw_vi_stats_cmd, u) +
@@ -4741,7 +4749,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
 	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
 	getmicrotime(&vi->last_refreshed);
-	end_synchronized_op(sc, LOCK_HELD);
+	end_synchronized_op(sc, LOCK_HELD | KEEP_LOCK);
 }
 
 static void
@@ -4782,6 +4790,16 @@ cxgbe_tick(void *arg)
 	cxgbe_refresh_stats(sc, pi);
 
 	callout_schedule(&pi->tick, hz);
+}
+
+static void
+vi_tick(void *arg)
+{
+	struct vi_info *vi = arg;
+	struct adapter *sc = vi->pi->adapter;
+
+	ADAPTER_LOCK_ASSERT_OWNED(sc);
+	vi_refresh_stats(sc, vi);
 }
 
 static void
