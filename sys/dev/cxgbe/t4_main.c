@@ -1643,9 +1643,6 @@ vi_get_counter(struct ifnet *ifp, ift_counter c)
 		return (s->rx_mcast_frames);
 	case IFCOUNTER_OMCASTS:
 		return (s->tx_mcast_frames);
-#if 0
-	case IFCOUNTER_IQDROPS:
-#endif
 	case IFCOUNTER_OQDROPS: {
 		uint64_t drops;
 
