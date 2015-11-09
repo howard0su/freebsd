@@ -203,6 +203,10 @@ xhci_pci_attach(device_t self)
 	sc->sc_io_hdl = rman_get_bushandle(sc->sc_io_res);
 	sc->sc_io_size = rman_get_size(sc->sc_io_res);
 
+	rid = PCIR_BAR(4);
+	sc->sc_msix_res = bus_alloc_resource_any(self, SYS_RES_MEMORY, &rid,
+	    RF_ACTIVE);
+
 	switch (pci_get_devid(self)) {
 	case 0x01941033:	/* NEC uPD720200 USB 3.0 controller */
 	case 0x00141912:	/* NEC uPD720201 USB 3.0 controller */
@@ -241,8 +245,16 @@ xhci_pci_attach(device_t self)
 
 	rid = 0;
 	if (xhci_use_msi && usemsi) {
+		if (sc->sc_msix_res != NULL) {
+			count = 1;
+			if (pci_alloc_msix(self, &count) == 0) {
+				if (bootverbose)
+					device_printf(self, "MSI-X enabled\n");
+				rid = 1;
+			}
+		}
 		count = 1;
-		if (pci_alloc_msi(self, &count) == 0) {
+		if (rid == 0 && pci_alloc_msi(self, &count) == 0) {
 			if (bootverbose)
 				device_printf(self, "MSI enabled\n");
 			rid = 1;
@@ -335,6 +347,11 @@ xhci_pci_detach(device_t self)
 		    rman_get_rid(sc->sc_irq_res), sc->sc_irq_res);
 		sc->sc_irq_res = NULL;
 		pci_release_msi(self);
+	}
+	if (sc->sc_msix_res) {
+		bus_release_resource(self, SYS_RES_MEMORY, PCIR_BAR(4),
+		    sc->sc_msix_res);
+		sc->sc_msix_res = NULL;
 	}
 	if (sc->sc_io_res) {
 		bus_release_resource(self, SYS_RES_MEMORY, PCI_XHCI_CBMEM,
