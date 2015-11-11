@@ -210,7 +210,6 @@ enum {
 	INTR_OFLD_RXQ	= (1 << 5),	/* All TOE rxq's take interrupts */
 	INTR_ALL	= (INTR_RXQ | INTR_OFLD_RXQ),
 	VI_NETMAP	= (1 << 6),
-	/* XXX: Do we need a flag for "is main VI"? */
 };
 
 #define IS_DOOMED(vi)	((vi)->flags & DOOMED)
