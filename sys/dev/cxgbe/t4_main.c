@@ -4785,6 +4785,8 @@ vi_tick(void *arg)
 
 	ADAPTER_LOCK_ASSERT_OWNED(sc);
 	vi_refresh_stats(sc, vi);
+
+	callout_schedule(&vi->tick, hz);
 }
 
 static void
