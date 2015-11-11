@@ -1292,18 +1292,7 @@ cxgbe_detach(device_t dev)
 		return (rc);
 	device_delete_children(dev);
 
-	/* Tell if_ioctl and if_init that the VI is going away */
-	ADAPTER_LOCK(sc);
-	SET_DOOMED(&pi->vi[0]);
-	wakeup(&sc->flags);
-	while (IS_BUSY(sc))
-		mtx_sleep(&sc->flags, &sc->sc_lock, 0, "t4detach", 0);
-	SET_BUSY(sc);
-#ifdef INVARIANTS
-	sc->last_op = "t4detach";
-	sc->last_op_thr = curthread;
-#endif
-	ADAPTER_UNLOCK(sc);
+	doom_vi(sc, &pi->vi[0]);
 
 	if (pi->flags & HAS_TRACEQ) {
 		sc->traceq = -1;	/* cloner should not create ifnet */
@@ -1313,10 +1302,7 @@ cxgbe_detach(device_t dev)
 	cxgbe_vi_detach(&pi->vi[0]);
 	callout_drain(&pi->tick);
 
-	ADAPTER_LOCK(sc);
-	CLR_BUSY(sc);
-	wakeup(&sc->flags);
-	ADAPTER_UNLOCK(sc);
+	end_synchronized_op(sc, 0);
 
 	return (0);
 }
@@ -1841,26 +1827,12 @@ vcxgbe_detach(device_t dev)
 	vi = device_get_softc(dev);
 	sc = vi->pi->adapter;
 
-	/* Tell if_ioctl and if_init that the VI is going away */
-	ADAPTER_LOCK(sc);
-	SET_DOOMED(vi);
-	wakeup(&sc->flags);
-	while (IS_BUSY(sc))
-		mtx_sleep(&sc->flags, &sc->sc_lock, 0, "t4detach", 0);
-	SET_BUSY(sc);
-#ifdef INVARIANTS
-	sc->last_op = "t4detach";
-	sc->last_op_thr = curthread;
-#endif
-	ADAPTER_UNLOCK(sc);
+	doom_vi(sc, vi);
 
 	cxgbe_vi_detach(vi);
 	t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
 
-	ADAPTER_LOCK(sc);
-	CLR_BUSY(sc);
-	wakeup(&sc->flags);
-	ADAPTER_UNLOCK(sc);
+	end_synchronized_op(sc, 0);
 
 	return (0);
 }
@@ -3445,6 +3417,29 @@ done:
 
 	return (rc);
 }
+
+/*
+ * Tell if_ioctl and if_init that the VI is going away.  This is
+ * special variant of begin_synchronized_op and must be paired with a
+ * call to end_synchronized_op.
+ */
+void
+doom_vi(struct adapter *sc, struct vi_info *vi)
+{
+	
+	ADAPTER_LOCK(sc);
+	SET_DOOMED(vi);
+	wakeup(&sc->flags);
+	while (IS_BUSY(sc))
+		mtx_sleep(&sc->flags, &sc->sc_lock, 0, "t4detach", 0);
+	SET_BUSY(sc);
+#ifdef INVARIANTS
+	sc->last_op = "t4detach";
+	sc->last_op_thr = curthread;
+#endif
+	ADAPTER_UNLOCK(sc);
+}
+
 
 /*
  * {begin|end}_synchronized_op must be called from the same thread.

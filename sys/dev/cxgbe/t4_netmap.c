@@ -1132,18 +1132,7 @@ ncxgbe_detach(device_t dev)
 	vi = device_get_softc(dev);
 	sc = vi->pi->adapter;
 
-	/* Tell if_ioctl and if_init that the VI is going away */
-	ADAPTER_LOCK(sc);
-	SET_DOOMED(vi);
-	wakeup(&sc->flags);
-	while (IS_BUSY(sc))
-		mtx_sleep(&sc->flags, &sc->sc_lock, 0, "t4detach", 0);
-	SET_BUSY(sc);
-#ifdef INVARIANTS
-	sc->last_op = "t4detach";
-	sc->last_op_thr = curthread;
-#endif
-	ADAPTER_UNLOCK(sc);
+	doom_vi(sc, vi);
 
 	netmap_detach(vi->ifp);
 	ether_ifdetach(vi->ifp);
@@ -1154,10 +1143,7 @@ ncxgbe_detach(device_t dev)
 	vi->ifp = NULL;
 	t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
 
-	ADAPTER_LOCK(sc);
-	CLR_BUSY(sc);
-	wakeup(&sc->flags);
-	ADAPTER_UNLOCK(sc);
+	end_synchronized_op(sc, 0);
 
 	return (0);
 }
