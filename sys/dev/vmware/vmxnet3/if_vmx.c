@@ -530,7 +530,7 @@ static int
 trunc_powerof2(int val)
 {
 
-	return (1U << (ffs(val) - 1));
+	return (1U << (fls(val) - 1));
 }
 
 static void
