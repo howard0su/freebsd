@@ -3651,14 +3651,7 @@ setup_intr_handlers(struct adapter *sc)
 	for_each_port(sc, p) {
 		pi = sc->port[p];
 		for_each_vi(pi, v, vi) {
-			/*
-			 * One idea here might be to move this into the
-			 * VI attach routines and have each VI driver
-			 * allocate its IRQs.  That would let us move
-			 * the netmap bits below into their own driver.
-			 * All we would need to do is save the starting
-			 * irq/rid values in each vi_info.
-			 */
+			vi->first_intr = rid - 1;
 #ifdef DEV_NETMAP
 			if (vi->flags & VI_NETMAP) {
 				for_each_nm_rxq(vi, q, nm_rxq) {
@@ -3669,6 +3662,7 @@ setup_intr_handlers(struct adapter *sc)
 						return (rc);
 					irq++;
 					rid++;
+					vi->nintr++;
 				}
 				continue;
 			}
@@ -3687,6 +3681,7 @@ setup_intr_handlers(struct adapter *sc)
 						return (rc);
 					irq++;
 					rid++;
+					vi->nintr++;
 				}
 			}
 #ifdef TCP_OFFLOAD
@@ -3699,6 +3694,7 @@ setup_intr_handlers(struct adapter *sc)
 						return (rc);
 					irq++;
 					rid++;
+					vi->nintr++;
 				}
 			}
 		}

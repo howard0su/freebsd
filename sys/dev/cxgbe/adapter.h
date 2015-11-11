@@ -235,6 +235,9 @@ struct vi_info {
 
 	eventhandler_tag vlan_c;
 
+	int nintr;
+	int first_intr;
+
 	/* These need to be int as they are used in sysctl */
 	int ntxq;	/* # of tx queues */
 	int first_txq;	/* index of first tx queue */

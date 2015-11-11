@@ -851,45 +851,14 @@ t4_teardown_adapter_queues(struct adapter *sc)
 }
 
 static inline int
-vi_intr_count(struct vi_info *vi)
-{
-	int rc = 0;
-
-	if (vi->flags & INTR_RXQ)
-		rc += vi->nrxq;
-#ifdef TCP_OFFLOAD
-	if (vi->flags & INTR_OFLD_RXQ)
-		rc += vi->nofldrxq;
-#endif
-	return (rc);
-}
-
-/*
- * Per the VI note over in setup_intr_handlers, this entire function
- * would be moot if we stored the first vector in vi_info.
- */
-static inline int
 first_vector(struct vi_info *vi)
 {
-	struct vi_info *vi2;
-	struct port_info *pi;
 	struct adapter *sc = vi->pi->adapter;
-	int rc = T4_EXTRA_INTR, i, v;
 
 	if (sc->intr_count == 1)
 		return (0);
 
-	for_each_port(sc, i) {
-		pi = sc->port[i];
-		for_each_vi(pi, v, vi2) {
-			if (vi2 == vi)
-				return (rc);
-
-			rc += vi_intr_count(vi2);
-		}
-	}
-
-	return (rc);
+	return (vi->first_intr);
 }
 
 /*
@@ -910,7 +879,7 @@ vi_intr_iq(struct vi_info *vi, int idx)
 
 	KASSERT(!(vi->flags & VI_NETMAP),
 	    ("%s: called on netmap VI", __func__));
-	nintr = vi_intr_count(vi);
+	nintr = vi->nintr;
 	KASSERT(nintr != 0,
 	    ("%s: vi %p has no exclusive interrupts, total interrupts = %d",
 	    __func__, vi, sc->intr_count));
