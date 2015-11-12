@@ -4768,7 +4768,7 @@ cxgbe_tick(void *arg)
 	callout_schedule(&pi->tick, hz);
 }
 
-static void
+void
 vi_tick(void *arg)
 {
 	struct vi_info *vi = arg;

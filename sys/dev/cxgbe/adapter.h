@@ -1016,6 +1016,7 @@ int adapter_full_uninit(struct adapter *);
 int vi_full_init(struct vi_info *);
 int vi_full_uninit(struct vi_info *);
 void vi_sysctls(struct vi_info *);
+void vi_tick(void *);
 
 #ifdef DEV_NETMAP
 /* t4_netmap.c */
