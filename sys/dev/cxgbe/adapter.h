@@ -180,11 +180,9 @@ enum {
 	HOLD_LOCK	= (1 << 0),
 	SLEEP_OK	= (1 << 1),
 	INTR_OK		= (1 << 2),
-	ALREADY_LOCKED	= (1 << 3),
 
 	/* flags understood by end_synchronized_op */
 	LOCK_HELD	= HOLD_LOCK,
-	KEEP_LOCK	= ALREADY_LOCKED,
 };
 
 enum {

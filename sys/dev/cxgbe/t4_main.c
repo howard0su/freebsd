@@ -3375,10 +3375,7 @@ begin_synchronized_op(struct adapter *sc, struct vi_info *vi, int flags,
 	else
 		pri = 0;
 
-	if (flags & ALREADY_LOCKED)
-		ADAPTER_LOCK_ASSERT_OWNED(sc);
-	else
-		ADAPTER_LOCK(sc);
+	ADAPTER_LOCK(sc);
 	for (;;) {
 
 		if (vi && IS_DOOMED(vi)) {
@@ -3410,7 +3407,7 @@ begin_synchronized_op(struct adapter *sc, struct vi_info *vi, int flags,
 #endif
 
 done:
-	if (!(flags & ALREADY_LOCKED) && (!(flags & HOLD_LOCK) || rc))
+	if (!(flags & HOLD_LOCK) || rc)
 		ADAPTER_UNLOCK(sc);
 
 	return (rc);
@@ -3454,8 +3451,7 @@ end_synchronized_op(struct adapter *sc, int flags)
 	KASSERT(IS_BUSY(sc), ("%s: controller not busy.", __func__));
 	CLR_BUSY(sc);
 	wakeup(&sc->flags);
-	if (!(flags & KEEP_LOCK))
-		ADAPTER_UNLOCK(sc);
+	ADAPTER_UNLOCK(sc);
 }
 
 static int
