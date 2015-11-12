@@ -3435,7 +3435,6 @@ doom_vi(struct adapter *sc, struct vi_info *vi)
 	ADAPTER_UNLOCK(sc);
 }
 
-
 /*
  * {begin|end}_synchronized_op must be called from the same thread.
  */
