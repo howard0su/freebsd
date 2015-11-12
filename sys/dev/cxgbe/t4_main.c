@@ -1153,7 +1153,7 @@ cxgbe_vi_attach(device_t dev, struct vi_info *vi)
 	struct sbuf *sb;
 
 	vi->xact_addr_filt = -1;
-	callout_init_mtx(&vi->tick, &vi->pi->adapter->sc_lock, 0);
+	callout_init(&vi->tick, 1);
 
 	/* Allocate an ifnet and set it up */
 	ifp = if_alloc(IFT_ETHER);
@@ -3517,15 +3517,11 @@ cxgbe_init_synchronized(struct vi_info *vi)
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	pi->up_vis++;
 
-	if (pi->nvi > 1) {
-		PORT_UNLOCK(pi);
-		ADAPTER_LOCK(sc);
+	if (pi->nvi > 1)
 		callout_reset(&vi->tick, hz, vi_tick, vi);
-		ADAPTER_UNLOCK(sc);
-	} else {
+	else
 		callout_reset(&pi->tick, hz, cxgbe_tick, pi);	
-		PORT_UNLOCK(pi);
-	}
+	PORT_UNLOCK(pi);
 done:
 	if (rc != 0)
 		cxgbe_uninit_synchronized(vi);
@@ -3572,14 +3568,11 @@ cxgbe_uninit_synchronized(struct vi_info *vi)
 		TXQ_UNLOCK(txq);
 	}
 
-	if (pi->nvi > 1) {
-		ADAPTER_LOCK(sc);
-		callout_stop(&vi->tick);
-		ADAPTER_UNLOCK(sc);
-	}
 	PORT_LOCK(pi);
 	if (pi->nvi == 1)
 		callout_stop(&pi->tick);
+	else
+		callout_stop(&vi->tick);
 	if (!(ifp->if_drv_flags & IFF_DRV_RUNNING)) {
 		PORT_UNLOCK(pi);
 		return (0);
@@ -4766,15 +4759,13 @@ vi_tick(void *arg)
 	struct vi_info *vi = arg;
 	struct adapter *sc = vi->pi->adapter;
 
-	ADAPTER_LOCK_ASSERT_OWNED(sc);
-
-	if (begin_synchronized_op(sc, vi, HOLD_LOCK | ALREADY_LOCKED,
-	    "vistats") != 0)
+	if (begin_synchronized_op(sc, vi, HOLD_LOCK, "vistats") != 0)
 		return;
+
 	vi_refresh_stats(sc, vi);
 
 	callout_schedule(&vi->tick, hz);
-	end_synchronized_op(sc, LOCK_HELD | KEEP_LOCK);
+	end_synchronized_op(sc, LOCK_HELD);
 }
 
 static void

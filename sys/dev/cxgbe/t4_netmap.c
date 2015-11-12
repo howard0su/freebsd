@@ -149,9 +149,7 @@ cxgbe_nm_init_synchronized(struct vi_info *vi)
 		return (rc);	/* error message displayed already */
 
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
-	ADAPTER_LOCK(sc);
 	callout_reset(&vi->tick, hz, vi_tick, vi);
-	ADAPTER_UNLOCK(sc);
 
 	return (rc);
 }
@@ -166,9 +164,7 @@ cxgbe_nm_uninit_synchronized(struct vi_info *vi)
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 
-	ADAPTER_LOCK(sc);
 	callout_stop(&vi->tick);
-	ADAPTER_UNLOCK(sc);
 	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
 
 	return (0);
@@ -1062,7 +1058,7 @@ ncxgbe_attach(device_t dev)
 	}
 	vi->viid = rc;
 	vi->xact_addr_filt = -1;
-	callout_init_mtx(&vi->tick, &vi->pi->adapter->sc_lock, 0);
+	callout_init(&vi->tick, 1);
 
 	ifp = if_alloc(IFT_ETHER);
 	if (ifp == NULL) {
