@@ -4718,7 +4718,6 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	vi->stats.rx_ucast_bytes = be64toh(fwstats.rx_ucast_bytes);
 	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
 	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
-	getmicrotime(&vi->last_refreshed);
 }
 
 static void
