@@ -149,6 +149,9 @@ cxgbe_nm_init_synchronized(struct vi_info *vi)
 		return (rc);	/* error message displayed already */
 
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
+	ADAPTER_LOCK(sc);
+	callout_reset(&vi->tick, hz, vi_tick, vi);
+	ADAPTER_UNLOCK(sc);
 
 	return (rc);
 }
@@ -163,6 +166,9 @@ cxgbe_nm_uninit_synchronized(struct vi_info *vi)
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 
+	ADAPTER_LOCK(sc);
+	callout_stop(&vi->tick);
+	ADAPTER_UNLOCK(sc);
 	ifp->if_drv_flags &= ~IFF_DRV_RUNNING;
 
 	return (0);
@@ -1056,6 +1062,7 @@ ncxgbe_attach(device_t dev)
 	}
 	vi->viid = rc;
 	vi->xact_addr_filt = -1;
+	callout_init_mtx(&vi->tick, &vi->pi->adapter->sc_lock, 0);
 
 	ifp = if_alloc(IFT_ETHER);
 	if (ifp == NULL) {
@@ -1072,6 +1079,7 @@ ncxgbe_attach(device_t dev)
 	ifp->if_ioctl = cxgbe_nm_ioctl;
 	ifp->if_transmit = cxgbe_nm_transmit;
 	ifp->if_qflush = cxgbe_nm_qflush;
+	ifp->if_get_counter = cxgbe_get_counter;
 
 	/*
 	 * netmap(4) says "netmap does not use features such as checksum
@@ -1137,6 +1145,7 @@ ncxgbe_detach(device_t dev)
 	netmap_detach(vi->ifp);
 	ether_ifdetach(vi->ifp);
 	cxgbe_nm_uninit_synchronized(vi);
+	callout_drain(&vi->tick);
 	vi_full_uninit(vi);
 	ifmedia_removeall(&vi->media);
 	if_free(vi->ifp);
