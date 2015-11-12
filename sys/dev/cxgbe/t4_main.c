@@ -4677,12 +4677,9 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	size_t len;
 	int offset, rc, todo;
 
-	if (!(vi->flags & VI_INIT_DONE))
-		return;
+	ASSERT_SYNCHRONIZED_OP(sc);
+	KASSERT(vi->flags & VI_INIT_DONE, ("%s: VI not initialized", __func__));
 
-	if (begin_synchronized_op(sc, vi, HOLD_LOCK | ALREADY_LOCKED,
-	    "vistats") != 0)
-		return;
 	statsp = (__be64 *)&fwstats;
 	len = offsetof(struct fw_vi_stats_cmd, u) +
 	    sizeof(struct fw_vi_stats_ctl);
@@ -4700,7 +4697,6 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 		if (rc != 0) {
 			device_printf(vi->dev,
 			    "failed to fetch VI stats: rc %d\n", rc);
-			end_synchronized_op(sc, LOCK_HELD);
 			return;
 		}
 		memcpy(statsp, &c.u.ctl.stat0, todo * sizeof(__be64));
@@ -4723,7 +4719,6 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
 	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
 	getmicrotime(&vi->last_refreshed);
-	end_synchronized_op(sc, LOCK_HELD | KEEP_LOCK);
 }
 
 static void
@@ -4773,9 +4768,14 @@ vi_tick(void *arg)
 	struct adapter *sc = vi->pi->adapter;
 
 	ADAPTER_LOCK_ASSERT_OWNED(sc);
+
+	if (begin_synchronized_op(sc, vi, HOLD_LOCK | ALREADY_LOCKED,
+	    "vistats") != 0)
+		return;
 	vi_refresh_stats(sc, vi);
 
 	callout_schedule(&vi->tick, hz);
+	end_synchronized_op(sc, LOCK_HELD | KEEP_LOCK);
 }
 
 static void
