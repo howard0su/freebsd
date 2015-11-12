@@ -348,6 +348,16 @@ TUNABLE_INT("hw.cxl.write_combine", &t5_write_combine);
 static int t4_num_vis = 1;
 TUNABLE_INT("hw.cxgbe.num_vis", &t4_num_vis);
 
+/* Functions used by extra VIs to obtain unique MAC addresses for each VI. */
+static int vi_mac_funcs[] = {
+	FW_VI_FUNC_OFLD,
+	FW_VI_FUNC_IWARP,
+	FW_VI_FUNC_OPENISCSI,
+	FW_VI_FUNC_OPENFCOE,
+	FW_VI_FUNC_FOISCSI,
+	FW_VI_FUNC_FOFCOE,
+};
+
 struct intrs_and_queues {
 	uint16_t intr_type;	/* INTx, MSI, or MSI-X */
 	uint16_t nirq;		/* Total # of vectors */
@@ -730,6 +740,9 @@ t4_attach(device_t dev)
 	 * "main" regular VI for the port.  The second VI is used for
 	 * netmap if present, and any remaining VIs are used for
 	 * additional virtual interfaces.
+	 *
+	 * Limit the number of VIs per port to the number of available
+	 * MAC addresses per port.
 	 */
 	if (t4_num_vis >= 1)
 		num_vis = t4_num_vis;
@@ -738,6 +751,8 @@ t4_attach(device_t dev)
 #ifdef DEV_NETMAP
 	num_vis++;
 #endif
+	if (num_vis > nitems(vi_mac_funcs))
+		num_vis = nitems(vi_mac_funcs);
 
 	/*
 	 * First pass over all the ports - allocate VIs and initialize some
@@ -1777,14 +1792,6 @@ vcxgbe_attach(device_t dev)
 	struct vi_info *vi;
 	struct port_info *pi;
 	struct adapter *sc;
-	static int mac_funcs[] = {
-		FW_VI_FUNC_OFLD,
-		FW_VI_FUNC_IWARP,
-		FW_VI_FUNC_OPENISCSI,
-		FW_VI_FUNC_OPENFCOE,
-		FW_VI_FUNC_FOISCSI,
-		FW_VI_FUNC_FOFCOE,
-	};
 	int func, index, rc;
 
 	vi = device_get_softc(dev);
@@ -1792,14 +1799,10 @@ vcxgbe_attach(device_t dev)
 	sc = pi->adapter;
 
 	index = vi - pi->vi;
-	if (index < nitems(mac_funcs))
-		func = mac_funcs[index];
-	else
-		/*
-		 * XXX: In this case the user will need to assign
-		 * custom MAC addresses.
-		 */
-		func = FW_VI_FUNC_ETH;
+	KASSERT(index < nitems(vi_mac_funcs),
+	    ("%s: VI %s doesn't have a MAC func", __func__,
+	    device_get_nameunit(dev)));
+	func = vi_mac_funcs[index];
 	rc = t4_alloc_vi_func(sc, sc->mbox, pi->tx_chan, sc->pf, 0, 1,
 	    vi->hw_addr, &vi->rss_size, func, 0);
 	if (rc < 0) {
