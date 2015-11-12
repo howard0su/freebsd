@@ -261,6 +261,16 @@ list_devs(const char *name, int verbose, int bars, int caps, int errors,
 }
 
 static void
+print_bus_range(int fd, struct pci_conf *p, int secreg, int subreg)
+{
+	uint8_t secbus, subbus;
+
+	secbus = read_config(fd, &p->pc_sel, secreg, 1);
+	subbus = read_config(fd, &p->pc_sel, subreg, 1);
+	printf("bus range  = %u - %u\n", secbus, subbus);
+}
+
+static void
 list_bars(int fd, struct pci_conf *p)
 {
 	int i, max;
@@ -271,9 +281,11 @@ list_bars(int fd, struct pci_conf *p)
 		break;
 	case PCIM_HDRTYPE_BRIDGE:
 		max = PCIR_MAX_BAR_1;
+		print_bus_range(fd, p, PCIR_SECBUS_1, PCIR_SUBBUS_1);
 		break;
 	case PCIM_HDRTYPE_CARDBUS:
 		max = PCIR_MAX_BAR_2;
+		print_bus_range(fd, p, PCIR_SECBUS_2, PCIR_SUBBUS_2);
 		break;
 	default:
 		return;
