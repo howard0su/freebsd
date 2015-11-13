@@ -4659,9 +4659,41 @@ t4_get_regs(struct adapter *sc, struct t4_regdump *regs, uint8_t *buf)
 		reg_block_dump(sc, buf, reg_ranges[i], reg_ranges[i + 1]);
 }
 
+#define	A_PL_INDIR_CMD	0x1f8
+
+#define	S_PL_AUTOINC	31
+#define	M_PL_AUTOINC	0x1U
+#define	V_PL_AUTOINC(x)	((x) << S_AUTOINC)
+#define	G_PL_AUTOINC(x)	(((x) >> S_AUTOINC) & M_AUTOINC)
+
+#define	S_PL_VFID	20
+#define	M_PL_VFID	0xffU
+#define	V_PL_VFID(x)	((x) << S_VFID)
+#define	G_PL_VFID(x)	(((x) >> S_VFID) & M_VFID)
+
+#define	S_PL_ADDR	0
+#define	M_PL_ADDR	0xfffffU
+#define	V_PL_ADDR(x)	((x) << S_PL_ADDR)
+#define	G_PL_ADDR(x)	(((x) >> S_PL_ADDR) & M_PL_ADDR)
+
+#define	A_PL_INDIR_DATA	0x1fc
+
+static uint64_t
+read_vf_stat(struct adapter *sc, struct vi_info *vi, int reg)
+{
+	__be32 stats[2];
+
+	mtx_assert(&sc->regwin_lock, MA_OWNED);
+	t4_read_indirect(sc, A_PL_INDIR_CMD, A_PL_INDIR_DATA, stats,
+	    nitems(stats), V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
+	    V_PL_ADDR(VF_MPS_REG(reg)));
+	return (((uint64_t)be32toh(stats[1])) << 32 | be32toh(stats[0]));
+}
+
 static void
 vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 {
+#if 0
 	struct fw_vi_stats_cmd c;
 	struct fw_vi_stats_vf fwstats;
 	__be64 *statsp;
@@ -4709,6 +4741,43 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	vi->stats.rx_ucast_bytes = be64toh(fwstats.rx_ucast_bytes);
 	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
 	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
+#else
+
+	mtx_lock(&sc->regwin_lock);
+	vi->stats.tx_bcast_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_BCAST_BYTES_L);
+	vi->stats.tx_bcast_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_BCAST_FRAMES_L);
+	vi->stats.tx_mcast_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_MCAST_BYTES_L);
+	vi->stats.tx_mcast_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_MCAST_FRAMES_L);
+	vi->stats.tx_ucast_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_UCAST_BYTES_L);
+	vi->stats.tx_ucast_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_UCAST_FRAMES_L);
+	vi->stats.tx_drop_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_DROP_FRAMES_L);
+	vi->stats.tx_offload_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_OFFLOAD_BYTES_L);
+	vi->stats.tx_offload_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_TX_VF_OFFLOAD_FRAMES_L);
+	vi->stats.rx_bcast_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_BCAST_BYTES_L);
+	vi->stats.rx_bcast_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_BCAST_FRAMES_L);
+	vi->stats.rx_mcast_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_MCAST_BYTES_L);
+	vi->stats.rx_mcast_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_MCAST_FRAMES_L);
+	vi->stats.rx_ucast_bytes = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_UCAST_BYTES_L);
+	vi->stats.rx_ucast_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_UCAST_FRAMES_L);
+	vi->stats.rx_err_frames = read_vf_stat(sc, vi,
+	    A_MPS_VF_STAT_RX_VF_ERR_FRAMES_L);
+	mtx_unlock(&sc->regwin_lock);
+#endif
 }
 
 static void
