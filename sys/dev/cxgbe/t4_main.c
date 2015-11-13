@@ -4663,13 +4663,13 @@ t4_get_regs(struct adapter *sc, struct t4_regdump *regs, uint8_t *buf)
 
 #define	S_PL_AUTOINC	31
 #define	M_PL_AUTOINC	0x1U
-#define	V_PL_AUTOINC(x)	((x) << S_AUTOINC)
-#define	G_PL_AUTOINC(x)	(((x) >> S_AUTOINC) & M_AUTOINC)
+#define	V_PL_AUTOINC(x)	((x) << S_PL_AUTOINC)
+#define	G_PL_AUTOINC(x)	(((x) >> S_PL_AUTOINC) & M_PL_AUTOINC)
 
 #define	S_PL_VFID	20
 #define	M_PL_VFID	0xffU
-#define	V_PL_VFID(x)	((x) << S_VFID)
-#define	G_PL_VFID(x)	(((x) >> S_VFID) & M_VFID)
+#define	V_PL_VFID(x)	((x) << S_PL_VFID)
+#define	G_PL_VFID(x)	(((x) >> S_PL_VFID) & M_PL_VFID)
 
 #define	S_PL_ADDR	0
 #define	M_PL_ADDR	0xfffffU
