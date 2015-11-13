@@ -4699,55 +4699,6 @@ read_vf_stat(struct adapter *sc, struct vi_info *vi, int reg)
 static void
 vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 {
-#if 0
-	struct fw_vi_stats_cmd c;
-	struct fw_vi_stats_vf fwstats;
-	__be64 *statsp;
-	size_t len;
-	int offset, rc, todo;
-
-	ASSERT_SYNCHRONIZED_OP(sc);
-	KASSERT(vi->flags & VI_INIT_DONE, ("%s: VI not initialized", __func__));
-
-	statsp = (__be64 *)&fwstats;
-	len = offsetof(struct fw_vi_stats_cmd, u) +
-	    sizeof(struct fw_vi_stats_ctl);
-	len = roundup(len, 16);
-	for (offset = 0; offset < VI_VF_NUM_STATS; offset += 6) {
-		todo = imin(6, VI_VF_NUM_STATS - offset);
-		memset(&c, 0, sizeof(c));
-		c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_STATS_CMD) |
-		    F_FW_CMD_REQUEST | F_FW_CMD_READ |
-		    V_FW_VI_STATS_CMD_VIID(vi->viid));
-		c.retval_len16 = htonl(V_FW_CMD_LEN16(len / 16));
-		c.u.ctl.nstats_ix = htons(V_FW_VI_STATS_CMD_NSTATS(todo) |
-		    V_FW_VI_STATS_CMD_IX(offset));
-		rc = -t4_wr_mbox_ns(sc, sc->mbox, &c, len, &c);
-		if (rc != 0) {
-			device_printf(vi->dev,
-			    "failed to fetch VI stats: rc %d\n", rc);
-			return;
-		}
-		memcpy(statsp, &c.u.ctl.stat0, todo * sizeof(__be64));
-		statsp += todo;
-	}
-	vi->stats.tx_bcast_bytes = be64toh(fwstats.tx_bcast_bytes);
-	vi->stats.tx_bcast_frames = be64toh(fwstats.tx_bcast_frames);
-	vi->stats.tx_mcast_bytes = be64toh(fwstats.tx_mcast_bytes);
-	vi->stats.tx_mcast_frames = be64toh(fwstats.tx_mcast_frames);
-	vi->stats.tx_ucast_bytes = be64toh(fwstats.tx_ucast_bytes);
-	vi->stats.tx_ucast_frames = be64toh(fwstats.tx_ucast_frames);
-	vi->stats.tx_drop_frames = be64toh(fwstats.tx_drop_frames);
-	vi->stats.tx_offload_bytes = be64toh(fwstats.tx_offload_bytes);
-	vi->stats.tx_offload_frames = be64toh(fwstats.tx_offload_frames);
-	vi->stats.rx_bcast_bytes = be64toh(fwstats.rx_bcast_bytes);
-	vi->stats.rx_bcast_frames = be64toh(fwstats.rx_bcast_frames);
-	vi->stats.rx_mcast_bytes = be64toh(fwstats.rx_mcast_bytes);
-	vi->stats.rx_mcast_frames = be64toh(fwstats.rx_mcast_frames);
-	vi->stats.rx_ucast_bytes = be64toh(fwstats.rx_ucast_bytes);
-	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
-	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
-#else
 	struct timeval tv;
 	const struct timeval interval = {0, 250000};	/* 250ms */
 
@@ -4794,7 +4745,6 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	    A_MPS_VF_STAT_RX_VF_ERR_FRAMES_L);
 	getmicrotime(&vi->last_refreshed);
 	mtx_unlock(&sc->regwin_lock);
-#endif
 }
 
 static void
