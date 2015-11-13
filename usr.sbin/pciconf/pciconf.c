@@ -289,10 +289,34 @@ print_window(int reg, const char *type, int range, uint64_t base,
 }
 
 static void
+print_special_decode(bool isa, bool vga, bool subtractive)
+{
+	bool comma;
+
+	if (isa || vga || subtractive) {
+		comma = false;
+		printf("    decode     = ");
+		if (isa) {
+			printf("ISA");
+			comma = true;
+		}
+		if (vga) {
+			printf("%sVGA", comma ? ", " : "");
+			comma = true;
+		}
+		if (subtractive)
+			printf("%ssubtractive", comma ? ", " : "");
+		printf("\n");
+	}
+}
+
+static void
 print_bridge_windows(int fd, struct pci_conf *p)
 {
 	uint64_t base, limit;
 	uint32_t val;
+	uint16_t bctl;
+	bool subtractive;
 	int range;
 
 	/*
@@ -345,57 +369,70 @@ print_bridge_windows(int fd, struct pci_conf *p)
 		print_window(PCIR_PMBASEL_1, "Prefetchable Memory", range, base,
 		    limit);
 	}
+
+	/*
+	 * XXX: This list of bridges that are subtractive but do not set
+	 * progif to indicate it is copied from pci_pci.c.
+	 */
+	subtractive = p->pc_progif == PCIP_BRIDGE_PCI_SUBTRACTIVE;
+	switch (p->pc_device << 16 | p->pc_vendor) {
+	case 0xa002177d:		/* Cavium ThunderX */
+	case 0x124b8086:		/* Intel 82380FB Mobile */
+	case 0x060513d7:		/* Toshiba ???? */
+		subtractive = true;
+	}
+	if (p->pc_vendor == 0x8086 && (p->pc_device & 0xff00) == 0x2400)
+		subtractive = true;
+		
+	bctl = read_config(fd, &p->pc_sel, PCIR_BRIDGECTL_1, 2);
+	print_special_decode(bctl & PCIB_BCR_ISA_ENABLE,
+	    bctl & PCIB_BCR_VGA_ENABLE, subtractive);
+}
+
+static void
+print_cardbus_mem_window(int fd, struct pci_conf *p, int basereg, int limitreg,
+    bool prefetch)
+{
+
+	print_window(basereg, prefetch ? "Prefetchable Memory" : "Memory", 32,
+	    PCI_CBBMEMBASE(read_config(fd, &p->pc_sel, basereg, 4)),
+	    PCI_CBBMEMLIMIT(read_config(fd, &p->pc_sel, limitreg, 4)));
+}
+
+static void
+print_cardbus_io_window(int fd, struct pci_conf *p, int basereg, int limitreg)
+{
+	uint32_t base, limit;
+	uint32_t val;
+	int range;
+
+	val = read_config(fd, &p->pc_sel, basereg, 2);
+	if ((val & PCIM_CBBIO_MASK) == PCIM_CBBIO_32) {
+		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, basereg, 4));
+		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, limitreg, 4));
+		range = 32;
+	} else {
+		base = PCI_CBBIOBASE(val);
+		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, limitreg, 2));
+		range = 16;
+	}
+	print_window(basereg, "I/O Port", range, base, limit);
 }
 
 static void
 print_cardbus_windows(int fd, struct pci_conf *p)
 {
-	uint32_t base, limit;
-	uint32_t val;
 	uint16_t bctl;
-	int range;
 
 	bctl = read_config(fd, &p->pc_sel, PCIR_BRIDGECTL_2, 2);
-	print_window(PCIR_MEMBASE0_2,
-	    bctl & (1 << 8) ? "Prefetchable Memory" : "Memory", 32,
-	    PCI_CBBMEMBASE(read_config(fd, &p->pc_sel, PCIR_MEMBASE0_2, 4)),
-	    PCI_CBBMEMLIMIT(read_config(fd, &p->pc_sel, PCIR_MEMLIMIT0_2, 4)));
-	print_window(PCIR_MEMBASE1_2,
-	    bctl & (1 << 9) ? "Prefetchable Memory" : "Memory", 32,
-	    PCI_CBBMEMBASE(read_config(fd, &p->pc_sel, PCIR_MEMBASE1_2, 4)),
-	    PCI_CBBMEMLIMIT(read_config(fd, &p->pc_sel, PCIR_MEMLIMIT1_2, 4)));
-
-	val = read_config(fd, &p->pc_sel, PCIR_IOBASE0_2, 2);
-	if ((val & PCIM_CBBIO_MASK) == PCIM_CBBIO_32) {
-		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE0_2,
-		    4));
-		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
-		    PCIR_IOLIMIT0_2, 4));
-		range = 32;
-	} else {
-		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE0_2,
-		    2));
-		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
-		    PCIR_IOLIMIT0_2, 2));
-		range = 16;
-	}
-	print_window(PCIR_IOBASE0_2, "I/O Port", range, base, limit);
-		    
-	val = read_config(fd, &p->pc_sel, PCIR_IOBASE1_2, 2);
-	if ((val & PCIM_CBBIO_MASK) == PCIM_CBBIO_32) {
-		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE1_2,
-		    4));
-		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
-		    PCIR_IOLIMIT1_2, 4));
-		range = 32;
-	} else {
-		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE1_2,
-		    2));
-		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
-		    PCIR_IOLIMIT1_2, 2));
-		range = 16;
-	}
-	print_window(PCIR_IOBASE1_2, "I/O Port", range, base, limit);
+	print_cardbus_mem_window(fd, p, PCIR_MEMBASE0_2, PCIR_MEMLIMIT0_2,
+	    bctl & CBB_BCR_PREFETCH_0_ENABLE);
+	print_cardbus_mem_window(fd, p, PCIR_MEMBASE1_2, PCIR_MEMLIMIT1_2,
+	    bctl & CBB_BCR_PREFETCH_1_ENABLE);
+	print_cardbus_io_window(fd, p, PCIR_IOBASE0_2, PCIR_IOLIMIT0_2);
+	print_cardbus_io_window(fd, p, PCIR_IOBASE1_2, PCIR_IOLIMIT1_2);
+	print_special_decode(bctl & CBB_BCR_ISA_ENABLE,
+	    bctl & CBB_BCR_VGA_ENABLE, false);
 }
 
 static void
