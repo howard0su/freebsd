@@ -4683,6 +4683,9 @@ read_vf_stat(struct adapter *sc, struct vi_info *vi, int reg)
 {
 	__be32 stats[2];
 
+	CTR3(KTR_CXGBE, "read_vf_stat: VIID %#x, reg %#x, PL addr %#x",
+	    vi->viid, reg, V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
+	    V_PL_ADDR(VF_MPS_REG(reg)));
 	mtx_assert(&sc->regwin_lock, MA_OWNED);
 	t4_read_indirect(sc, A_PL_INDIR_CMD, A_PL_INDIR_DATA, stats,
 	    nitems(stats), V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
