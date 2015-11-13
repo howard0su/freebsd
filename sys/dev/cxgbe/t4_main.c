@@ -4687,9 +4687,10 @@ read_vf_stat(struct adapter *sc, struct vi_info *vi, int reg)
 	    vi->viid, reg, V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
 	    V_PL_ADDR(VF_MPS_REG(reg)));
 	mtx_assert(&sc->regwin_lock, MA_OWNED);
-	t4_read_indirect(sc, A_PL_INDIR_CMD, A_PL_INDIR_DATA, stats,
-	    nitems(stats), V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
-	    V_PL_ADDR(VF_MPS_REG(reg)));
+	t4_write_reg(sc, A_PL_INDIR_CMD, V_PL_AUTOINC(1) |
+	    V_PL_VFID(G_FW_VIID_VIN(vi->viid)) | V_PL_ADDR(VF_MPS_REG(reg)));
+	stats[0] = t4_read_reg(sc, A_PL_INDIR_DATA);
+	stats[1] = t4_read_reg(sc, A_PL_INDIR_DATA);
 	return (((uint64_t)stats[1]) << 32 | stats[0]);
 }
 
