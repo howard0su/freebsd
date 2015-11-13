@@ -1618,6 +1618,8 @@ vi_get_counter(struct ifnet *ifp, ift_counter c)
 	struct vi_info *vi = ifp->if_softc;
 	struct fw_vi_stats_vf *s = &vi->stats;
 
+	vi_refresh_stats(vi->pi->adapter, vi);
+
 	switch (c) {
 	case IFCOUNTER_IPACKETS:
 		return (s->rx_bcast_frames + s->rx_mcast_frames +
@@ -4746,6 +4748,16 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	vi->stats.rx_ucast_frames = be64toh(fwstats.rx_ucast_frames);
 	vi->stats.rx_err_frames = be64toh(fwstats.rx_err_frames);
 #else
+	struct timeval tv;
+	const struct timeval interval = {0, 250000};	/* 250ms */
+
+	if (!(vi->flags & VI_INIT_DONE))
+		return;
+
+	getmicrotime(&tv);
+	timevalsub(&tv, &interval);
+	if (timevalcmp(&tv, &vi->last_refreshed, <))
+		return;
 
 	mtx_lock(&sc->regwin_lock);
 	vi->stats.tx_bcast_bytes = read_vf_stat(sc, vi,
@@ -4780,6 +4792,7 @@ vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 	    A_MPS_VF_STAT_RX_VF_UCAST_FRAMES_L);
 	vi->stats.rx_err_frames = read_vf_stat(sc, vi,
 	    A_MPS_VF_STAT_RX_VF_ERR_FRAMES_L);
+	getmicrotime(&vi->last_refreshed);
 	mtx_unlock(&sc->regwin_lock);
 #endif
 }
@@ -4830,13 +4843,9 @@ vi_tick(void *arg)
 	struct vi_info *vi = arg;
 	struct adapter *sc = vi->pi->adapter;
 
-	if (begin_synchronized_op(sc, vi, HOLD_LOCK, "vistats") != 0)
-		return;
-
 	vi_refresh_stats(sc, vi);
 
 	callout_schedule(&vi->tick, hz);
-	end_synchronized_op(sc, LOCK_HELD);
 }
 
 static void
