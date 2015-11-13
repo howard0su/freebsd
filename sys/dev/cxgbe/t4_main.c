@@ -4681,7 +4681,7 @@ t4_get_regs(struct adapter *sc, struct t4_regdump *regs, uint8_t *buf)
 static uint64_t
 read_vf_stat(struct adapter *sc, struct vi_info *vi, int reg)
 {
-	__be32 stats[2];
+	u32 stats[2];
 
 	CTR3(KTR_CXGBE, "read_vf_stat: VIID %#x, reg %#x, PL addr %#x",
 	    vi->viid, reg, V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
@@ -4690,7 +4690,7 @@ read_vf_stat(struct adapter *sc, struct vi_info *vi, int reg)
 	t4_read_indirect(sc, A_PL_INDIR_CMD, A_PL_INDIR_DATA, stats,
 	    nitems(stats), V_PL_VFID(G_FW_VIID_VIN(vi->viid)) |
 	    V_PL_ADDR(VF_MPS_REG(reg)));
-	return (((uint64_t)be32toh(stats[1])) << 32 | be32toh(stats[0]));
+	return (((uint64_t)stats[1]) << 32 | stats[0]);
 }
 
 static void
