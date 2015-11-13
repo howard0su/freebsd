@@ -265,6 +265,11 @@
 #define	PCIR_BIOS_1	0x38
 #define	PCIR_BRIDGECTL_1 0x3e
 
+#define	PCI_PPBMEMBASE(h,l)  ((((uint64_t)(h) << 32) + ((l)<<16)) & ~0xfffff)
+#define	PCI_PPBMEMLIMIT(h,l) ((((uint64_t)(h) << 32) + ((l)<<16)) | 0xfffff)
+#define	PCI_PPBIOBASE(h,l)   ((((h)<<16) + ((l)<<8)) & ~0xfff)
+#define	PCI_PPBIOLIMIT(h,l)  ((((h)<<16) + ((l)<<8)) | 0xfff)
+
 /* config registers for header type 2 (CardBus) devices */
 
 #define	PCIR_MAX_BAR_2	0
