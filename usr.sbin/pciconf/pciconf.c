@@ -348,6 +348,57 @@ print_bridge_windows(int fd, struct pci_conf *p)
 }
 
 static void
+print_cardbus_windows(int fd, struct pci_conf *p)
+{
+	uint32_t base, limit;
+	uint32_t val;
+	uint16_t bctl;
+	int range;
+
+	bctl = read_config(fd, &p->pc_sel, PCIR_BRIDGECTL_2, 2);
+	print_window(PCIR_MEMBASE0_2,
+	    bctl & (1 << 8) ? "Prefetchable Memory" : "Memory", 32,
+	    PCI_CBBMEMBASE(read_config(fd, &p->pc_sel, PCIR_MEMBASE0_2, 4)),
+	    PCI_CBBMEMLIMIT(read_config(fd, &p->pc_sel, PCIR_MEMLIMIT0_2, 4)));
+	print_window(PCIR_MEMBASE1_2,
+	    bctl & (1 << 9) ? "Prefetchable Memory" : "Memory", 32,
+	    PCI_CBBMEMBASE(read_config(fd, &p->pc_sel, PCIR_MEMBASE1_2, 4)),
+	    PCI_CBBMEMLIMIT(read_config(fd, &p->pc_sel, PCIR_MEMLIMIT1_2, 4)));
+
+	val = read_config(fd, &p->pc_sel, PCIR_IOBASE0_2, 2);
+	if ((val & PCIM_CBBIO_MASK) == PCIM_CBBIO_32) {
+		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE0_2,
+		    4));
+		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
+		    PCIR_IOLIMIT0_2, 4));
+		range = 32;
+	} else {
+		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE0_2,
+		    2));
+		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
+		    PCIR_IOLIMIT0_2, 2));
+		range = 16;
+	}
+	print_window(PCIR_IOBASE0_2, "I/O Port", range, base, limit);
+		    
+	val = read_config(fd, &p->pc_sel, PCIR_IOBASE1_2, 2);
+	if ((val & PCIM_CBBIO_MASK) == PCIM_CBBIO_32) {
+		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE1_2,
+		    4));
+		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
+		    PCIR_IOLIMIT1_2, 4));
+		range = 32;
+	} else {
+		base = PCI_CBBIOBASE(read_config(fd, &p->pc_sel, PCIR_IOBASE1_2,
+		    2));
+		limit = PCI_CBBIOBASE(read_config(fd, &p->pc_sel,
+		    PCIR_IOLIMIT1_2, 2));
+		range = 16;
+	}
+	print_window(PCIR_IOBASE1_2, "I/O Port", range, base, limit);
+}
+
+static void
 list_bridge(int fd, struct pci_conf *p)
 {
 
@@ -358,6 +409,7 @@ list_bridge(int fd, struct pci_conf *p)
 		break;
 	case PCIM_HDRTYPE_CARDBUS:
 		print_bus_range(fd, p, PCIR_SECBUS_2, PCIR_SUBBUS_2);
+		print_cardbus_windows(fd, p);
 		break;
 	}
 }

@@ -289,6 +289,9 @@
 #define	PCIR_IOLIMIT0_2	0x30
 #define	PCIR_IOBASE1_2	0x34
 #define	PCIR_IOLIMIT1_2	0x38
+#define	PCIM_CBBIO_16		0x0
+#define	PCIM_CBBIO_32		0x1
+#define	PCIM_CBBIO_MASK		0x3
 
 #define	PCIR_BRIDGECTL_2 0x3e
 
@@ -296,6 +299,11 @@
 #define	PCIR_SUBDEV_2	0x42
 
 #define	PCIR_PCCARDIF_2	0x44
+
+#define	PCI_CBBMEMBASE(l)  ((l) & ~0xfffff)
+#define	PCI_CBBMEMLIMIT(l) ((l) | 0xfffff)
+#define	PCI_CBBIOBASE(l)   ((l) & ~0x3)
+#define	PCI_CBBIOLIMIT(l)  ((l) | 0x3)
 
 /* PCI device class, subclass and programming interface definitions */
 
