@@ -107,19 +107,19 @@ main(int argc, char **argv)
 	listmode = readmode = writemode = attachedmode = 0;
 	bars = bridge = caps = errors = verbose = vpd = byte = isshort = 0;
 
-	while ((c = getopt(argc, argv, "abBcehlrwvV")) != -1) {
+	while ((c = getopt(argc, argv, "aBbcehlrwVv")) != -1) {
 		switch(c) {
 		case 'a':
 			attachedmode = 1;
 			break;
 
+		case 'B':
+			bridge = 1;
+			break;
+
 		case 'b':
 			bars = 1;
 			byte = 1;
-			break;
-
-		case 'B':
-			bridge = 1;
 			break;
 
 		case 'c':
