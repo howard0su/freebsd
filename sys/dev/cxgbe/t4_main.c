@@ -3784,6 +3784,7 @@ vi_full_init(struct vi_info *vi)
 		return (0);
 	}
 #endif
+
 	/*
 	 * Setup RSS for this VI.  Save a copy of the RSS table for later use.
 	 */
@@ -8272,7 +8273,7 @@ set_sched_queue(struct adapter *sc, struct t4_sched_queue *p)
 		goto done;
 	}
 
-	/* XXX: VI */
+	/* XXX: Only supported for the main VI. */
 	pi = sc->port[p->port];
 	vi = &pi->vi[0];
 	if (!in_range(p->queue, 0, vi->ntxq - 1) || !in_range(p->cl, 0, 7)) {

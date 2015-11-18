@@ -248,19 +248,18 @@ struct vi_info {
 	int nofldrxq;		/* # of offload rx queues */
 	int first_ofld_rxq;	/* index of first offload rx queue */
 #endif
-
 	int tmr_idx;
 	int pktc_idx;
 	int qsize_rxq;
 	int qsize_txq;
 
-	struct sysctl_ctx_list ctx;	/* from ifconfig up to driver detach */
-
-	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
 	struct timeval last_refreshed;
 	struct fw_vi_stats_vf stats;
 
 	struct callout tick;
+	struct sysctl_ctx_list ctx;	/* from ifconfig up to driver detach */
+
+	uint8_t hw_addr[ETHER_ADDR_LEN]; /* factory MAC address, won't change */
 };
 
 struct port_info {
