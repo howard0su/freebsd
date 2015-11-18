@@ -8560,9 +8560,8 @@ t4_ioctl(struct cdev *dev, unsigned long cmd, caddr_t data, int fflag,
 		mtx_unlock(&sc->regwin_lock);
 
 		/*
-		 * Not sure if looping over all VIs is really ideal vs
-		 * having this command clear VI stats instead of port
-		 * stats.
+		 * Since this command accepts a port, clear stats for
+		 * all VIs on this port.
 		 */
 		for_each_vi(pi, v, vi) {
 			if (vi->flags & VI_INIT_DONE) {
