@@ -4728,6 +4728,19 @@ t4_get_vi_stats(struct adapter *sc, unsigned int viid,
 }
 
 static void
+t4_clr_vi_stats(struct adapter *sc, unsigned int viid)
+{
+	int reg;
+
+	t4_write_reg(sc, A_PL_INDIR_CMD, V_PL_AUTOINC(1) |
+	    V_PL_VFID(G_FW_VIID_VIN(viid)) |
+	    V_PL_ADDR(VF_MPS_REG(A_MPS_VF_STAT_TX_VF_BCAST_BYTES_L)));
+	for (reg = A_MPS_VF_STAT_TX_VF_BCAST_BYTES_L;
+	     reg <= A_MPS_VF_STAT_RX_VF_ERR_FRAMES_H; reg += 4)
+		t4_write_reg(sc, A_PL_INDIR_DATA, 0);
+}
+
+static void
 vi_refresh_stats(struct adapter *sc, struct vi_info *vi)
 {
 	struct timeval tv;
@@ -8539,6 +8552,12 @@ t4_ioctl(struct cdev *dev, unsigned long cmd, caddr_t data, int fflag,
 		/* MAC stats */
 		t4_clr_port_stats(sc, pi->tx_chan);
 		pi->tx_parse_error = 0;
+		mtx_lock(&sc->regwin_lock);
+		for_each_vi(pi, v, vi) {
+			if (vi->flags & VI_INIT_DONE)
+				t4_clr_vi_stats(sc, vi->viid);
+		}
+		mtx_unlock(&sc->regwin_lock);
 
 		/*
 		 * Not sure if looping over all VIs is really ideal vs
