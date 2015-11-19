@@ -1230,7 +1230,7 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 	struct l2t_entry *e = NULL;
 	int rscale, mtu_idx, rx_credits, rxqid, ulp_mode;
 	struct synq_entry *synqe = NULL;
-	int reject_reason;
+	int reject_reason, v;
 	uint16_t vid;
 #ifdef INVARIANTS
 	unsigned int opcode = G_CPL_OPCODE(be32toh(OPCODE_TID(cpl)));
@@ -1249,11 +1249,24 @@ do_pass_accept_req(struct sge_iq *iq, const struct rss_header *rss,
 	pi = sc->port[G_SYN_INTF(be16toh(cpl->l2info))];
 
 	/*
-	 * XXX: To support multiple VIs with TOE we would have to use the
-	 * mac_ix field to determine which VI received the SYN.
+	 * Use the MAC index to lookup the associated VI.  If this SYN
+	 * didn't match a perfect MAC filter, punt.
 	 */
-	vi = &pi->vi[0];
-	hw_ifp = vi->ifp;	/* the cxgbeX ifnet */
+	if (!(be16toh(cpl->l2info) & F_SYN_XACT_MATCH)) {
+		m_freem(m);
+		m = NULL;
+		REJECT_PASS_ACCEPT();
+	}
+	for_each_vi(pi, v, vi) {
+		if (vi->xact_addr_filt == G_SYN_MAC_IDX(be16toh(cpl->l2info)))
+			goto found;
+	}
+	m_freem(m);
+	m = NULL;
+	REJECT_PASS_ACCEPT();
+
+found:
+	hw_ifp = vi->ifp;	/* the (v)cxgbeX ifnet */
 	m->m_pkthdr.rcvif = hw_ifp;
 	tod = TOEDEV(hw_ifp);
 
