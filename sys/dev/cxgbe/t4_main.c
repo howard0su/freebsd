@@ -8675,8 +8675,14 @@ toe_capability(struct vi_info *vi, int enable)
 			if (rc)
 				return (rc);
 		}
-		if ((vi->ifp->if_capenable & IFCAP_TOE) == 0)
+		if ((vi->ifp->if_capenable & IFCAP_TOE) == 0) {
 			pi->uld_vis++;
+			CTR2(KTR_CXGBE, "%s: increasing uld_vis to %d",
+			    device_get_nameunit(vi->dev), pi->uld_vis);
+		} else
+			CTR2(KTR_CXGBE, "%s: TOE already enabled: %x",
+			    device_get_nameunit(vi->dev),
+			    vi->ifp->if_capenable & IFCAP_TOE);
 
 		if (isset(&sc->offload_map, pi->port_id))
 			return (0);
@@ -8702,9 +8708,13 @@ toe_capability(struct vi_info *vi, int enable)
 		if (!uld_active(sc, ULD_ISCSI))
 			(void) t4_activate_uld(sc, ULD_ISCSI);
 
+		CTR1(KTR_CXGBE, "%s: setting bit in offload_map",
+		    device_get_nameunit(pi->vi[0].dev));
 		setbit(&sc->offload_map, pi->port_id);
 	} else {
 		pi->uld_vis--;
+		CTR2(KTR_CXGBE, "%s: decreasing uld_vis to %d",
+		    device_get_nameunit(vi->dev), pi->uld_vis);
 
 		if (!isset(&sc->offload_map, pi->port_id) || pi->uld_vis > 0)
 			return (0);
@@ -8712,6 +8722,8 @@ toe_capability(struct vi_info *vi, int enable)
 		KASSERT(uld_active(sc, ULD_TOM),
 		    ("%s: TOM never initialized?", __func__));
 		clrbit(&sc->offload_map, pi->port_id);
+		CTR1(KTR_CXGBE, "%s: clearing bit in offload_map",
+		    device_get_nameunit(pi->vi[0].dev));
 	}
 
 	return (0);
