@@ -868,6 +868,10 @@ t4_attach(device_t dev)
 	if (is_offload(sc)) {
 		s->nofldrxq = n10g * iaq.nofldrxq10g + n1g * iaq.nofldrxq1g;
 		s->nofldtxq = n10g * iaq.nofldtxq10g + n1g * iaq.nofldtxq1g;
+		if (num_vis > 1) {
+			s->nofldrxq += (n10g + n1g) * (num_vis - 1);
+			s->nofldtxq += (n10g + n1g) * (num_vis - 1);
+		}
 		s->neq += s->nofldtxq + s->nofldrxq;
 		s->niq += s->nofldrxq;
 
@@ -963,21 +967,18 @@ t4_attach(device_t dev)
 			tqidx += vi->ntxq;
 
 #ifdef TCP_OFFLOAD
-			/* Offload is only enabled on the first VI. */
-			if (j != 0 || !is_offload(sc))
+			if (!is_offload(sc))
 				continue;
 			vi->first_ofld_rxq = ofld_rqidx;
 			vi->first_ofld_txq = ofld_tqidx;
 			if (is_10G_port(pi) || is_40G_port(pi)) {
-				vi->flags |= iaq.intr_flags_10g &
-				    INTR_OFLD_RXQ;
-				vi->nofldrxq = iaq.nofldrxq10g;
-				vi->nofldtxq = iaq.nofldtxq10g;
+				vi->flags |= iaq.intr_flags_10g & INTR_OFLD_RXQ;
+				vi->nofldrxq = j == 0 ? iaq.nofldrxq10g : 1;
+				vi->nofldtxq = j == 0 ? iaq.nofldtxq10g : 1;
 			} else {
-				vi->flags |= iaq.intr_flags_1g &
-				    INTR_OFLD_RXQ;
-				vi->nofldrxq = iaq.nofldrxq1g;
-				vi->nofldtxq = iaq.nofldtxq1g;
+				vi->flags |= iaq.intr_flags_1g & INTR_OFLD_RXQ;
+				vi->nofldrxq = j == 0 ? iaq.nofldrxq1g : 1;
+				vi->nofldtxq = j == 0 ? iaq.nofldtxq1g : 1;
 			}
 			ofld_rqidx += vi->nofldrxq;
 			ofld_tqidx += vi->nofldtxq;
@@ -2216,9 +2217,9 @@ restart:
 		 */
 		iaq->nirq = T4_EXTRA_INTR;
 		iaq->nirq += n10g * (nrxq10g + nofldrxq10g + nnmrxq10g);
-		iaq->nirq += n10g * (num_vis - 1);
+		iaq->nirq += n10g * 2 * (num_vis - 1);
 		iaq->nirq += n1g * (nrxq1g + nofldrxq1g + nnmrxq1g);
-		iaq->nirq += n1g * (num_vis - 1);
+		iaq->nirq += n1g * 2 * (num_vis - 1);
 		if (iaq->nirq <= navail &&
 		    (itype != INTR_MSI || powerof2(iaq->nirq))) {
 			iaq->intr_flags_10g = INTR_ALL;
@@ -8646,10 +8647,6 @@ t4_iscsi_init(struct ifnet *ifp, unsigned int tag_mask,
 		V_HPZ3(pgsz_order[3]));
 }
 
-/*
- * XXX: If we wanted to permit TOE on extra VIs we would need to
- * rework this somehow.
- */
 static int
 toe_capability(struct vi_info *vi, int enable)
 {
@@ -8673,6 +8670,13 @@ toe_capability(struct vi_info *vi, int enable)
 			if (rc)
 				return (rc);
 		}
+		if (!(pi->vi[0].flags & VI_INIT_DONE)) {
+			rc = cxgbe_init_synchronized(&pi->vi[0]);
+			if (rc)
+				return (rc);
+		}
+		if ((vi->ifp->if_capenable & IFCAP_TOE) == 0)
+			pi->uld_vis++;
 
 		if (isset(&sc->offload_map, pi->port_id))
 			return (0);
@@ -8700,7 +8704,9 @@ toe_capability(struct vi_info *vi, int enable)
 
 		setbit(&sc->offload_map, pi->port_id);
 	} else {
-		if (!isset(&sc->offload_map, pi->port_id))
+		pi->uld_vis--;
+
+		if (!isset(&sc->offload_map, pi->port_id) || pi->uld_vis > 0)
 			return (0);
 
 		KASSERT(uld_active(sc, ULD_TOM),

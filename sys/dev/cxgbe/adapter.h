@@ -269,6 +269,7 @@ struct port_info {
 	struct vi_info *vi;
 	int nvi;
 	int up_vis;
+	int uld_vis;
 
 	struct mtx pi_lock;
 	char lockname[16];

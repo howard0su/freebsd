@@ -963,7 +963,8 @@ t4_tom_activate(struct adapter *sc)
 {
 	struct tom_data *td;
 	struct toedev *tod;
-	int i, rc;
+	struct vi_info *vi;
+	int i, rc, v;
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 
@@ -1022,9 +1023,11 @@ t4_tom_activate(struct adapter *sc)
 	tod->tod_offload_socket = t4_offload_socket;
 	tod->tod_ctloutput = t4_ctloutput;
 
-	/* XXX: To support TOE on all VIs this would need to use for_each_vi. */
-	for_each_port(sc, i)
-		TOEDEV(sc->port[i]->vi[0].ifp) = &td->tod;
+	for_each_port(sc, i) {
+		for_each_vi(sc->port[i], v, vi) {
+			TOEDEV(vi->ifp) = &td->tod;
+		}
+	}
 
 	sc->tom_softc = td;
 	register_toedev(sc->tom_softc);
