@@ -44,6 +44,7 @@
 
 #include "opt_compat.h"
 #include "opt_ddb.h"
+#include "opt_kstack_pages.h"
 #include "opt_platform.h"
 #include "opt_sched.h"
 #include "opt_timer.h"
@@ -59,6 +60,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/bus.h>
 #include <sys/cons.h>
 #include <sys/cpu.h>
+#include <sys/efi.h>
 #include <sys/exec.h>
 #include <sys/imgact.h>
 #include <sys/kdb.h>
@@ -71,6 +73,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/pcpu.h>
 #include <sys/ptrace.h>
+#include <sys/reboot.h>
 #include <sys/rwlock.h>
 #include <sys/sched.h>
 #include <sys/signalvar.h>
@@ -87,10 +90,12 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
 
+#include <machine/acle-compat.h>
 #include <machine/armreg.h>
 #include <machine/atags.h>
 #include <machine/cpu.h>
 #include <machine/cpuinfo.h>
+#include <machine/db_machdep.h>
 #include <machine/devmap.h>
 #include <machine/frame.h>
 #include <machine/intr.h>
@@ -114,7 +119,57 @@ __FBSDID("$FreeBSD$");
 
 #ifdef DDB
 #include <ddb/ddb.h>
-#endif
+
+#if __ARM_ARCH >= 6
+#include <machine/cpu-v6.h>
+
+DB_SHOW_COMMAND(cp15, db_show_cp15)
+{
+	u_int reg;
+
+	reg = cp15_midr_get();
+	db_printf("Cpu ID: 0x%08x\n", reg);
+	reg = cp15_ctr_get();
+	db_printf("Current Cache Lvl ID: 0x%08x\n",reg);
+
+	reg = cp15_sctlr_get();
+	db_printf("Ctrl: 0x%08x\n",reg);
+	reg = cp15_actlr_get();
+	db_printf("Aux Ctrl: 0x%08x\n",reg);
+
+	reg = cp15_id_pfr0_get();
+	db_printf("Processor Feat 0: 0x%08x\n", reg);
+	reg = cp15_id_pfr1_get();
+	db_printf("Processor Feat 1: 0x%08x\n", reg);
+	reg = cp15_id_dfr0_get();
+	db_printf("Debug Feat 0: 0x%08x\n", reg);
+	reg = cp15_id_afr0_get();
+	db_printf("Auxiliary Feat 0: 0x%08x\n", reg);
+	reg = cp15_id_mmfr0_get();
+	db_printf("Memory Model Feat 0: 0x%08x\n", reg);
+	reg = cp15_id_mmfr1_get();
+	db_printf("Memory Model Feat 1: 0x%08x\n", reg);
+	reg = cp15_id_mmfr2_get();
+	db_printf("Memory Model Feat 2: 0x%08x\n", reg);
+	reg = cp15_id_mmfr3_get();
+	db_printf("Memory Model Feat 3: 0x%08x\n", reg);
+	reg = cp15_ttbr_get();
+	db_printf("TTB0: 0x%08x\n", reg);
+}
+
+DB_SHOW_COMMAND(vtop, db_show_vtop)
+{
+	u_int reg;
+
+	if (have_addr) {
+		cp15_ats1cpr_set(addr);
+		reg = cp15_par_get();
+		db_printf("Physical address reg: 0x%08x\n",reg);
+	} else
+		db_printf("show vtop <virt_addr>\n");
+}
+#endif /* __ARM_ARCH >= 6 */
+#endif /* DDB */
 
 #ifdef DEBUG
 #define	debugf(fmt, args...) printf(fmt, ##args)
@@ -194,7 +249,7 @@ void
 board_set_serial(uint64_t serial)
 {
 
-	snprintf(board_serial, sizeof(board_serial)-1, 
+	snprintf(board_serial, sizeof(board_serial)-1,
 		    "%016jx", serial);
 }
 
@@ -246,7 +301,7 @@ sendsig(catcher, ksi, mask)
 
 	/* make room on the stack */
 	fp--;
-	
+
 	/* make the stack aligned */
 	fp = (struct sigframe *)STACKALIGN(fp);
 	/* Populate the siginfo frame. */
@@ -267,17 +322,13 @@ sendsig(catcher, ksi, mask)
 		sigexit(td, SIGILL);
 	}
 
-	/* Translate the signal if appropriate. */
-	if (p->p_sysent->sv_sigtbl && sig <= p->p_sysent->sv_sigsize)
-		sig = p->p_sysent->sv_sigtbl[_SIG_IDX(sig)];
-
 	/*
 	 * Build context to run handler in.  We invoke the handler
 	 * directly, only returning via the trampoline.  Note the
 	 * trampoline version numbers are coordinated with machine-
 	 * dependent code in libc.
 	 */
-	
+
 	tf->tf_r0 = sig;
 	tf->tf_r1 = (register_t)&fp->sf_si;
 	tf->tf_r2 = (register_t)&fp->sf_uc;
@@ -287,6 +338,13 @@ sendsig(catcher, ksi, mask)
 	tf->tf_pc = (register_t)catcher;
 	tf->tf_usr_sp = (register_t)fp;
 	tf->tf_usr_lr = (register_t)(PS_STRINGS - *(p->p_sysent->sv_szsigcode));
+	/* Set the mode to enter in the signal handler */
+#if __ARM_ARCH >= 7
+	if ((register_t)catcher & 1)
+		tf->tf_spsr |= PSR_T;
+	else
+		tf->tf_spsr &= ~PSR_T;
+#endif
 
 	CTR3(KTR_SIG, "sendsig: return td=%p pc=%#x sp=%#x", td, tf->tf_usr_lr,
 	    tf->tf_usr_sp);
@@ -372,7 +430,7 @@ cpu_startup(void *dummy)
 	/*
 	 * Display the RAM layout.
 	 */
-	printf("real memory  = %ju (%ju MB)\n", 
+	printf("real memory  = %ju (%ju MB)\n",
 	    (uintmax_t)arm32_ptob(realmem),
 	    (uintmax_t)arm32_ptob(realmem) / mbyte);
 	printf("avail memory = %ju (%ju MB)\n",
@@ -434,7 +492,7 @@ cpu_est_clockrate(int cpu_id, uint64_t *rate)
 void
 cpu_idle(int busy)
 {
-	
+
 	CTR2(KTR_SPARE2, "cpu_idle(%d) at %d", busy, curcpu);
 	spinlock_enter();
 #ifndef NO_EVENTTIMERS
@@ -504,14 +562,14 @@ int
 set_regs(struct thread *td, struct reg *regs)
 {
 	struct trapframe *tf = td->td_frame;
-	
+
 	bcopy(regs->r, &tf->tf_r0, sizeof(regs->r));
 	tf->tf_usr_sp = regs->r_sp;
 	tf->tf_usr_lr = regs->r_lr;
 	tf->tf_pc = regs->r_pc;
 	tf->tf_spsr &=  ~PSR_FLAGS;
 	tf->tf_spsr |= regs->r_cpsr & PSR_FLAGS;
-	return (0);								
+	return (0);
 }
 
 int
@@ -570,28 +628,130 @@ ptrace_write_int(struct thread *td, vm_offset_t addr, u_int32_t v)
 	return proc_rwmem(td->td_proc, &uio);
 }
 
+static u_int
+ptrace_get_usr_reg(void *cookie, int reg)
+{
+	int ret;
+	struct thread *td = cookie;
+
+	KASSERT(((reg >= 0) && (reg <= ARM_REG_NUM_PC)),
+	 ("reg is outside range"));
+
+	switch(reg) {
+	case ARM_REG_NUM_PC:
+		ret = td->td_frame->tf_pc;
+		break;
+	case ARM_REG_NUM_LR:
+		ret = td->td_frame->tf_usr_lr;
+		break;
+	case ARM_REG_NUM_SP:
+		ret = td->td_frame->tf_usr_sp;
+		break;
+	default:
+		ret = *((register_t*)&td->td_frame->tf_r0 + reg);
+		break;
+	}
+
+	return (ret);
+}
+
+static u_int
+ptrace_get_usr_int(void* cookie, vm_offset_t offset, u_int* val)
+{
+	struct thread *td = cookie;
+	u_int error;
+
+	error = ptrace_read_int(td, offset, val);
+
+	return (error);
+}
+
+/**
+ * This function parses current instruction opcode and decodes
+ * any possible jump (change in PC) which might occur after
+ * the instruction is executed.
+ *
+ * @param     td                Thread structure of analysed task
+ * @param     cur_instr         Currently executed instruction
+ * @param     alt_next_address  Pointer to the variable where
+ *                              the destination address of the
+ *                              jump instruction shall be stored.
+ *
+ * @return    <0>               when jump is possible
+ *            <EINVAL>          otherwise
+ */
+static int
+ptrace_get_alternative_next(struct thread *td, uint32_t cur_instr,
+    uint32_t *alt_next_address)
+{
+	int error;
+
+	if (inst_branch(cur_instr) || inst_call(cur_instr) ||
+	    inst_return(cur_instr)) {
+		error = arm_predict_branch(td, cur_instr, td->td_frame->tf_pc,
+		    alt_next_address, ptrace_get_usr_reg, ptrace_get_usr_int);
+
+		return (error);
+	}
+
+	return (EINVAL);
+}
+
 int
 ptrace_single_step(struct thread *td)
 {
 	struct proc *p;
-	int error;
-	
+	int error, error_alt;
+	uint32_t cur_instr, alt_next = 0;
+
+	/* TODO: This needs to be updated for Thumb-2 */
+	if ((td->td_frame->tf_spsr & PSR_T) != 0)
+		return (EINVAL);
+
 	KASSERT(td->td_md.md_ptrace_instr == 0,
 	 ("Didn't clear single step"));
+	KASSERT(td->td_md.md_ptrace_instr_alt == 0,
+	 ("Didn't clear alternative single step"));
 	p = td->td_proc;
 	PROC_UNLOCK(p);
-	error = ptrace_read_int(td, td->td_frame->tf_pc + 4,
-	    &td->td_md.md_ptrace_instr);
+
+	error = ptrace_read_int(td, td->td_frame->tf_pc,
+	    &cur_instr);
 	if (error)
 		goto out;
-	error = ptrace_write_int(td, td->td_frame->tf_pc + 4,
-	    PTRACE_BREAKPOINT);
-	if (error)
-		td->td_md.md_ptrace_instr = 0;
-	td->td_md.md_ptrace_addr = td->td_frame->tf_pc + 4;
+
+	error = ptrace_read_int(td, td->td_frame->tf_pc + INSN_SIZE,
+	    &td->td_md.md_ptrace_instr);
+	if (error == 0) {
+		error = ptrace_write_int(td, td->td_frame->tf_pc + INSN_SIZE,
+		    PTRACE_BREAKPOINT);
+		if (error) {
+			td->td_md.md_ptrace_instr = 0;
+		} else {
+			td->td_md.md_ptrace_addr = td->td_frame->tf_pc +
+			    INSN_SIZE;
+		}
+	}
+
+	error_alt = ptrace_get_alternative_next(td, cur_instr, &alt_next);
+	if (error_alt == 0) {
+		error_alt = ptrace_read_int(td, alt_next,
+		    &td->td_md.md_ptrace_instr_alt);
+		if (error_alt) {
+			td->td_md.md_ptrace_instr_alt = 0;
+		} else {
+			error_alt = ptrace_write_int(td, alt_next,
+			    PTRACE_BREAKPOINT);
+			if (error_alt)
+				td->td_md.md_ptrace_instr_alt = 0;
+			else
+				td->td_md.md_ptrace_addr_alt = alt_next;
+		}
+	}
+
 out:
 	PROC_LOCK(p);
-	return (error);
+	return ((error != 0) && (error_alt != 0));
 }
 
 int
@@ -599,7 +759,11 @@ ptrace_clear_single_step(struct thread *td)
 {
 	struct proc *p;
 
-	if (td->td_md.md_ptrace_instr) {
+	/* TODO: This needs to be updated for Thumb-2 */
+	if ((td->td_frame->tf_spsr & PSR_T) != 0)
+		return (EINVAL);
+
+	if (td->td_md.md_ptrace_instr != 0) {
 		p = td->td_proc;
 		PROC_UNLOCK(p);
 		ptrace_write_int(td, td->td_md.md_ptrace_addr,
@@ -607,6 +771,16 @@ ptrace_clear_single_step(struct thread *td)
 		PROC_LOCK(p);
 		td->td_md.md_ptrace_instr = 0;
 	}
+
+	if (td->td_md.md_ptrace_instr_alt != 0) {
+		p = td->td_proc;
+		PROC_UNLOCK(p);
+		ptrace_write_int(td, td->td_md.md_ptrace_addr_alt,
+		    td->td_md.md_ptrace_instr_alt);
+		PROC_LOCK(p);
+		td->td_md.md_ptrace_instr_alt = 0;
+	}
+
 	return (0);
 }
 
@@ -677,10 +851,13 @@ get_mcontext(struct thread *td, mcontext_t *mcp, int clear_ret)
 	struct trapframe *tf = td->td_frame;
 	__greg_t *gr = mcp->__gregs;
 
-	if (clear_ret & GET_MC_CLEAR_RET)
+	if (clear_ret & GET_MC_CLEAR_RET) {
 		gr[_REG_R0] = 0;
-	else
+		gr[_REG_CPSR] = tf->tf_spsr & ~PSR_C;
+	} else {
 		gr[_REG_R0]   = tf->tf_r0;
+		gr[_REG_CPSR] = tf->tf_spsr;
+	}
 	gr[_REG_R1]   = tf->tf_r1;
 	gr[_REG_R2]   = tf->tf_r2;
 	gr[_REG_R3]   = tf->tf_r3;
@@ -696,7 +873,6 @@ get_mcontext(struct thread *td, mcontext_t *mcp, int clear_ret)
 	gr[_REG_SP]   = tf->tf_usr_sp;
 	gr[_REG_LR]   = tf->tf_usr_lr;
 	gr[_REG_PC]   = tf->tf_pc;
-	gr[_REG_CPSR] = tf->tf_spsr;
 
 	return (0);
 }
@@ -746,7 +922,7 @@ sys_sigreturn(td, uap)
 {
 	ucontext_t uc;
 	int spsr;
-	
+
 	if (uap == NULL)
 		return (EFAULT);
 	if (copyin(uap->sigcntxp, &uc, sizeof(uc)))
@@ -845,14 +1021,11 @@ fake_preload_metadata(struct arm_boot_params *abp __unused)
 void
 pcpu0_init(void)
 {
-#if ARM_ARCH_6 || ARM_ARCH_7A || defined(CPU_MV_PJ4B)
+#if __ARM_ARCH >= 6
 	set_curthread(&thread0);
 #endif
 	pcpu_init(pcpup, 0, sizeof(struct pcpu));
 	PCPU_SET(curthread, &thread0);
-#ifdef VFP
-	PCPU_SET(cpu, 0);
-#endif
 }
 
 #if defined(LINUX_BOOT_ABI)
@@ -953,7 +1126,6 @@ freebsd_parse_boot_param(struct arm_boot_params *abp)
 	ksym_end = MD_FETCH(kmdp, MODINFOMD_ESYM, uintptr_t);
 	db_fetch_ksymtab(ksym_start, ksym_end);
 #endif
-	preload_addr_relocate = KERNVIRTADDR - abp->abp_physaddr;
 	return lastaddr;
 }
 #endif
@@ -1003,12 +1175,117 @@ init_proc0(vm_offset_t kstack)
 	proc_linkup0(&proc0, &thread0);
 	thread0.td_kstack = kstack;
 	thread0.td_pcb = (struct pcb *)
-		(thread0.td_kstack + KSTACK_PAGES * PAGE_SIZE) - 1;
+		(thread0.td_kstack + kstack_pages * PAGE_SIZE) - 1;
 	thread0.td_pcb->pcb_flags = 0;
 	thread0.td_pcb->pcb_vfpcpu = -1;
-	thread0.td_pcb->pcb_vfpstate.fpscr = VFPSCR_DN | VFPSCR_FZ;
+	thread0.td_pcb->pcb_vfpstate.fpscr = VFPSCR_DN;
 	thread0.td_frame = &proc0_tf;
 	pcpup->pc_curpcb = thread0.td_pcb;
+}
+
+int
+arm_predict_branch(void *cookie, u_int insn, register_t pc, register_t *new_pc,
+    u_int (*fetch_reg)(void*, int), u_int (*read_int)(void*, vm_offset_t, u_int*))
+{
+	u_int addr, nregs, offset = 0;
+	int error = 0;
+
+	switch ((insn >> 24) & 0xf) {
+	case 0x2:	/* add pc, reg1, #value */
+	case 0x0:	/* add pc, reg1, reg2, lsl #offset */
+		addr = fetch_reg(cookie, (insn >> 16) & 0xf);
+		if (((insn >> 16) & 0xf) == 15)
+			addr += 8;
+		if (insn & 0x0200000) {
+			offset = (insn >> 7) & 0x1e;
+			offset = (insn & 0xff) << (32 - offset) |
+			    (insn & 0xff) >> offset;
+		} else {
+
+			offset = fetch_reg(cookie, insn & 0x0f);
+			if ((insn & 0x0000ff0) != 0x00000000) {
+				if (insn & 0x10)
+					nregs = fetch_reg(cookie,
+					    (insn >> 8) & 0xf);
+				else
+					nregs = (insn >> 7) & 0x1f;
+				switch ((insn >> 5) & 3) {
+				case 0:
+					/* lsl */
+					offset = offset << nregs;
+					break;
+				case 1:
+					/* lsr */
+					offset = offset >> nregs;
+					break;
+				default:
+					break; /* XXX */
+				}
+
+			}
+			*new_pc = addr + offset;
+			return (0);
+
+		}
+
+	case 0xa:	/* b ... */
+	case 0xb:	/* bl ... */
+		addr = ((insn << 2) & 0x03ffffff);
+		if (addr & 0x02000000)
+			addr |= 0xfc000000;
+		*new_pc = (pc + 8 + addr);
+		return (0);
+	case 0x7:	/* ldr pc, [pc, reg, lsl #2] */
+		addr = fetch_reg(cookie, insn & 0xf);
+		addr = pc + 8 + (addr << 2);
+		error = read_int(cookie, addr, &addr);
+		*new_pc = addr;
+		return (error);
+	case 0x1:	/* mov pc, reg */
+		*new_pc = fetch_reg(cookie, insn & 0xf);
+		return (0);
+	case 0x4:
+	case 0x5:	/* ldr pc, [reg] */
+		addr = fetch_reg(cookie, (insn >> 16) & 0xf);
+		/* ldr pc, [reg, #offset] */
+		if (insn & (1 << 24))
+			offset = insn & 0xfff;
+		if (insn & 0x00800000)
+			addr += offset;
+		else
+			addr -= offset;
+		error = read_int(cookie, addr, &addr);
+		*new_pc = addr;
+
+		return (error);
+	case 0x8:	/* ldmxx reg, {..., pc} */
+	case 0x9:
+		addr = fetch_reg(cookie, (insn >> 16) & 0xf);
+		nregs = (insn  & 0x5555) + ((insn  >> 1) & 0x5555);
+		nregs = (nregs & 0x3333) + ((nregs >> 2) & 0x3333);
+		nregs = (nregs + (nregs >> 4)) & 0x0f0f;
+		nregs = (nregs + (nregs >> 8)) & 0x001f;
+		switch ((insn >> 23) & 0x3) {
+		case 0x0:	/* ldmda */
+			addr = addr - 0;
+			break;
+		case 0x1:	/* ldmia */
+			addr = addr + 0 + ((nregs - 1) << 2);
+			break;
+		case 0x2:	/* ldmdb */
+			addr = addr - 4;
+			break;
+		case 0x3:	/* ldmib */
+			addr = addr + 4 + ((nregs - 1) << 2);
+			break;
+		}
+		error = read_int(cookie, addr, &addr);
+		*new_pc = addr;
+
+		return (error);
+	default:
+		return (EINVAL);
+	}
 }
 
 #ifdef ARM_NEW_PMAP
@@ -1037,6 +1314,113 @@ set_stackptrs(int cpu)
 }
 #endif
 
+#ifdef EFI
+#define efi_next_descriptor(ptr, size) \
+	((struct efi_md *)(((uint8_t *) ptr) + size))
+
+static void
+add_efi_map_entries(struct efi_map_header *efihdr, struct mem_region *mr,
+    int *mrcnt, uint32_t *memsize)
+{
+	struct efi_md *map, *p;
+	const char *type;
+	size_t efisz, memory_size;
+	int ndesc, i, j;
+
+	static const char *types[] = {
+		"Reserved",
+		"LoaderCode",
+		"LoaderData",
+		"BootServicesCode",
+		"BootServicesData",
+		"RuntimeServicesCode",
+		"RuntimeServicesData",
+		"ConventionalMemory",
+		"UnusableMemory",
+		"ACPIReclaimMemory",
+		"ACPIMemoryNVS",
+		"MemoryMappedIO",
+		"MemoryMappedIOPortSpace",
+		"PalCode"
+	};
+
+	*mrcnt = 0;
+	*memsize = 0;
+
+	/*
+	 * Memory map data provided by UEFI via the GetMemoryMap
+	 * Boot Services API.
+	 */
+	efisz = roundup2(sizeof(struct efi_map_header), 0x10);
+	map = (struct efi_md *)((uint8_t *)efihdr + efisz);
+
+	if (efihdr->descriptor_size == 0)
+		return;
+	ndesc = efihdr->memory_size / efihdr->descriptor_size;
+
+	if (boothowto & RB_VERBOSE)
+		printf("%23s %12s %12s %8s %4s\n",
+		    "Type", "Physical", "Virtual", "#Pages", "Attr");
+
+	memory_size = 0;
+	for (i = 0, j = 0, p = map; i < ndesc; i++,
+	    p = efi_next_descriptor(p, efihdr->descriptor_size)) {
+		if (boothowto & RB_VERBOSE) {
+			if (p->md_type <= EFI_MD_TYPE_PALCODE)
+				type = types[p->md_type];
+			else
+				type = "<INVALID>";
+			printf("%23s %012llx %12p %08llx ", type, p->md_phys,
+			    p->md_virt, p->md_pages);
+			if (p->md_attr & EFI_MD_ATTR_UC)
+				printf("UC ");
+			if (p->md_attr & EFI_MD_ATTR_WC)
+				printf("WC ");
+			if (p->md_attr & EFI_MD_ATTR_WT)
+				printf("WT ");
+			if (p->md_attr & EFI_MD_ATTR_WB)
+				printf("WB ");
+			if (p->md_attr & EFI_MD_ATTR_UCE)
+				printf("UCE ");
+			if (p->md_attr & EFI_MD_ATTR_WP)
+				printf("WP ");
+			if (p->md_attr & EFI_MD_ATTR_RP)
+				printf("RP ");
+			if (p->md_attr & EFI_MD_ATTR_XP)
+				printf("XP ");
+			if (p->md_attr & EFI_MD_ATTR_RT)
+				printf("RUNTIME");
+			printf("\n");
+		}
+
+		switch (p->md_type) {
+		case EFI_MD_TYPE_CODE:
+		case EFI_MD_TYPE_DATA:
+		case EFI_MD_TYPE_BS_CODE:
+		case EFI_MD_TYPE_BS_DATA:
+		case EFI_MD_TYPE_FREE:
+			/*
+			 * We're allowed to use any entry with these types.
+			 */
+			break;
+		default:
+			continue;
+		}
+
+		j++;
+		if (j >= FDT_MEM_REGIONS)
+			break;
+
+		mr[j].mr_start = p->md_phys;
+		mr[j].mr_size = p->md_pages * PAGE_SIZE;
+		memory_size += mr[j].mr_size;
+	}
+
+	*mrcnt = j;
+	*memsize = memory_size;
+}
+#endif /* EFI */
+
 #ifdef FDT
 static char *
 kenv_next(char *cp)
@@ -1055,7 +1439,6 @@ kenv_next(char *cp)
 static void
 print_kenv(void)
 {
-	int len;
 	char *cp;
 
 	debugf("loader passed (static) kenv:\n");
@@ -1065,7 +1448,6 @@ print_kenv(void)
 	}
 	debugf(" kern_envp = 0x%08x\n", (uint32_t)kern_envp);
 
-	len = 0;
 	for (cp = kern_envp; cp != NULL; cp = kenv_next(cp))
 		debugf(" %x %s\n", (uint32_t)cp, cp);
 }
@@ -1123,7 +1505,7 @@ initarm(struct arm_boot_params *abp)
 
 	/* Grab reserved memory regions information from device tree. */
 	if (fdt_get_reserved_regions(mem_regions, &mem_regions_sz) == 0)
-		arm_physmem_exclude_regions(mem_regions, mem_regions_sz, 
+		arm_physmem_exclude_regions(mem_regions, mem_regions_sz,
 		    EXFLAG_NODUMP | EXFLAG_NOALLOC);
 
 	/* Platform-specific initialisation */
@@ -1192,7 +1574,7 @@ initarm(struct arm_boot_params *abp)
 	valloc_pages(irqstack, IRQ_STACK_SIZE * MAXCPU);
 	valloc_pages(abtstack, ABT_STACK_SIZE * MAXCPU);
 	valloc_pages(undstack, UND_STACK_SIZE * MAXCPU);
-	valloc_pages(kernelstack, KSTACK_PAGES * MAXCPU);
+	valloc_pages(kernelstack, kstack_pages * MAXCPU);
 	valloc_pages(msgbufpv, round_page(msgbufsize) / PAGE_SIZE);
 
 	/*
@@ -1329,7 +1711,7 @@ initarm(struct arm_boot_params *abp)
 	 *
 	 * Prepare the list of physical memory available to the vm subsystem.
 	 */
-	arm_physmem_exclude_region(abp->abp_physaddr, 
+	arm_physmem_exclude_region(abp->abp_physaddr,
 	    (virtual_avail - KERNVIRTADDR), EXFLAG_NOALLOC);
 	arm_physmem_init_kernel_globals();
 
@@ -1350,6 +1732,9 @@ initarm(struct arm_boot_params *abp)
 	char *env;
 	void *kmdp;
 	int err_devmap, mem_regions_sz;
+#ifdef EFI
+	struct efi_map_header *efihdr;
+#endif
 
 	/* get last allocated physical address */
 	arm_physmem_kernaddr = abp->abp_physaddr;
@@ -1363,10 +1748,7 @@ initarm(struct arm_boot_params *abp)
 	 * Find the dtb passed in by the boot loader.
 	 */
 	kmdp = preload_search_by_type("elf kernel");
-	if (kmdp != NULL)
-		dtbp = MD_FETCH(kmdp, MODINFOMD_DTBP, vm_offset_t);
-	else
-		dtbp = (vm_offset_t)NULL;
+	dtbp = MD_FETCH(kmdp, MODINFOMD_DTBP, vm_offset_t);
 #if defined(FDT_DTB_STATIC)
 	/*
 	 * In case the device tree blob was not retrieved (from metadata) try
@@ -1382,9 +1764,20 @@ initarm(struct arm_boot_params *abp)
 	if (OF_init((void *)dtbp) != 0)
 		panic("OF_init failed with the found device tree");
 
-	/* Grab physical memory regions information from device tree. */
-	if (fdt_get_mem_regions(mem_regions, &mem_regions_sz, &memsize) != 0)
-		panic("Cannot get physical memory regions");
+#ifdef EFI
+	efihdr = (struct efi_map_header *)preload_search_info(kmdp,
+	    MODINFO_METADATA | MODINFOMD_EFI_MAP);
+	if (efihdr != NULL) {
+		add_efi_map_entries(efihdr, mem_regions, &mem_regions_sz,
+		   &memsize);
+	} else
+#endif
+	{
+		/* Grab physical memory regions information from device tree. */
+		if (fdt_get_mem_regions(mem_regions, &mem_regions_sz,
+		    &memsize) != 0)
+			panic("Cannot get physical memory regions");
+	}
 	arm_physmem_hardware_regions(mem_regions, mem_regions_sz);
 
 	/* Grab reserved memory regions information from device tree. */
@@ -1432,7 +1825,7 @@ initarm(struct arm_boot_params *abp)
 	irqstack    = pmap_preboot_get_vpages(IRQ_STACK_SIZE * MAXCPU);
 	abtstack    = pmap_preboot_get_vpages(ABT_STACK_SIZE * MAXCPU);
 	undstack    = pmap_preboot_get_vpages(UND_STACK_SIZE * MAXCPU );
-	kernelstack = pmap_preboot_get_vpages(KSTACK_PAGES * MAXCPU);
+	kernelstack = pmap_preboot_get_vpages(kstack_pages * MAXCPU);
 
 	/* Allocate message buffer. */
 	msgbufp = (void *)pmap_preboot_get_vpages(

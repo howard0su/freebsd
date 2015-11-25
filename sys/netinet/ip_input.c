@@ -49,6 +49,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
+#include <sys/rmlock.h>
 #include <sys/rwlock.h>
 #include <sys/sdt.h>
 #include <sys/syslog.h>
@@ -78,6 +79,8 @@ __FBSDID("$FreeBSD$");
 #include <netinet/ip_carp.h>
 #ifdef IPSEC
 #include <netinet/ip_ipsec.h>
+#include <netipsec/ipsec.h>
+#include <netipsec/key.h>
 #endif /* IPSEC */
 #include <netinet/in_rss.h>
 
@@ -90,15 +93,15 @@ CTASSERT(sizeof(struct ip) == 20);
 #endif
 
 /* IP reassembly functions are defined in ip_reass.c. */
-extern void ipreass_init();
-extern void ipreass_drain();
-extern void ipreass_slowtimo();
+extern void ipreass_init(void);
+extern void ipreass_drain(void);
+extern void ipreass_slowtimo(void);
 #ifdef VIMAGE
-extern void ipreass_destroy();
+extern void ipreass_destroy(void);
 #endif
 
-struct	rwlock in_ifaddr_lock;
-RW_SYSINIT(in_ifaddr_lock, &in_ifaddr_lock, "in_ifaddr_lock");
+struct rmlock in_ifaddr_lock;
+RM_SYSINIT(in_ifaddr_lock, &in_ifaddr_lock, "in_ifaddr_lock");
 
 VNET_DEFINE(int, rsvp_on);
 
@@ -139,7 +142,7 @@ static struct netisr_handler ip_nh = {
 	.nh_handler = ip_input,
 	.nh_proto = NETISR_IP,
 #ifdef	RSS
-	.nh_m2cpuid = rss_soft_m2cpuid,
+	.nh_m2cpuid = rss_soft_m2cpuid_v4,
 	.nh_policy = NETISR_POLICY_CPU,
 	.nh_dispatch = NETISR_DISPATCH_HYBRID,
 #else
@@ -159,7 +162,7 @@ static struct netisr_handler ip_direct_nh = {
 	.nh_name = "ip_direct",
 	.nh_handler = ip_direct_input,
 	.nh_proto = NETISR_IP_DIRECT,
-	.nh_m2cpuid = rss_m2cpuid,
+	.nh_m2cpuid = rss_soft_m2cpuid_v4,
 	.nh_policy = NETISR_POLICY_CPU,
 	.nh_dispatch = NETISR_DISPATCH_HYBRID,
 };
@@ -499,12 +502,22 @@ tooshort:
 			m_adj(m, ip_len - m->m_pkthdr.len);
 	}
 
+	/* Try to forward the packet, but if we fail continue */
 #ifdef IPSEC
+	/* For now we do not handle IPSEC in tryforward. */
+	if (!key_havesp(IPSEC_DIR_INBOUND) && !key_havesp(IPSEC_DIR_OUTBOUND) &&
+	    (V_ipforwarding == 1))
+		if (ip_tryforward(m) == NULL)
+			return;
 	/*
 	 * Bypass packet filtering for packets previously handled by IPsec.
 	 */
 	if (ip_ipsec_filtertunnel(m))
 		goto passin;
+#else
+	if (V_ipforwarding == 1)
+		if (ip_tryforward(m) == NULL)
+			return;
 #endif /* IPSEC */
 
 	/*
@@ -897,6 +910,7 @@ ip_forward(struct mbuf *m, int srcrt)
 	struct ip *ip = mtod(m, struct ip *);
 	struct in_ifaddr *ia;
 	struct mbuf *mcopy;
+	struct sockaddr_in *sin;
 	struct in_addr dest;
 	struct route ro;
 	int error, type = 0, code = 0, mtu = 0;
@@ -925,7 +939,23 @@ ip_forward(struct mbuf *m, int srcrt)
 	}
 #endif
 
-	ia = ip_rtaddr(ip->ip_dst, M_GETFIB(m));
+	bzero(&ro, sizeof(ro));
+	sin = (struct sockaddr_in *)&ro.ro_dst;
+	sin->sin_family = AF_INET;
+	sin->sin_len = sizeof(*sin);
+	sin->sin_addr = ip->ip_dst;
+#ifdef RADIX_MPATH
+	rtalloc_mpath_fib(&ro,
+	    ntohl(ip->ip_src.s_addr ^ ip->ip_dst.s_addr),
+	    M_GETFIB(m));
+#else
+	in_rtalloc_ign(&ro, 0, M_GETFIB(m));
+#endif
+	if (ro.ro_rt != NULL) {
+		ia = ifatoia(ro.ro_rt->rt_ifa);
+		ifa_ref(&ia->ia_ifa);
+	} else
+		ia = NULL;
 #ifndef IPSEC
 	/*
 	 * 'ia' may be NULL if there is no route for this destination.
@@ -934,6 +964,7 @@ ip_forward(struct mbuf *m, int srcrt)
 	 */
 	if (!srcrt && ia == NULL) {
 		icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, 0, 0);
+		RO_RTFREE(&ro);
 		return;
 	}
 #endif
@@ -990,15 +1021,7 @@ ip_forward(struct mbuf *m, int srcrt)
 	dest.s_addr = 0;
 	if (!srcrt && V_ipsendredirects &&
 	    ia != NULL && ia->ia_ifp == m->m_pkthdr.rcvif) {
-		struct sockaddr_in *sin;
 		struct rtentry *rt;
-
-		bzero(&ro, sizeof(ro));
-		sin = (struct sockaddr_in *)&ro.ro_dst;
-		sin->sin_family = AF_INET;
-		sin->sin_len = sizeof(*sin);
-		sin->sin_addr = ip->ip_dst;
-		in_rtalloc_ign(&ro, 0, M_GETFIB(m));
 
 		rt = ro.ro_rt;
 
@@ -1018,15 +1041,7 @@ ip_forward(struct mbuf *m, int srcrt)
 				code = ICMP_REDIRECT_HOST;
 			}
 		}
-		if (rt)
-			RTFREE(rt);
 	}
-
-	/*
-	 * Try to cache the route MTU from ip_output so we can consider it for
-	 * the ICMP_UNREACH_NEEDFRAG "Next-Hop MTU" field described in RFC1191.
-	 */
-	bzero(&ro, sizeof(ro));
 
 	error = ip_output(m, NULL, &ro, IP_FORWARDING, NULL, NULL);
 

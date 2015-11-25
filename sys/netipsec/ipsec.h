@@ -92,6 +92,7 @@ struct secpolicy {
 	u_int state;
 #define	IPSEC_SPSTATE_DEAD	0
 #define	IPSEC_SPSTATE_ALIVE	1
+	u_int32_t priority;		/* priority of this policy */
 	u_int32_t id;			/* It's unique number on the system. */
 	/*
 	 * lifetime handler.
@@ -309,7 +310,6 @@ struct inpcb;
 extern int ipsec_init_policy(struct socket *so, struct inpcbpolicy **);
 extern int ipsec_copy_policy(struct inpcbpolicy *, struct inpcbpolicy *);
 extern u_int ipsec_get_reqlevel(struct ipsecrequest *);
-extern int ipsec_in_reject(struct secpolicy *, struct mbuf *);
 
 extern int ipsec_set_policy(struct inpcb *inp, int optname,
 	caddr_t request, size_t len, struct ucred *cred);
@@ -327,8 +327,8 @@ extern size_t ipsec_hdrsiz(struct mbuf *, u_int, struct inpcb *);
 extern size_t ipsec_hdrsiz_tcp(struct tcpcb *);
 
 union sockaddr_union;
-extern char * ipsec_address(union sockaddr_union* sa);
-extern const char *ipsec_logsastr(struct secasvar *);
+extern char *ipsec_address(union sockaddr_union *, char *, socklen_t);
+extern char *ipsec_logsastr(struct secasvar *, char *, size_t);
 
 extern void ipsec_dumpmbuf(struct mbuf *);
 
@@ -338,7 +338,7 @@ extern void ah4_ctlinput(int cmd, struct sockaddr *sa, void *);
 extern int esp4_input(struct mbuf **mp, int *offp, int proto);
 extern void esp4_ctlinput(int cmd, struct sockaddr *sa, void *);
 extern int ipcomp4_input(struct mbuf **mp, int *offp, int proto);
-extern int ipsec4_common_input(struct mbuf *m, ...);
+extern int ipsec_common_input(struct mbuf *m, int, int, int, int); 
 extern int ipsec4_common_input_cb(struct mbuf *m, struct secasvar *sav,
 			int skip, int protoff);
 extern int ipsec4_process_packet(struct mbuf *, struct ipsecrequest *);

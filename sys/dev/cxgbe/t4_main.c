@@ -30,6 +30,7 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
+#include "opt_rss.h"
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -55,6 +56,9 @@ __FBSDID("$FreeBSD$");
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/if_vlan_var.h>
+#ifdef RSS
+#include <net/rss_config.h>
+#endif
 #if defined(__i386__) || defined(__amd64__)
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -606,6 +610,33 @@ t5_probe(device_t dev)
 	return (ENXIO);
 }
 
+static void
+t5_attribute_workaround(device_t dev)
+{
+	device_t root_port;
+	uint32_t v;
+
+	/*
+	 * The T5 chips do not properly echo the No Snoop and Relaxed
+	 * Ordering attributes when replying to a TLP from a Root
+	 * Port.  As a workaround, find the parent Root Port and
+	 * disable No Snoop and Relaxed Ordering.  Note that this
+	 * affects all devices under this root port.
+	 */
+	root_port = pci_find_pcie_root_port(dev);
+	if (root_port == NULL) {
+		device_printf(dev, "Unable to find parent root port\n");
+		return;
+	}
+
+	v = pcie_adjust_config(root_port, PCIER_DEVICE_CTL,
+	    PCIEM_CTL_RELAXED_ORD_ENABLE | PCIEM_CTL_NOSNOOP_ENABLE, 0, 2);
+	if ((v & (PCIEM_CTL_RELAXED_ORD_ENABLE | PCIEM_CTL_NOSNOOP_ENABLE)) !=
+	    0)
+		device_printf(dev, "Disabled No Snoop/Relaxed Ordering on %s\n",
+		    device_get_nameunit(root_port));
+}
+
 static int
 t4_attach(device_t dev)
 {
@@ -620,11 +651,13 @@ t4_attach(device_t dev)
 	int nm_rqidx, nm_tqidx;
 #endif
 	int num_vis;
-	const char *pcie_ts;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
+	TUNABLE_INT_FETCH("hw.cxgbe.debug_flags", &sc->debug_flags);
 
+	if ((pci_get_device(dev) & 0xff00) == 0x5400)
+		t5_attribute_workaround(dev);
 	pci_enable_busmaster(dev);
 	if (pci_find_cap(dev, PCIY_EXPRESS, &i) == 0) {
 		uint32_t v;
@@ -1000,25 +1033,10 @@ t4_attach(device_t dev)
 		goto done;
 	}
 
-	switch (sc->params.pci.speed) {
-		case 0x1:
-			pcie_ts = "2.5";
-			break;
-		case 0x2:
-			pcie_ts = "5.0";
-			break;
-		case 0x3:
-			pcie_ts = "8.0";
-			break;
-		default:
-			pcie_ts = "??";
-			break;
-	}
 	device_printf(dev,
-	    "PCIe x%d (%s GTS/s) (%d), %d ports, %d %s interrupt%s, %d eq, %d iq\n",
-	    sc->params.pci.width, pcie_ts, sc->params.pci.speed,
-	    sc->params.nports, sc->intr_count,
-	    sc->intr_type == INTR_MSIX ? "MSI-X" :
+	    "PCIe gen%d x%d, %d ports, %d %s interrupt%s, %d eq, %d iq\n",
+	    sc->params.pci.speed, sc->params.pci.width, sc->params.nports,
+	    sc->intr_count, sc->intr_type == INTR_MSIX ? "MSI-X" :
 	    (sc->intr_type == INTR_MSI ? "MSI" : "INTx"),
 	    sc->intr_count > 1 ? "s" : "", sc->sge.neq, sc->sge.niq);
 
@@ -1745,12 +1763,8 @@ cxgbe_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 	struct port_info *pi = vi->pi;
 	struct ifmedia_entry *cur;
 	int speed = pi->link_cfg.speed;
-#ifdef INVARIANTS
-	int data = (pi->port_type << 8) | pi->mod_type;
-#endif
 
 	cur = vi->media.ifm_cur;
-	MPASS(cur->ifm_data == data);
 
 	ifmr->ifm_status = IFM_AVALID;
 	if (!pi->link_cfg.link_ok)
@@ -3119,30 +3133,29 @@ t4_set_desc(struct adapter *sc)
 static void
 build_medialist(struct port_info *pi, struct ifmedia *media)
 {
-	int data, m;
+	int m;
 
 	PORT_LOCK(pi);
 
 	ifmedia_removeall(media);
 
 	m = IFM_ETHER | IFM_FDX;
-	data = (pi->port_type << 8) | pi->mod_type;
 
 	switch(pi->port_type) {
 	case FW_PORT_TYPE_BT_XFI:
 	case FW_PORT_TYPE_BT_XAUI:
-		ifmedia_add(media, m | IFM_10G_T, data, NULL);
+		ifmedia_add(media, m | IFM_10G_T, 0, NULL);
 		/* fall through */
 
 	case FW_PORT_TYPE_BT_SGMII:
-		ifmedia_add(media, m | IFM_1000_T, data, NULL);
-		ifmedia_add(media, m | IFM_100_TX, data, NULL);
-		ifmedia_add(media, IFM_ETHER | IFM_AUTO, data, NULL);
+		ifmedia_add(media, m | IFM_1000_T, 0, NULL);
+		ifmedia_add(media, m | IFM_100_TX, 0, NULL);
+		ifmedia_add(media, IFM_ETHER | IFM_AUTO, 0, NULL);
 		ifmedia_set(media, IFM_ETHER | IFM_AUTO);
 		break;
 
 	case FW_PORT_TYPE_CX4:
-		ifmedia_add(media, m | IFM_10G_CX4, data, NULL);
+		ifmedia_add(media, m | IFM_10G_CX4, 0, NULL);
 		ifmedia_set(media, m | IFM_10G_CX4);
 		break;
 
@@ -3153,29 +3166,29 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 		switch (pi->mod_type) {
 
 		case FW_PORT_MOD_TYPE_LR:
-			ifmedia_add(media, m | IFM_10G_LR, data, NULL);
+			ifmedia_add(media, m | IFM_10G_LR, 0, NULL);
 			ifmedia_set(media, m | IFM_10G_LR);
 			break;
 
 		case FW_PORT_MOD_TYPE_SR:
-			ifmedia_add(media, m | IFM_10G_SR, data, NULL);
+			ifmedia_add(media, m | IFM_10G_SR, 0, NULL);
 			ifmedia_set(media, m | IFM_10G_SR);
 			break;
 
 		case FW_PORT_MOD_TYPE_LRM:
-			ifmedia_add(media, m | IFM_10G_LRM, data, NULL);
+			ifmedia_add(media, m | IFM_10G_LRM, 0, NULL);
 			ifmedia_set(media, m | IFM_10G_LRM);
 			break;
 
 		case FW_PORT_MOD_TYPE_TWINAX_PASSIVE:
 		case FW_PORT_MOD_TYPE_TWINAX_ACTIVE:
-			ifmedia_add(media, m | IFM_10G_TWINAX, data, NULL);
+			ifmedia_add(media, m | IFM_10G_TWINAX, 0, NULL);
 			ifmedia_set(media, m | IFM_10G_TWINAX);
 			break;
 
 		case FW_PORT_MOD_TYPE_NONE:
 			m &= ~IFM_FDX;
-			ifmedia_add(media, m | IFM_NONE, data, NULL);
+			ifmedia_add(media, m | IFM_NONE, 0, NULL);
 			ifmedia_set(media, m | IFM_NONE);
 			break;
 
@@ -3185,7 +3198,7 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 			device_printf(pi->dev,
 			    "unknown port_type (%d), mod_type (%d)\n",
 			    pi->port_type, pi->mod_type);
-			ifmedia_add(media, m | IFM_UNKNOWN, data, NULL);
+			ifmedia_add(media, m | IFM_UNKNOWN, 0, NULL);
 			ifmedia_set(media, m | IFM_UNKNOWN);
 			break;
 		}
@@ -3195,24 +3208,24 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 		switch (pi->mod_type) {
 
 		case FW_PORT_MOD_TYPE_LR:
-			ifmedia_add(media, m | IFM_40G_LR4, data, NULL);
+			ifmedia_add(media, m | IFM_40G_LR4, 0, NULL);
 			ifmedia_set(media, m | IFM_40G_LR4);
 			break;
 
 		case FW_PORT_MOD_TYPE_SR:
-			ifmedia_add(media, m | IFM_40G_SR4, data, NULL);
+			ifmedia_add(media, m | IFM_40G_SR4, 0, NULL);
 			ifmedia_set(media, m | IFM_40G_SR4);
 			break;
 
 		case FW_PORT_MOD_TYPE_TWINAX_PASSIVE:
 		case FW_PORT_MOD_TYPE_TWINAX_ACTIVE:
-			ifmedia_add(media, m | IFM_40G_CR4, data, NULL);
+			ifmedia_add(media, m | IFM_40G_CR4, 0, NULL);
 			ifmedia_set(media, m | IFM_40G_CR4);
 			break;
 
 		case FW_PORT_MOD_TYPE_NONE:
 			m &= ~IFM_FDX;
-			ifmedia_add(media, m | IFM_NONE, data, NULL);
+			ifmedia_add(media, m | IFM_NONE, 0, NULL);
 			ifmedia_set(media, m | IFM_NONE);
 			break;
 
@@ -3220,7 +3233,7 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 			device_printf(pi->dev,
 			    "unknown port_type (%d), mod_type (%d)\n",
 			    pi->port_type, pi->mod_type);
-			ifmedia_add(media, m | IFM_UNKNOWN, data, NULL);
+			ifmedia_add(media, m | IFM_UNKNOWN, 0, NULL);
 			ifmedia_set(media, m | IFM_UNKNOWN);
 			break;
 		}
@@ -3230,7 +3243,7 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 		device_printf(pi->dev,
 		    "unknown port_type (%d), mod_type (%d)\n", pi->port_type,
 		    pi->mod_type);
-		ifmedia_add(media, m | IFM_UNKNOWN, data, NULL);
+		ifmedia_add(media, m | IFM_UNKNOWN, 0, NULL);
 		ifmedia_set(media, m | IFM_UNKNOWN);
 		break;
 	}
@@ -3410,6 +3423,7 @@ begin_synchronized_op(struct adapter *sc, struct vi_info *vi, int flags,
 #ifdef INVARIANTS
 	sc->last_op = wmesg;
 	sc->last_op_thr = curthread;
+	sc->last_op_flags = flags;
 #endif
 
 done:
@@ -3437,6 +3451,7 @@ doom_vi(struct adapter *sc, struct vi_info *vi)
 #ifdef INVARIANTS
 	sc->last_op = "t4detach";
 	sc->last_op_thr = curthread;
+	sc->last_op_flags = 0;
 #endif
 	ADAPTER_UNLOCK(sc);
 }
@@ -3755,6 +3770,71 @@ adapter_full_uninit(struct adapter *sc)
 	return (0);
 }
 
+#ifdef RSS
+#define SUPPORTED_RSS_HASHTYPES (RSS_HASHTYPE_RSS_IPV4 | \
+    RSS_HASHTYPE_RSS_TCP_IPV4 | RSS_HASHTYPE_RSS_IPV6 | \
+    RSS_HASHTYPE_RSS_TCP_IPV6 | RSS_HASHTYPE_RSS_UDP_IPV4 | \
+    RSS_HASHTYPE_RSS_UDP_IPV6)
+
+/* Translates kernel hash types to hardware. */
+static int
+hashconfig_to_hashen(int hashconfig)
+{
+	int hashen = 0;
+
+	if (hashconfig & RSS_HASHTYPE_RSS_IPV4)
+		hashen |= F_FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN;
+	if (hashconfig & RSS_HASHTYPE_RSS_IPV6)
+		hashen |= F_FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN;
+	if (hashconfig & RSS_HASHTYPE_RSS_UDP_IPV4) {
+		hashen |= F_FW_RSS_VI_CONFIG_CMD_UDPEN |
+		    F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN;
+	}
+	if (hashconfig & RSS_HASHTYPE_RSS_UDP_IPV6) {
+		hashen |= F_FW_RSS_VI_CONFIG_CMD_UDPEN |
+		    F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN;
+	}
+	if (hashconfig & RSS_HASHTYPE_RSS_TCP_IPV4)
+		hashen |= F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN;
+	if (hashconfig & RSS_HASHTYPE_RSS_TCP_IPV6)
+		hashen |= F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN;
+
+	return (hashen);
+}
+
+/* Translates hardware hash types to kernel. */
+static int
+hashen_to_hashconfig(int hashen)
+{
+	int hashconfig = 0;
+
+	if (hashen & F_FW_RSS_VI_CONFIG_CMD_UDPEN) {
+		/*
+		 * If UDP hashing was enabled it must have been enabled for
+		 * either IPv4 or IPv6 (inclusive or).  Enabling UDP without
+		 * enabling any 4-tuple hash is nonsense configuration.
+		 */
+		MPASS(hashen & (F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN |
+		    F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN));
+
+		if (hashen & F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN)
+			hashconfig |= RSS_HASHTYPE_RSS_UDP_IPV4;
+		if (hashen & F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN)
+			hashconfig |= RSS_HASHTYPE_RSS_UDP_IPV6;
+	}
+	if (hashen & F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN)
+		hashconfig |= RSS_HASHTYPE_RSS_TCP_IPV4;
+	if (hashen & F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN)
+		hashconfig |= RSS_HASHTYPE_RSS_TCP_IPV6;
+	if (hashen & F_FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN)
+		hashconfig |= RSS_HASHTYPE_RSS_IPV4;
+	if (hashen & F_FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN)
+		hashconfig |= RSS_HASHTYPE_RSS_IPV6;
+
+	return (hashconfig);
+}
+#endif
+
 int
 vi_full_init(struct vi_info *vi)
 {
@@ -3762,7 +3842,14 @@ vi_full_init(struct vi_info *vi)
 	struct ifnet *ifp = vi->ifp;
 	uint16_t *rss;
 	struct sge_rxq *rxq;
-	int rc, i, j;
+	int rc, i, j, hashen;
+#ifdef RSS
+	int nbuckets = rss_getnumbuckets();
+	int hashconfig = rss_gethashconfig();
+	int extra;
+	uint32_t raw_rss_key[RSS_KEYSIZE / sizeof(uint32_t)];
+	uint32_t rss_key[RSS_KEYSIZE / sizeof(uint32_t)];
+#endif
 
 	ASSERT_SYNCHRONIZED_OP(sc);
 	KASSERT((vi->flags & VI_INIT_DONE) == 0,
@@ -3789,19 +3876,96 @@ vi_full_init(struct vi_info *vi)
 	/*
 	 * Setup RSS for this VI.  Save a copy of the RSS table for later use.
 	 */
+	if (vi->nrxq > vi->rss_size) {
+		if_printf(ifp, "nrxq (%d) > hw RSS table size (%d); "
+		    "some queues will never receive traffic.\n", vi->nrxq,
+		    vi->rss_size);
+	} else if (vi->rss_size % vi->nrxq) {
+		if_printf(ifp, "nrxq (%d), hw RSS table size (%d); "
+		    "expect uneven traffic distribution.\n", vi->nrxq,
+		    vi->rss_size);
+	}
+#ifdef RSS
+	MPASS(RSS_KEYSIZE == 40);
+	if (vi->nrxq != nbuckets) {
+		if_printf(ifp, "nrxq (%d) != kernel RSS buckets (%d);"
+		    "performance will be impacted.\n", vi->nrxq, nbuckets);
+	}
+
+	rss_getkey((void *)&raw_rss_key[0]);
+	for (i = 0; i < nitems(rss_key); i++) {
+		rss_key[i] = htobe32(raw_rss_key[nitems(rss_key) - 1 - i]);
+	}
+	t4_write_rss_key(sc, (void *)&rss_key[0], -1);
+#endif
 	rss = malloc(vi->rss_size * sizeof (*rss), M_CXGBE, M_ZERO | M_WAITOK);
 	for (i = 0; i < vi->rss_size;) {
+#ifdef RSS
+		j = rss_get_indirection_to_bucket(i);
+		j %= pi->vrxq;
+		rxq = &sc->sge.rxq[vi->first_rxq + j];
+		rss[i++] = rxq->iq.abs_id;
+#else
 		for_each_rxq(vi, j, rxq) {
 			rss[i++] = rxq->iq.abs_id;
 			if (i == vi->rss_size)
 				break;
 		}
+#endif
 	}
 
 	rc = -t4_config_rss_range(sc, sc->mbox, vi->viid, 0, vi->rss_size, rss,
 	    vi->rss_size);
 	if (rc != 0) {
 		if_printf(ifp, "rss_config failed: %d\n", rc);
+		goto done;
+	}
+
+#ifdef RSS
+	hashen = hashconfig_to_hashen(hashconfig);
+
+	/*
+	 * We may have had to enable some hashes even though the global config
+	 * wants them disabled.  This is a potential problem that must be
+	 * reported to the user.
+	 */
+	extra = hashen_to_hashconfig(hashen) ^ hashconfig;
+
+	/*
+	 * If we consider only the supported hash types, then the enabled hashes
+	 * are a superset of the requested hashes.  In other words, there cannot
+	 * be any supported hash that was requested but not enabled, but there
+	 * can be hashes that were not requested but had to be enabled.
+	 */
+	extra &= SUPPORTED_RSS_HASHTYPES;
+	MPASS((extra & hashconfig) == 0);
+
+	if (extra) {
+		if_printf(ifp,
+		    "global RSS config (0x%x) cannot be accomodated.\n",
+		    hashconfig);
+	}
+	if (extra & RSS_HASHTYPE_RSS_IPV4)
+		if_printf(ifp, "IPv4 2-tuple hashing forced on.\n");
+	if (extra & RSS_HASHTYPE_RSS_TCP_IPV4)
+		if_printf(ifp, "TCP/IPv4 4-tuple hashing forced on.\n");
+	if (extra & RSS_HASHTYPE_RSS_IPV6)
+		if_printf(ifp, "IPv6 2-tuple hashing forced on.\n");
+	if (extra & RSS_HASHTYPE_RSS_TCP_IPV6)
+		if_printf(ifp, "TCP/IPv6 4-tuple hashing forced on.\n");
+	if (extra & RSS_HASHTYPE_RSS_UDP_IPV4)
+		if_printf(ifp, "UDP/IPv4 4-tuple hashing forced on.\n");
+	if (extra & RSS_HASHTYPE_RSS_UDP_IPV6)
+		if_printf(ifp, "UDP/IPv6 4-tuple hashing forced on.\n");
+#else
+	hashen = F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN |
+	    F_FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN |
+	    F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN |
+	    F_FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN | F_FW_RSS_VI_CONFIG_CMD_UDPEN;
+#endif
+	rc = -t4_config_vi_rss(sc, sc->mbox, vi->viid, hashen, rss[0]);
+	if (rc != 0) {
+		if_printf(ifp, "rss hash/defaultq config failed: %d\n", rc);
 		goto done;
 	}
 
@@ -5016,6 +5180,9 @@ t4_sysctls(struct adapter *sc)
 	sc->lro_timeout = 100;
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "lro_timeout", CTLFLAG_RW,
 	    &sc->lro_timeout, 0, "lro inactive-flush timeout (in us)");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "debug_flags", CTLFLAG_RW,
+	    &sc->debug_flags, 0, "flags to enable runtime debugging");
 
 #ifdef SBUF_DRAIN
 	/*
@@ -6767,9 +6934,9 @@ sysctl_mps_tcam(SYSCTL_HANDLER_ARGS)
 				F_FW_CMD_REQUEST | F_FW_CMD_READ |
 				V_FW_LDST_CMD_ADDRSPACE(FW_LDST_ADDRSPC_MPS));
 			ldst_cmd.cycles_to_len16 = htobe32(FW_LEN16(ldst_cmd));
-			ldst_cmd.u.mps.fid_ctl =
+			ldst_cmd.u.mps.rplc.fid_idx =
 			    htobe16(V_FW_LDST_CMD_FID(FW_LDST_MPS_RPLC) |
-				V_FW_LDST_CMD_CTL(i));
+				V_FW_LDST_CMD_IDX(i));
 
 			rc = begin_synchronized_op(sc, NULL, SLEEP_OK | INTR_OK,
 			    "t4mps");
@@ -6785,10 +6952,10 @@ sysctl_mps_tcam(SYSCTL_HANDLER_ARGS)
 				rc = 0;
 			} else {
 				sbuf_printf(sb, " %08x %08x %08x %08x",
-				    be32toh(ldst_cmd.u.mps.rplc127_96),
-				    be32toh(ldst_cmd.u.mps.rplc95_64),
-				    be32toh(ldst_cmd.u.mps.rplc63_32),
-				    be32toh(ldst_cmd.u.mps.rplc31_0));
+				    be32toh(ldst_cmd.u.mps.rplc.rplc127_96),
+				    be32toh(ldst_cmd.u.mps.rplc.rplc95_64),
+				    be32toh(ldst_cmd.u.mps.rplc.rplc63_32),
+				    be32toh(ldst_cmd.u.mps.rplc.rplc31_0));
 			}
 		} else
 			sbuf_printf(sb, "%36s", "");
@@ -8858,17 +9025,39 @@ tweak_tunables(void)
 {
 	int nc = mp_ncpus;	/* our snapshot of the number of CPUs */
 
-	if (t4_ntxq10g < 1)
+	if (t4_ntxq10g < 1) {
+#ifdef RSS
+		t4_ntxq10g = rss_getnumbuckets();
+#else
 		t4_ntxq10g = min(nc, NTXQ_10G);
+#endif
+	}
 
-	if (t4_ntxq1g < 1)
+	if (t4_ntxq1g < 1) {
+#ifdef RSS
+		/* XXX: way too many for 1GbE? */
+		t4_ntxq1g = rss_getnumbuckets();
+#else
 		t4_ntxq1g = min(nc, NTXQ_1G);
+#endif
+	}
 
-	if (t4_nrxq10g < 1)
+	if (t4_nrxq10g < 1) {
+#ifdef RSS
+		t4_nrxq10g = rss_getnumbuckets();
+#else
 		t4_nrxq10g = min(nc, NRXQ_10G);
+#endif
+	}
 
-	if (t4_nrxq1g < 1)
+	if (t4_nrxq1g < 1) {
+#ifdef RSS
+		/* XXX: way too many for 1GbE? */
+		t4_nrxq1g = rss_getnumbuckets();
+#else
 		t4_nrxq1g = min(nc, NRXQ_1G);
+#endif
+	}
 
 #ifdef TCP_OFFLOAD
 	if (t4_nofldtxq10g < 1)
@@ -9012,10 +9201,17 @@ static devclass_t vcxgbe_devclass, vcxl_devclass;
 DRIVER_MODULE(t4nex, pci, t4_driver, t4_devclass, mod_event, 0);
 MODULE_VERSION(t4nex, 1);
 MODULE_DEPEND(t4nex, firmware, 1, 1, 1);
+#ifdef DEV_NETMAP
+MODULE_DEPEND(t4nex, netmap, 1, 1, 1);
+#endif /* DEV_NETMAP */
+
 
 DRIVER_MODULE(t5nex, pci, t5_driver, t5_devclass, mod_event, 0);
 MODULE_VERSION(t5nex, 1);
 MODULE_DEPEND(t5nex, firmware, 1, 1, 1);
+#ifdef DEV_NETMAP
+MODULE_DEPEND(t5nex, netmap, 1, 1, 1);
+#endif /* DEV_NETMAP */
 
 DRIVER_MODULE(cxgbe, t4nex, cxgbe_driver, cxgbe_devclass, 0, 0);
 MODULE_VERSION(cxgbe, 1);

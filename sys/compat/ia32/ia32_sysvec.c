@@ -125,7 +125,7 @@ struct sysentvec ia32_freebsd_sysvec = {
 	.sv_maxssiz	= &ia32_maxssiz,
 	.sv_flags	= SV_ABI_FREEBSD | SV_IA32 | SV_ILP32 |
 #ifdef __amd64__
-		SV_SHP
+		SV_SHP | SV_TIMEKEEP
 #else
 		0
 #endif
@@ -136,6 +136,7 @@ struct sysentvec ia32_freebsd_sysvec = {
 	.sv_shared_page_base = FREEBSD32_SHAREDPAGE,
 	.sv_shared_page_len = PAGE_SIZE,
 	.sv_schedtail	= NULL,
+	.sv_thread_detach = NULL,
 };
 INIT_SYSENTVEC(elf_ia32_sysvec, &ia32_freebsd_sysvec);
 

@@ -25,6 +25,7 @@
  */
 
 #include "opt_platform.h"
+#include "opt_uart.h"
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
@@ -56,6 +57,16 @@ __FBSDID("$FreeBSD$");
 #include "uart_if.h"
 
 #define	DEFAULT_RCLK	1843200
+
+/*
+ * Set the default baudrate tolerance to 3.0%.
+ *
+ * Some embedded boards have odd reference clocks (eg 25MHz)
+ * and we need to handle higher variances in the target baud rate.
+ */
+#ifndef	UART_DEV_TOLERANCE_PCT
+#define	UART_DEV_TOLERANCE_PCT	30
+#endif	/* UART_DEV_TOLERANCE_PCT */
 
 static int broken_txfifo = 0;
 SYSCTL_INT(_hw, OID_AUTO, broken_txfifo, CTLFLAG_RWTUN,
@@ -123,8 +134,8 @@ ns8250_divisor(int rclk, int baudrate)
 	/* 10 times error in percent: */
 	error = ((actual_baud - baudrate) * 2000 / baudrate + 1) >> 1;
 
-	/* 3.0% maximum error tolerance: */
-	if (error < -30 || error > 30)
+	/* enforce maximum error tolerance: */
+	if (error < -UART_DEV_TOLERANCE_PCT || error > UART_DEV_TOLERANCE_PCT)
 		return (0);
 
 	return (divisor);
@@ -378,7 +389,8 @@ struct uart_class uart_ns8250_class = {
 	sizeof(struct ns8250_softc),
 	.uc_ops = &uart_ns8250_ops,
 	.uc_range = 8,
-	.uc_rclk = DEFAULT_RCLK
+	.uc_rclk = DEFAULT_RCLK,
+	.uc_rshift = 0
 };
 
 #ifdef FDT
@@ -415,10 +427,10 @@ ns8250_bus_attach(struct uart_softc *sc)
 	 * has broken txfifo. 
 	 */
 	node = ofw_bus_get_node(sc->sc_dev);
-	if ((OF_getprop(node, "busy-detect", &cell, sizeof(cell))) > 0)
-		ns8250->busy_detect = 1;
-	if ((OF_getprop(node, "broken-txfifo", &cell, sizeof(cell))) > 0)
-		broken_txfifo = 1;
+	if ((OF_getencprop(node, "busy-detect", &cell, sizeof(cell))) > 0)
+		ns8250->busy_detect = cell ? 1 : 0;
+	if ((OF_getencprop(node, "broken-txfifo", &cell, sizeof(cell))) > 0)
+		broken_txfifo =  cell ? 1 : 0;
 #endif
 
 	bas = &sc->sc_bas;

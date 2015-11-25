@@ -41,22 +41,6 @@
 #include "rtld_lock.h"
 #include "rtld_machdep.h"
 
-#ifdef COMPAT_32BIT
-#undef STANDARD_LIBRARY_PATH
-#undef _PATH_ELF_HINTS
-#define	_PATH_ELF_HINTS		"/var/run/ld-elf32.so.hints"
-/* For running 32 bit binaries  */
-#define	STANDARD_LIBRARY_PATH	"/lib32:/usr/lib32"
-#define LD_ "LD_32_"
-#endif
-
-#ifndef STANDARD_LIBRARY_PATH
-#define STANDARD_LIBRARY_PATH	"/lib:/usr/lib"
-#endif
-#ifndef LD_
-#define LD_ "LD_"
-#endif
-
 #define NEW(type)	((type *) xmalloc(sizeof(type)))
 #define CNEW(type)	((type *) xcalloc(1, sizeof(type)))
 
@@ -264,6 +248,7 @@ typedef struct Struct_Obj_Entry {
     bool z_loadfltr : 1;	/* Immediately load filtees */
     bool z_interpose : 1;	/* Interpose all objects but main */
     bool z_nodeflib : 1;	/* Don't search default library path */
+    bool z_global : 1;		/* Make the object global */
     bool ref_nodel : 1;		/* Refcount increased to prevent dlclose */
     bool init_scanned: 1;	/* Object is already on init list. */
     bool on_fini_list: 1;	/* Object is already on fini list. */

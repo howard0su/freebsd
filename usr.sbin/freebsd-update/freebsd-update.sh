@@ -52,6 +52,8 @@ Options:
                   (default: root)
   --not-running-from-cron
                -- Run without a tty, for use by automated tools
+  --currently-running release
+               -- Update as if currently running this release
 Commands:
   fetch        -- Fetch updates from server
   cron         -- Sleep rand(3600) seconds, fetch updates, and send an
@@ -216,7 +218,15 @@ config_KeepModifiedMetadata () {
 # Add to the list of components which should be kept updated.
 config_Components () {
 	for C in $@; do
-		COMPONENTS="${COMPONENTS} ${C}"
+		if [ "$C" = "src" ]; then
+			if [ -e /usr/src/COPYRIGHT ]; then
+				COMPONENTS="${COMPONENTS} ${C}"
+			else
+				echo "src component not installed, skipped"
+			fi
+		else
+			COMPONENTS="${COMPONENTS} ${C}"
+		fi
 	done
 }
 
@@ -425,6 +435,9 @@ parse_cmdline () {
 			;;
 		--not-running-from-cron)
 			NOTTYOK=1
+			;;
+		--currently-running)
+			shift; export UNAME_r="$1"
 			;;
 
 		# Configuration file equivalents
@@ -690,7 +703,7 @@ fetch_check_params () {
 	fi
 
 	# Check that we have updates ready to install
-	if [ -f ${BDHASH}-install/kerneldone && $FORCEFETCH -eq 0 ]; then
+	if [ -f ${BDHASH}-install/kerneldone -a $FORCEFETCH -eq 0 ]; then
 		echo "You have a partially completed upgrade pending"
 		echo "Run '$0 install' first."
 		echo "Run '$0 fetch -F' to proceed anyway."
@@ -2642,10 +2655,10 @@ install_unschg () {
 	while read F; do
 		if ! [ -e ${BASEDIR}/${F} ]; then
 			continue
+		else
+			echo ${BASEDIR}/${F}
 		fi
-
-		chflags noschg ${BASEDIR}/${F} || return 1
-	done < filelist
+	done < filelist | xargs chflags noschg || return 1
 
 	# Clean up
 	rm filelist
@@ -2723,7 +2736,7 @@ backup_kernel () {
 	if [ $BACKUPKERNELSYMBOLFILES = yes ]; then
 		FINDFILTER=""
 	else
-		FINDFILTER=-"a ! -name *.symbols"
+		FINDFILTER="-a ! -name *.debug -a ! -name *.symbols"
 	fi
 
 	# Backup all the kernel files using hardlinks.
@@ -3220,7 +3233,7 @@ get_params () {
 # Fetch command.  Make sure that we're being called
 # interactively, then run fetch_check_params and fetch_run
 cmd_fetch () {
-	if [ ! -t 0 && $NOTTYOK -eq 0 ]; then
+	if [ ! -t 0 -a $NOTTYOK -eq 0 ]; then
 		echo -n "`basename $0` fetch should not "
 		echo "be run non-interactively."
 		echo "Run `basename $0` cron instead."

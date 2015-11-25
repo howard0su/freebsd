@@ -12,7 +12,6 @@ MK_SSP=		no
 PROG=		loader.sym
 INTERNALPROG=
 
-.PATH: ${.CURDIR}/../../efi/loader
 # architecture-specific loader code
 SRCS=	autoload.c \
 	bootinfo.c \
@@ -20,23 +19,29 @@ SRCS=	autoload.c \
 	copy.c \
 	devicename.c \
 	main.c \
+	self_reloc.c \
 	smbios.c \
 	vers.c
 
-.PATH: ${.CURDIR}/arch/${MACHINE_CPUARCH}
+.PATH: ${.CURDIR}/arch/${MACHINE}
 # For smbios.c
 .PATH: ${.CURDIR}/../../i386/libi386
-.include "${.CURDIR}/arch/${MACHINE_CPUARCH}/Makefile.inc"
+.include "${.CURDIR}/arch/${MACHINE}/Makefile.inc"
 
-CFLAGS+=	-fPIC
 CFLAGS+=	-I${.CURDIR}
-CFLAGS+=	-I${.CURDIR}/arch/${MACHINE_CPUARCH}
+CFLAGS+=	-I${.CURDIR}/arch/${MACHINE}
 CFLAGS+=	-I${.CURDIR}/../include
-CFLAGS+=	-I${.CURDIR}/../include/${MACHINE_CPUARCH}
+CFLAGS+=	-I${.CURDIR}/../include/${MACHINE}
 CFLAGS+=	-I${.CURDIR}/../../../contrib/dev/acpica/include
 CFLAGS+=	-I${.CURDIR}/../../..
 CFLAGS+=	-I${.CURDIR}/../../i386/libi386
 CFLAGS+=	-DNO_PCI -DEFI
+
+# make buildenv doesn't set DESTDIR, this means LIBSTAND
+# will be wrong when crossbuilding.
+.if exists(${.OBJDIR}/../../../../lib/libstand/libstand.a)
+LIBSTAND=	${.OBJDIR}/../../../../lib/libstand/libstand.a
+.endif
 
 .if ${MK_FORTH} != "no"
 BOOT_FORTH=	yes
@@ -67,15 +72,15 @@ CFLAGS+=	-DEFI_STAGING_SIZE=${EFI_STAGING_SIZE}
 .include	"${.CURDIR}/../../common/Makefile.inc"
 CFLAGS+=	-I${.CURDIR}/../../common
 
-FILES=	loader.efi
+FILES+=	loader.efi
 FILESMODE_loader.efi=	${BINMODE}
 
-LDSCRIPT=	${.CURDIR}/arch/${MACHINE_CPUARCH}/ldscript.${MACHINE_CPUARCH}
-LDFLAGS=	-Wl,-T${LDSCRIPT} -Wl,-Bsymbolic -shared -Wl,-znocombreloc
+LDSCRIPT=	${.CURDIR}/arch/${MACHINE}/ldscript.${MACHINE}
+LDFLAGS+=	-Wl,-T${LDSCRIPT} -Wl,-Bsymbolic -shared
 
-CLEANFILES=	vers.c loader.efi
+CLEANFILES+=	vers.c loader.efi
 
-NEWVERSWHAT=	"EFI loader" ${MACHINE_CPUARCH}
+NEWVERSWHAT=	"EFI loader" ${MACHINE}
 
 vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/../../efi/loader/version
 	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
@@ -91,7 +96,7 @@ EFI_TARGET=	efi-app-ia32
 EFI_TARGET=	binary
 .endif
 
-loader.efi: loader.sym
+loader.efi: ${PROG}
 	if [ `${OBJDUMP} -t ${.ALLSRC} | fgrep '*UND*' | wc -l` != 0 ]; then \
 		${OBJDUMP} -t ${.ALLSRC} | fgrep '*UND*'; \
 		exit 1; \
@@ -111,12 +116,17 @@ LDADD=		${LIBFICL} ${LIBEFI} ${LIBFDT} ${LIBEFI_FDT} ${LIBSTAND}
 
 .include <bsd.prog.mk>
 
-beforedepend ${OBJS}: machine x86
+beforedepend ${OBJS}: machine
 
-CLEANFILES+=   machine x86
+CLEANFILES+=   machine
 
 machine:
-	ln -sf ${.CURDIR}/../../../amd64/include machine
+	ln -sf ${.CURDIR}/../../../${MACHINE}/include machine
+
+.if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386"
+beforedepend ${OBJS}: x86
+CLEANFILES+=   x86
 
 x86:
 	ln -sf ${.CURDIR}/../../../x86/include x86
+.endif

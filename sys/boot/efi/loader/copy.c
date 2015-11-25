@@ -38,10 +38,10 @@ __FBSDID("$FreeBSD$");
 #include <efilib.h>
 
 #ifndef EFI_STAGING_SIZE
-#define	EFI_STAGING_SIZE	32
+#define	EFI_STAGING_SIZE	48
 #endif
 
-#define	STAGE_PAGES	((EFI_STAGING_SIZE) * 1024 * 1024 / 4096)
+#define	STAGE_PAGES	EFI_SIZE_TO_PAGES((EFI_STAGING_SIZE) * 1024 * 1024)
 
 EFI_PHYSICAL_ADDRESS	staging, staging_end;
 int			stage_offset_set = 0;
@@ -59,10 +59,16 @@ efi_copy_init(void)
 		    (unsigned long)(status & EFI_ERROR_MASK));
 		return (status);
 	}
-	staging_end = staging + STAGE_PAGES * 4096;
+	staging_end = staging + STAGE_PAGES * EFI_PAGE_SIZE;
 
-#ifdef __arm__
-	/* Round the kernel load address to a 2MiB value */
+#if defined(__aarch64__) || defined(__arm__)
+	/*
+	 * Round the kernel load address to a 2MiB value. This is needed
+	 * because the kernel builds a page table based on where it has
+	 * been loaded in physical address space. As the kernel will use
+	 * either a 1MiB or 2MiB page for this we need to make sure it
+	 * is correctly aligned for both cases.
+	 */
 	staging = roundup2(staging, 2 * 1024 * 1024);
 #endif
 
@@ -126,7 +132,7 @@ efi_copy_finish(void)
 
 	src = (uint64_t *)staging;
 	dst = (uint64_t *)(staging - stage_offset);
-	last = (uint64_t *)(staging + STAGE_PAGES * EFI_PAGE_SIZE);
+	last = (uint64_t *)staging_end;
 
 	while (src < last)
 		*dst++ = *src++;

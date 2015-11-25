@@ -469,7 +469,13 @@ typedef struct {
 typedef struct {
 	u_int16_t	con_handle; /* connection handle */
 } ng_hci_lp_qos_ind_ep;
-
+/*Encryption Change event*/
+#define NGM_HCI_LP_ENC_CHG 			10 /* HCI->Upper*/
+typedef struct {
+	uint16_t con_handle;
+	uint8_t status;
+	uint8_t link_type; 
+}ng_hci_lp_enc_change_ep;
 /**************************************************************************
  **************************************************************************
  **                    HCI node command/event parameters
@@ -897,6 +903,8 @@ typedef struct {
 } __attribute__ ((packed)) ng_hci_set_event_mask_cp;
 
 typedef ng_hci_status_rp	ng_hci_set_event_mask_rp;
+#define NG_HCI_EVENT_MASK_DEFAULT 0x1fffffffffff
+#define NG_HCI_EVENT_MASK_LE  0x2000000000000000
 
 #define NG_HCI_OCF_RESET			0x0003
 /* No command parameter(s) */
@@ -1454,6 +1462,7 @@ typedef struct {
 	
 } __attribute__ ((packed)) ng_hci_le_set_event_mask_cp;
 typedef ng_hci_status_rp	ng_hci_le_set_event_mask_rp;
+#define NG_HCI_LE_EVENT_MASK_ALL 0x1f
 
 #define NG_HCI_OCF_LE_READ_BUFFER_SIZE			0x0002
 /*No command parameter */

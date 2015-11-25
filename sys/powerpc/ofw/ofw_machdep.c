@@ -34,6 +34,7 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include "opt_platform.h"
 #include <sys/param.h>
 #include <sys/bus.h>
 #include <sys/systm.h>
@@ -47,6 +48,7 @@ __FBSDID("$FreeBSD$");
 
 #include <net/ethernet.h>
 
+#include <dev/fdt/fdt_common.h>
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_pci.h>
 #include <dev/ofw/ofw_bus.h>
@@ -62,11 +64,12 @@ __FBSDID("$FreeBSD$");
 #include <machine/ofw_machdep.h>
 #include <machine/trap.h>
 
+static void	*fdt;
+int		ofw_real_mode;
+
 #ifdef AIM
 extern register_t ofmsr[5];
 extern void	*openfirmware_entry;
-static void	*fdt;
-int		ofw_real_mode;
 char		save_trap_init[0x2f00];          /* EXC_LAST */
 char		save_trap_of[0x2f00];            /* EXC_LAST */
 
@@ -151,17 +154,17 @@ parse_ofw_memory(phandle_t node, const char *prop, struct mem_region *output)
 	 * be found.
 	 */
 	phandle = OF_finddevice("/");
-	if (OF_getprop(phandle, "#address-cells", &address_cells, 
+	if (OF_getencprop(phandle, "#address-cells", &address_cells, 
 	    sizeof(address_cells)) < (ssize_t)sizeof(address_cells))
 		address_cells = 1;
-	if (OF_getprop(phandle, "#size-cells", &size_cells, 
+	if (OF_getencprop(phandle, "#size-cells", &size_cells, 
 	    sizeof(size_cells)) < (ssize_t)sizeof(size_cells))
 		size_cells = 1;
 
 	/*
 	 * Get memory.
 	 */
-	if (node == -1 || (sz = OF_getprop(node, prop,
+	if (node == -1 || (sz = OF_getencprop(node, prop,
 	    OFmem, sizeof(OFmem))) <= 0)
 		panic("Physical memory map not found");
 
@@ -336,10 +339,10 @@ ofw_mem_regions(struct mem_region *memp, int *memsz,
 	*availsz = asz;
 }
 
-#ifdef AIM
 void
 OF_initial_setup(void *fdt_ptr, void *junk, int (*openfirm)(void *))
 {
+#ifdef AIM
 	ofmsr[0] = mfmsr();
 	#ifdef __powerpc64__
 	ofmsr[0] &= ~PSL_SF;
@@ -348,22 +351,25 @@ OF_initial_setup(void *fdt_ptr, void *junk, int (*openfirm)(void *))
 	__asm __volatile("mfsprg1 %0" : "=&r"(ofmsr[2]));
 	__asm __volatile("mfsprg2 %0" : "=&r"(ofmsr[3]));
 	__asm __volatile("mfsprg3 %0" : "=&r"(ofmsr[4]));
+	openfirmware_entry = openfirm;
 
 	if (ofmsr[0] & PSL_DR)
 		ofw_real_mode = 0;
 	else
 		ofw_real_mode = 1;
 
+	ofw_save_trap_vec(save_trap_init);
+#else
+	ofw_real_mode = 1;
+#endif
+
 	fdt = fdt_ptr;
-	openfirmware_entry = openfirm;
 
 	#ifdef FDT_DTB_STATIC
 	/* Check for a statically included blob */
 	if (fdt == NULL)
 		fdt = &fdt_static_dtb;
 	#endif
-
-	ofw_save_trap_vec(save_trap_init);
 }
 
 boolean_t
@@ -371,6 +377,7 @@ OF_bootstrap()
 {
 	boolean_t status = FALSE;
 
+#ifdef AIM
 	if (openfirmware_entry != NULL) {
 		if (ofw_real_mode) {
 			status = OF_install(OFW_STD_REAL, 0);
@@ -386,18 +393,22 @@ OF_bootstrap()
 			return status;
 
 		OF_init(openfirmware);
-	} else if (fdt != NULL) {
+	} else
+#endif
+	if (fdt != NULL) {
 		status = OF_install(OFW_FDT, 0);
 
 		if (status != TRUE)
 			return status;
 
 		OF_init(fdt);
+		OF_interpret("perform-fixup", 0);
 	} 
 
 	return (status);
 }
 
+#ifdef AIM
 void
 ofw_quiesce(void)
 {
@@ -561,10 +572,10 @@ OF_get_addr_props(phandle_t node, uint32_t *addrp, uint32_t *sizep, int *pcip)
 	uint32_t addr, size;
 	int pci, res;
 
-	res = OF_getprop(node, "#address-cells", &addr, sizeof(addr));
+	res = OF_getencprop(node, "#address-cells", &addr, sizeof(addr));
 	if (res == -1)
 		addr = 2;
-	res = OF_getprop(node, "#size-cells", &size, sizeof(size));
+	res = OF_getencprop(node, "#size-cells", &size, sizeof(size));
 	if (res == -1)
 		size = 1;
 	pci = 0;
@@ -613,7 +624,7 @@ OF_decode_addr(phandle_t dev, int regno, bus_space_tag_t *tag,
 	OF_get_addr_props(bridge, &naddr, &nsize, &pci);
 	if (pci)
 		*tag = &bs_le_tag;
-	res = OF_getprop(dev, (pci) ? "assigned-addresses" : "reg",
+	res = OF_getencprop(dev, (pci) ? "assigned-addresses" : "reg",
 	    cell, sizeof(cell));
 	if (res == -1)
 		return (ENXIO);
@@ -642,7 +653,7 @@ OF_decode_addr(phandle_t dev, int regno, bus_space_tag_t *tag,
 		OF_get_addr_props(parent, &nbridge, NULL, &pcib);
 		if (pcib)
 			*tag = &bs_le_tag;
-		res = OF_getprop(bridge, "ranges", cell, sizeof(cell));
+		res = OF_getencprop(bridge, "ranges", cell, sizeof(cell));
 		if (res == -1)
 			goto next;
 		if (res % sizeof(cell[0]))

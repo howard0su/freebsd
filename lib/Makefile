@@ -8,7 +8,7 @@
 # and the main list to avoid needing a SUBDIR_DEPEND line on every library
 # naming just these few items.
 
-SUBDIR_ORDERED=	${_csu} \
+SUBDIR_ORDERED=	csu \
 	.WAIT \
 	libc \
 	libc_nonshared \
@@ -65,7 +65,6 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libldns} \
 	liblzma \
 	${_libmagic} \
-	libmandoc \
 	libmemstat \
 	libmd \
 	${_libmilter} \
@@ -76,7 +75,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libnetgraph} \
 	${_libngatm} \
 	libnv \
-	libohash \
+	libopenbsd \
 	libopie \
 	libpam \
 	libpcap \
@@ -130,7 +129,7 @@ SUBDIR_DEPEND_libarchive= libz libbz2 libexpat liblzma libmd
 SUBDIR_DEPEND_libatm= libmd
 SUBDIR_DEPEND_libauditdm= libbsm
 SUBDIR_DEPEND_libbsnmp= ${_libnetgraph}
-SUBDIR_DEPEND_libc++= libcxxrt
+SUBDIR_DEPEND_libc++:= libcxxrt
 SUBDIR_DEPEND_libc= libcompiler_rt
 SUBDIR_DEPEND_libcam= libsbuf
 SUBDIR_DEPEND_libcapsicum= libnv
@@ -138,7 +137,6 @@ SUBDIR_DEPEND_libcasper= libcapsicum libnv libpjdlog
 SUBDIR_DEPEND_libdevstat= libkvm
 SUBDIR_DEPEND_libdpv= libfigpar ncurses libutil
 SUBDIR_DEPEND_libedit= ncurses
-SUBDIR_DEPEND_libg++= msun
 SUBDIR_DEPEND_libgeom= libexpat libsbuf
 SUBDIR_DEPEND_liblibrpcsec_gss= libgssapi
 SUBDIR_DEPEND_libmagic= libz
@@ -148,23 +146,11 @@ SUBDIR_DEPEND_libpam= libcrypt libopie ${_libradius} librpcsvc libtacplus libuti
 SUBDIR_DEPEND_libpjdlog= libutil
 SUBDIR_DEPEND_libprocstat= libkvm libutil
 SUBDIR_DEPEND_libradius= libmd
-SUBDIR_DEPEND_libreadline= ncurses
 SUBDIR_DEPEND_libsmb= libkiconv
-SUBDIR_DEPEND_libstdc++= msun
 SUBDIR_DEPEND_libtacplus= libmd
 SUBDIR_DEPEND_libulog= libmd
 SUBDIR_DEPEND_libunbound= ${_libldns}
 SUBDIR_DEPEND_liblzma= ${_libthr}
-
-.if exists(${.CURDIR}/csu/${MACHINE_ARCH}-elf)
-_csu=csu/${MACHINE_ARCH}-elf
-.elif exists(${.CURDIR}/csu/${MACHINE_ARCH})
-_csu=csu/${MACHINE_ARCH}
-.elif exists(${.CURDIR}/csu/${MACHINE_CPUARCH}/Makefile)
-_csu=csu/${MACHINE_CPUARCH}
-.else
-_csu=csu
-.endif
 
 # NB: keep these sorted by MK_* knobs
 
@@ -194,7 +180,7 @@ _clang=		clang
 _cuse=		libcuse
 .endif
 
-.if ${MK_ELFTOOLCHAIN_TOOLS} != "no"
+.if ${MK_TOOLCHAIN} != "no"
 _libelftc=	libelftc
 .endif
 
@@ -227,8 +213,9 @@ _libldns=	libldns
 # sense to build when clang is enabled at all.  Furthermore, they can only be
 # built for certain architectures.
 .if ${MK_CLANG} != "no" && ${COMPILER_TYPE} == "clang" && \
-    (${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64" || \
-    (${MACHINE_CPUARCH} == "arm" && ${MACHINE_ARCH} != "armeb"))
+    (${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64" || \
+    (${MACHINE_CPUARCH} == "arm" && ${MACHINE_ARCH} != "armeb") || \
+    (${MACHINE_CPUARCH} == "i386"))
 _libclang_rt=	libclang_rt
 .endif
 
@@ -285,7 +272,7 @@ _libsmb=	libsmb
 _libsmb=	libsmb
 .endif
 
-.if ${MACHINE_CPUARCH} == "arm"
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "arm"
 _libsmb=	libsmb
 _libproc=	libproc
 _librtld_db=	librtld_db

@@ -53,18 +53,13 @@
 #define	FIRST_MSI_INT	256
 #ifdef XENHVM
 #include <xen/xen-os.h>
+#include <xen/interface/event_channel.h>
 #define	NUM_EVTCHN_INTS	NR_EVENT_CHANNELS
 #define	FIRST_EVTCHN_INT \
     (FIRST_MSI_INT + NUM_MSI_INTS)
 #define	LAST_EVTCHN_INT \
     (FIRST_EVTCHN_INT + NUM_EVTCHN_INTS - 1)
-#elif defined(XEN)
-#include <xen/xen-os.h>
-#define	NUM_EVTCHN_INTS	NR_EVENT_CHANNELS
-#define	FIRST_EVTCHN_INT 0
-#define	LAST_EVTCHN_INT \
-    (FIRST_EVTCHN_INT + NUM_EVTCHN_INTS - 1)
-#else /* !XEN && !XENHVM */
+#else /* !XENHVM */
 #define	NUM_EVTCHN_INTS	0
 #endif
 #define	NUM_IO_INTS	(FIRST_MSI_INT + NUM_MSI_INTS + NUM_EVTCHN_INTS)

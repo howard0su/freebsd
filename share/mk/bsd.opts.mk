@@ -66,10 +66,18 @@ __DEFAULT_YES_OPTIONS = \
     WARNS
 
 __DEFAULT_NO_OPTIONS = \
+    CCACHE_BUILD \
+    FAST_DEPEND \
     CTF \
     DEBUG_FILES \
-    INSTALL_AS_USER
+    INSTALL_AS_USER \
+    STALE_STAGED
 
+# meta mode related
+__DEFAULT_DEPENDENT_OPTIONS = \
+    STAGING_MAN/STAGING \
+    STAGING_PROG/STAGING \
+    
 .include <bsd.mkopt.mk>
 
 #
@@ -91,6 +99,10 @@ __DEFAULT_NO_OPTIONS = \
 MK_${var}:=no
 .endif
 .endfor
+
+.if ${MK_STAGING} == "no"
+MK_STALE_STAGED= no
+.endif
 
 .endif # !_WITHOUT_SRCCONF
 

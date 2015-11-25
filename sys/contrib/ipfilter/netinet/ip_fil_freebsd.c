@@ -189,7 +189,7 @@ ipf_timer_func(arg)
 #if 0
 		softc->ipf_slow_ch = timeout(ipf_timer_func, softc, hz/2);
 #endif
-		callout_init(&softc->ipf_slow_ch, CALLOUT_MPSAFE);
+		callout_init(&softc->ipf_slow_ch, 1);
 		callout_reset(&softc->ipf_slow_ch,
 			(hz / IPF_HZ_DIVIDE) * IPF_HZ_MULT,
 			ipf_timer_func, softc);
@@ -235,7 +235,7 @@ ipfattach(softc)
 	softc->ipf_slow_ch = timeout(ipf_timer_func, softc,
 				     (hz / IPF_HZ_DIVIDE) * IPF_HZ_MULT);
 #endif
-	callout_init(&softc->ipf_slow_ch, CALLOUT_MPSAFE);
+	callout_init(&softc->ipf_slow_ch, 1);
 	callout_reset(&softc->ipf_slow_ch, (hz / IPF_HZ_DIVIDE) * IPF_HZ_MULT,
 		ipf_timer_func, softc);
 	return 0;
@@ -1104,6 +1104,22 @@ ipf_checkv4sum(fin)
 		return -1;
 	}
 	if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
+		/* Depending on the driver, UDP may have zero checksum */
+		if (fin->fin_p == IPPROTO_UDP && (fin->fin_flx &
+		    (FI_FRAG|FI_SHORT|FI_BAD)) == 0) {
+			udphdr_t *udp = fin->fin_dp;
+			if (udp->uh_sum == 0) {
+				/*
+				 * we're good no matter what the hardware
+				 * checksum flags and csum_data say (handling
+				 * of csum_data for zero UDP checksum is not
+				 * consistent across all drivers)
+				 */
+				fin->fin_cksum = 1;
+				return 0;
+			}
+		}
+
 		if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
 			sum = m->m_pkthdr.csum_data;
 		else
