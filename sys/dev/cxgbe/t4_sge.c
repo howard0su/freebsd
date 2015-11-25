@@ -2898,7 +2898,7 @@ alloc_rxq(struct vi_info *vi, struct sge_rxq *rxq, int intr_idx, int idx,
 	struct sysctl_oid_list *children;
 	char name[16];
 
-	rc = alloc_iq_fl(pi, &rxq->iq, &rxq->fl, intr_idx,
+	rc = alloc_iq_fl(vi, &rxq->iq, &rxq->fl, intr_idx,
 	    tnl_cong(vi->pi, cong_drop));
 	if (rc != 0)
 		return (rc);

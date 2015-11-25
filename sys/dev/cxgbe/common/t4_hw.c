@@ -5740,13 +5740,13 @@ int __devinit t4_port_init(struct port_info *p, int mbox, int pf, int vf)
 
 	param = V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) |
 	    V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_RSSINFO) |
-	    V_FW_PARAMS_PARAM_YZ(p->viid);
+	    V_FW_PARAMS_PARAM_YZ(p->vi[0].viid);
 	ret = t4_query_params(adap, mbox, pf, vf, 1, &param, &val);
 	if (ret)
-		p->rss_base = 0xffff;
+		p->vi[0].rss_base = 0xffff;
 	else {
 		/* MPASS((val >> 16) == rss_size); */
-		p->rss_base = val & 0xffff;
+		p->vi[0].rss_base = val & 0xffff;
 	}
 
 	return 0;
