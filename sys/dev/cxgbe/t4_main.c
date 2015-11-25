@@ -1810,6 +1810,7 @@ vcxgbe_attach(device_t dev)
 	struct port_info *pi;
 	struct adapter *sc;
 	int func, index, rc;
+	u32 param, val;
 
 	vi = device_get_softc(dev);
 	pi = vi->pi;
@@ -1828,6 +1829,18 @@ vcxgbe_attach(device_t dev)
 		return (-rc);
 	}
 	vi->viid = rc;
+
+	param = V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) |
+	    V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_RSSINFO) |
+	    V_FW_PARAMS_PARAM_YZ(vi->viid);
+	rc = t4_query_params(sc, sc->mbox, sc->pf, 0, 1, &param, &val);
+	if (rc)
+		vi->rss_base = 0xffff;
+	else {
+		/* MPASS((val >> 16) == rss_size); */
+		vi->rss_base = val & 0xffff;
+	}
+	
 	rc = cxgbe_vi_attach(dev, vi);
 	if (rc) {
 		t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
