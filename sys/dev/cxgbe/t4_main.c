@@ -783,8 +783,10 @@ t4_attach(device_t dev)
 #ifdef DEV_NETMAP
 	num_vis++;
 #endif
-	if (num_vis > nitems(vi_mac_funcs))
+	if (num_vis > nitems(vi_mac_funcs)) {
 		num_vis = nitems(vi_mac_funcs);
+		device_printf(dev, "Number of VIs limited to %d\n", num_vis);
+	}
 
 	/*
 	 * First pass over all the ports - allocate VIs and initialize some
