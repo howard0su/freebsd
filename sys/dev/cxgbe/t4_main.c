@@ -978,7 +978,7 @@ t4_attach(device_t dev)
 				continue;
 			}
 #endif
-			
+
 			vi->first_rxq = rqidx;
 			vi->first_txq = tqidx;
 			if (is_10G_port(pi) || is_40G_port(pi)) {
@@ -1840,7 +1840,7 @@ vcxgbe_attach(device_t dev)
 		/* MPASS((val >> 16) == rss_size); */
 		vi->rss_base = val & 0xffff;
 	}
-	
+
 	rc = cxgbe_vi_attach(dev, vi);
 	if (rc) {
 		t4_free_vi(sc, sc->mbox, sc->pf, 0, vi->viid);
@@ -3454,7 +3454,7 @@ done:
 void
 doom_vi(struct adapter *sc, struct vi_info *vi)
 {
-	
+
 	ADAPTER_LOCK(sc);
 	SET_DOOMED(vi);
 	wakeup(&sc->flags);
@@ -3549,7 +3549,7 @@ cxgbe_init_synchronized(struct vi_info *vi)
 	if (pi->nvi > 1)
 		callout_reset(&vi->tick, hz, vi_tick, vi);
 	else
-		callout_reset(&pi->tick, hz, cxgbe_tick, pi);	
+		callout_reset(&pi->tick, hz, cxgbe_tick, pi);
 	PORT_UNLOCK(pi);
 done:
 	if (rc != 0)
