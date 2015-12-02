@@ -1665,7 +1665,7 @@ vi_get_counter(struct ifnet *ifp, ift_counter c)
 		uint64_t drops;
 
 		drops = 0;
-		if (vi->flags & VI_INIT_DONE) {
+		if ((vi->flags & (VI_INIT_DONE | VI_NETMAP)) == VI_INIT_DONE) {
 			int i;
 			struct sge_txq *txq;
 
