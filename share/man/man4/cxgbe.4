@@ -177,7 +177,8 @@ The first virtual interface on each port is required and represents
 the primary network interface on the port.
 Additional virtual interfaces on a port are named vcxgbe (T4) or
 vcxl (T5) and only use a single rx and tx queue.
-TOE is not supported on additional virtual interfaces.
+Additional virtual interfaces use a single pair of queues
+for rx and tx as well an additional pair of queues for TOE rx and tx.
 The default is 1.
 .It Va hw.cxgbe.holdoff_timer_idx_10G
 .It Va hw.cxgbe.holdoff_timer_idx_1G
