@@ -449,7 +449,6 @@ static int sysctl_qsize_txq(SYSCTL_HANDLER_ARGS);
 static int sysctl_pause_settings(SYSCTL_HANDLER_ARGS);
 static int sysctl_handle_t4_reg64(SYSCTL_HANDLER_ARGS);
 static int sysctl_temperature(SYSCTL_HANDLER_ARGS);
-static int sysctl_viid(SYSCTL_HANDLER_ARGS);
 #ifdef SBUF_DRAIN
 static int sysctl_cctrl(SYSCTL_HANDLER_ARGS);
 static int sysctl_cim_ibq_obq(SYSCTL_HANDLER_ARGS);
@@ -5415,8 +5414,8 @@ vi_sysctls(struct vi_info *vi)
 	oid = device_get_sysctl_tree(vi->dev);
 	children = SYSCTL_CHILDREN(oid);
 
-	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "viid", CTLTYPE_INT |
-	    CTLFLAG_RD, vi, 0, sysctl_viid, "IU", "VI identifer");
+	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "viid", CTLFLAG_RD, NULL,
+	    vi->viid, "VI identifer");
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nrxq", CTLFLAG_RD,
 	    &vi->nrxq, 0, "# of rx queues");
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "ntxq", CTLFLAG_RD,
@@ -5973,16 +5972,6 @@ sysctl_temperature(SYSCTL_HANDLER_ARGS)
 
 	rc = sysctl_handle_int(oidp, &t, 0, req);
 	return (rc);
-}
-
-static int
-sysctl_viid(SYSCTL_HANDLER_ARGS)
-{
-	struct vi_info *vi = arg1;
-	u_int v;
-
-	v = vi->viid;
-	return (sysctl_handle_int(oidp, &v, 0, req));
 }
 
 #ifdef SBUF_DRAIN
