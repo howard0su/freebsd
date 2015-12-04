@@ -72,8 +72,6 @@ __FBSDID("$FreeBSD$");
 #include <vm/uma.h>
 #include <sys/aio.h>
 
-#include "opt_vfs_aio.h"
-
 /*
  * Counter for allocating reference ids to new jobs.  Wrapped to 1 on
  * overflow. (XXX will be removed soon.)
@@ -309,6 +307,7 @@ static void	aio_process_mlock(struct kaiocb *job);
 static int	aio_newproc(int *);
 int		aio_aqueue(struct thread *td, struct aiocb *ujob,
 		    struct aioliojob *lio, int type, struct aiocb_ops *ops);
+static int	aio_queue_file(struct file *fp, struct aiocblist *aiocbe);
 static void	aio_physwakeup(struct bio *bp);
 static void	aio_proc_rundown(void *arg, struct proc *p);
 static void	aio_proc_rundown_exec(void *arg, struct proc *p,
@@ -1592,11 +1591,9 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	struct proc *p = td->td_proc;
 	cap_rights_t rights;
 	struct file *fp;
-	struct socket *so;
-	struct kaiocb *job, *job2;
+	struct kaiocb *job;
 	struct kaioinfo *ki;
 	struct kevent kev;
-	struct sockbuf *sb;
 	int opcode;
 	int error;
 	int fd, kqfd;
@@ -1739,14 +1736,9 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	kev.data = (intptr_t)job;
 	kev.udata = job->uaiocb.aio_sigevent.sigev_value.sival_ptr;
 	error = kqfd_register(kqfd, &kev, td, 1);
-aqueue_fail:
-	if (error) {
-		if (fp)
-			fdrop(fp, td);
-		uma_zfree(aiocb_zone, job);
-		ops->store_error(ujob, error);
-		goto done;
-	}
+	if (error)
+		goto aqueue_fail;
+	
 no_kqueue:
 
 	ops->store_error(ujob, EINPROGRESS);
@@ -1756,6 +1748,34 @@ no_kqueue:
 	job->jobflags = 0;
 	job->lio = lj;
 
+	/* XXX: fo_aio_queue check is temporary */
+	if (fp == NULL || fp->f_ops->fo_aio_queue == NULL)
+		error = aio_queue_file(fp, job);
+	else
+		error = fo_aio_queue(fp, job);
+aqueue_fail:
+	if (error) {
+		if (fp)
+			fdrop(fp, td);
+		uma_zfree(aiocb_zone, job);
+		ops->store_error(ujob, error);
+	}
+	return (error);
+}
+
+int
+aio_queue_file(struct file *fp, struct kaiocb *job)
+{
+	struct aioliojob *lj;
+	struct kaioinfo *ki;
+	struct kaiocb *job2;
+	struct socket *so;
+	struct sockbuf *sb;
+	int error, opcode;
+
+	lj = job->lio;
+	ki = job->userproc->p_aioinfo;
+	opcode = job->uaiocb.aio_lio_opcode;	
 	if (opcode == LIO_SYNC)
 		goto queueit;
 
@@ -1803,7 +1823,7 @@ no_kqueue:
 		SOCKBUF_UNLOCK(sb);
 	}
 
-	if ((error = aio_qphysio(p, job)) == 0)
+	if ((error = aio_qphysio(job->userproc, job)) == 0)
 		goto done;
 #if 0
 	if (error > 0) {
@@ -1848,7 +1868,7 @@ queueit:
 	mtx_lock(&aio_job_mtx);
 	TAILQ_INSERT_TAIL(&aio_jobs, job, list);
 	job->jobstate = JOBST_JOBQGLOBAL;
-	aio_kick_nowait(p);
+	aio_kick_nowait(job->userproc);
 	mtx_unlock(&aio_job_mtx);
 	AIO_UNLOCK(ki);
 	error = 0;
