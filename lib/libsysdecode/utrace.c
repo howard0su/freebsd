@@ -62,7 +62,7 @@ struct utrace_rtld {
 };
 
 static void
-print_utrace_rtld(FILE *fp, void *p, size_t len)
+print_utrace_rtld(FILE *fp, void *p, size_t len, int decimal)
 {
 	struct utrace_rtld *ut = p;
 	unsigned char *cp;
@@ -142,7 +142,7 @@ print_utrace_rtld(FILE *fp, void *p, size_t len)
 		len -= 4;
 		fprintf(fp, "RTLD: %zu ", len);
 		while (len--)
-			if (_sd_int_format == DECIMAL)
+			if (decimal)
 				fprintf(fp, " %d", *cp++);
 			else
 				fprintf(fp, " %02x", *cp++);
@@ -171,11 +171,11 @@ print_utrace_malloc(FILE *fp, void *p)
 }
 
 int
-sysdecode_utrace(FILE *fp, void *p, size_t len)
+sysdecode_utrace(FILE *fp, void *p, size_t len, int decimal)
 {
 
 	if (len >= 8 && bcmp(p, "RTLD", 4) == 0) {
-		print_utrace_rtld(fp, p, len);
+		print_utrace_rtld(fp, p, len, decimal);
 		return (1);
 	}
 

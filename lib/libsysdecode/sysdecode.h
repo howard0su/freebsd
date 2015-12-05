@@ -43,6 +43,6 @@ enum sysdecode_flags_format sysdecode_get_flags_format(void);
 enum sysdecode_int_format sysdecode_get_int_format(void);
 int	sysdecode_set_flags_format(enum sysdecode_flags_format _format);
 int	sysdecode_set_int_format(enum sysdecode_int_format _format);
-int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len);
+int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len, int _decimal);
 
 #endif /* !__SYSDECODE_H__ */
