@@ -7,9 +7,7 @@ LIB=	sysdecode
 SRCS=	errno.c flags.c format.c ioctl.c syscallnames.c utrace.c
 INCS=	sysdecode.h
 
-#CFLAGS+= -I${.CURDIR} -I${.CURDIR}/../libc/gen/
-
-CFLAGS+= -I${.CURDIR}/../../sys
+CFLAGS+= -I${.CURDIR} -I${.OBJDIR} -I${.CURDIR}/../../sys
 
 MAN+=	sysdecode.3 \
 	sysdecode_abi_to_freebsd_errno.3 \
@@ -46,6 +44,6 @@ ioctl.c: mkioctls
 	env MACHINE=${MACHINE} CPP="${CPP}" \
 		/bin/sh ${.CURDIR}/mkioctls ${DESTDIR}${INCLUDEDIR} > ${.TARGET}
 
-beforedepend: ioctl.c
+beforedepend: ioctl.c tables.h
 
 .include <bsd.lib.mk>
