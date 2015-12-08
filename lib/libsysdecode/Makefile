@@ -4,7 +4,7 @@
 
 LIB=	sysdecode
 
-SRCS=	errno.c format.c ioctl.c syscallnames.c utrace.c
+SRCS=	errno.c flags.c format.c ioctl.c syscallnames.c utrace.c
 INCS=	sysdecode.h
 
 #CFLAGS+= -I${.CURDIR} -I${.CURDIR}/../libc/gen/
@@ -21,7 +21,7 @@ MLINKS+= sysdecode_abi_to_freebsd_errno.3 sysdecode_freebsd_to_abi_errno.3
 #MAN+=	sysdecode_get_flags_format.3
 #MLINKS+=sysdecode_get_flags_format.3 sysdecode_set_flags_format.3
 
-CLEANFILES= ioctl.c
+CLEANFILES= ioctl.c tables.h
 
 .if defined(COMPAT_32BIT)
 CPP+=	-m32
@@ -38,6 +38,9 @@ CFLAGS.gcc.ioctl.c+= -Wno-redundant-decls
 CFLAGS.gcc.ioctl.c+= -Wno-unused
 
 CFLAGS.gcc+=	${CFLAGS.gcc.${.IMPSRC}}
+
+tables.h: mktables
+	sh ${.CURDIR}/mktables ${DESTDIR}${INCLUDEDIR} > ${.TARGET}
 
 ioctl.c: mkioctls
 	env MACHINE=${MACHINE} CPP="${CPP}" \
