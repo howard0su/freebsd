@@ -15,10 +15,6 @@ LIBADD+=	capsicum
 CFLAGS+=-DHAVE_LIBCAPSICUM
 .endif
 
-.if ${MK_PF} != "no"
-CFLAGS+=-DPF
-.endif
-
 NO_WERROR?=	YES
 
 CLEANFILES=	kdump_subr.c kdump_subr.h

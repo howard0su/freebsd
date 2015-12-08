@@ -18,6 +18,10 @@ CLEANFILES= ioctl.c
 CPP+=	-m32
 .endif
 
+.if ${MK_PF} != "no"
+CFLAGS+=-DPF
+.endif
+
 ioctl.c: mkioctls
 	env MACHINE=${MACHINE} CPP="${CPP}" \
 		/bin/sh ${.CURDIR}/mkioctls ${DESTDIR}${INCLUDEDIR} > ${.TARGET}
