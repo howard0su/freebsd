@@ -219,6 +219,9 @@ typedef struct oaiocb {
  */
 
 /* jobflags */
+#define	KAIOCB_QUEUEING		0x01
+#define	KAIOCB_CANCELLED	0x02
+#define	KAIOCB_CANCELLING	0x04
 #define	KAIOCB_CHECKSYNC	0x08
 
 /*
@@ -307,14 +310,13 @@ static void	aio_process_mlock(struct kaiocb *job);
 static int	aio_newproc(int *);
 int		aio_aqueue(struct thread *td, struct aiocb *ujob,
 		    struct aioliojob *lio, int type, struct aiocb_ops *ops);
-static int	aio_queue_file(struct file *fp, struct aiocblist *aiocbe);
+static int	aio_queue_file(struct file *fp, struct kaiocb *job);
 static void	aio_physwakeup(struct bio *bp);
 static void	aio_proc_rundown(void *arg, struct proc *p);
 static void	aio_proc_rundown_exec(void *arg, struct proc *p,
 		    struct image_params *imgp);
 static int	aio_qphysio(struct proc *p, struct kaiocb *job);
 static void	aio_daemon(void *param);
-static void	aio_swake_cb(struct socket *, struct sockbuf *);
 static int	aio_unload(void);
 static void	aio_bio_done_notify(struct proc *userp, struct kaiocb *job);
 static int	aio_kick(struct proc *userp);
@@ -441,8 +443,6 @@ aio_onceonly(void)
 {
 	int error;
 
-	/* XXX: should probably just use so->callback */
-	aio_swake = &aio_swake_cb;
 	exit_tag = EVENTHANDLER_REGISTER(process_exit, aio_proc_rundown, NULL,
 	    EVENTHANDLER_PRI_ANY);
 	exec_tag = EVENTHANDLER_REGISTER(process_exec, aio_proc_rundown_exec,
@@ -513,8 +513,7 @@ aio_unload(void)
 	if (error)
 		return error;
 	async_io_version = 0;
-	aio_swake = NULL;
-	taskqueue_free(taskqueue_aiod_kick);
+	taskqueue_free(taskqueue_aiod_bio);
 	delete_unrhdr(aiod_unr);
 	uma_zdestroy(kaio_zone);
 	uma_zdestroy(aiop_zone);
@@ -680,46 +679,78 @@ aio_proc_rundown_exec(void *arg, struct proc *p,
 }
 
 static int
-aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
+aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct kaiocb *job)
 {
+	aio_cancel_fn *func;
 	struct file *fp;
 	struct socket *so;
-	int error;
+	int cancelled, error;
 
 	AIO_LOCK_ASSERT(ki, MA_OWNED);
-	switch (cbe->jobstate) {
+	if (job->jobflags & KAIOCB_CANCELLED ||
+	    job->jobstate == JOBST_JOBFINISHED)
+		return (0);
+	MPASS((job->jobflags & KAIOCB_CANCELLING) == 0);
+	job->jobflags |= KAIOCB_CANCELLED;
+	switch (job->jobstate) {
 	case JOBST_JOBQGLOBAL:
 		mtx_lock(&aio_job_mtx);
-		TAILQ_REMOVE(&aio_jobs, cbe, list);
+		TAILQ_REMOVE(&aio_jobs, job, list);
 		mtx_unlock(&aio_job_mtx);
 		break;
 	case JOBST_JOBQSOCK:
-		fp = cbe->fd_file;
+		fp = job->fd_file;
 		MPASS(fp->f_type == DTYPE_SOCKET);
 		so = fp->f_data;
 		mtx_lock(&aio_job_mtx);
-		TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
+		TAILQ_REMOVE(&so->so_aiojobq, job, list);
 		mtx_unlock(&aio_job_mtx);
 		break;
 	case JOBST_JOBQSYNC:
 		mtx_lock(&aio_job_mtx);
-		TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
+		TAILQ_REMOVE(&ki->kaio_syncqueue, job, list);
 		mtx_unlock(&aio_job_mtx);
 		break;
 	case JOBST_JOBQPRIVATE:
-		error = cbe->cancel_fn(cbe);
-		if (error != 0)
-			return (0);
-		break;
+		func = job->cancel_fn;
+
+		/*
+		 * Set the CANCELLING flag so that aio_complete() will
+		 * defer completions of this job.  This prevents the
+		 * job from being freed out from under the cancel
+		 * callback.  After the callback any deferred
+		 * completion (whether from the callback or any other
+		 * source) will be completed.
+		 */
+		job->jobflags |= KAIOCB_CANCELLING;
+		AIO_UNLOCK(ki);
+		func(job);
+		AIO_LOCK(ki);
+		job->jobflags &= ~KAIOCB_CANCELLING;
+		if (job->jobstate == JOBST_JOBFINISHED) {
+			cancelled = job->uaiocb._aiocb_private.error ==
+			    ECANCELED;
+			TAILQ_REMOVE(&ki->kaio_jobqueue, job, plist);
+			aio_bio_done_notify(p, job);
+		} else {
+			/*
+			 * The cancel callback might have scheduled an
+			 * operation to cancel this request, but it is
+			 * only counted as cancelled if the request is
+			 * cancelled when the callback returns.
+			 */
+			cancelled = 0;
+		}
+		return (0);
 	default:
 		return (0);
 	}
 
-	cbe->jobstate = JOBST_JOBFINISHED;
-	cbe->uaiocb._aiocb_private.status = -1;
-	cbe->uaiocb._aiocb_private.error = ECANCELED;
-	TAILQ_REMOVE(&ki->kaio_jobqueue, cbe, plist);
-	aio_bio_done_notify(p, cbe);
+	job->jobstate = JOBST_JOBFINISHED;
+	job->uaiocb._aiocb_private.status = -1;
+	job->uaiocb._aiocb_private.error = ECANCELED;
+	TAILQ_REMOVE(&ki->kaio_jobqueue, job, plist);
+	aio_bio_done_notify(p, job);
 	return (1);
 }
 
@@ -1072,43 +1103,65 @@ notification_done:
 	}
 }
 
-void
-aio_queue(struct aiocblist *aiocbe, aio_cancel_fn *func)
+bool
+aio_completed(struct kaiocb *job)
 {
 	struct kaioinfo *ki;
-	struct aioliojob *lj;
-
-	ki = aiocbe->userproc->p_aioinfo;
-	lj = aiocbe->lio;
-
+	bool completed;
+	
+	ki = job->userproc->p_aioinfo;
 	AIO_LOCK(ki);
-	TAILQ_INSERT_TAIL(&ki->kaio_all, aiocbe, allist);
-	TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, aiocbe, plist);
-	aiocbe->jobstate = JOBST_JOBQPRIVATE;
-	aiocbe->cancel_fn = func;
-	ki->kaio_count++;
-	if (lj)
-		lj->lioj_count++;
+	completed = job->jobstate == JOBST_JOBFINISHED;
 	AIO_UNLOCK(ki);
-	atomic_add_int(&num_queue_count, 1);
+	return (completed);
+}
+
+bool
+aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn *func)
+{
+	struct kaioinfo *ki;
+	
+	ki = job->userproc->p_aioinfo;
+	AIO_LOCK(ki);
+	if (job->jobflags & KAIOCB_CANCELLED) {
+		AIO_UNLOCK(ki);
+		return (false);
+	}
+	job->jobstate = JOBST_JOBQPRIVATE;	
+	job->cancel_fn = func;
+	AIO_UNLOCK(ki);
+	return (true);
 }
 
 void
-aio_complete(struct aiocblist *aiocbe, long status, int error)
+aio_complete(struct kaiocb *job, long status, int error)
 {
 	struct kaioinfo *ki;
 	struct proc *userp;
 
-	aiocbe->uaiocb._aiocb_private.error = error;
-	aiocbe->uaiocb._aiocb_private.status = status;
+	job->uaiocb._aiocb_private.error = error;
+	job->uaiocb._aiocb_private.status = status;
 
-	userp = aiocbe->userproc;
+	userp = job->userproc;
 	ki = userp->p_aioinfo;
 
 	AIO_LOCK(ki);
-	TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
-	aio_bio_done_notify(userp, aiocbe);
+	KASSERT(job->jobstate != JOBST_JOBFINISHED,
+	    ("duplicate aio_complete"));
+	if (job->jobflags & (KAIOCB_QUEUEING | KAIOCB_CANCELLING))
+		job->jobstate = JOBST_JOBFINISHED;
+	else {
+		TAILQ_REMOVE(&ki->kaio_jobqueue, job, plist);
+		aio_bio_done_notify(userp, job);
+	}
 	AIO_UNLOCK(ki);
+}
+
+void
+aio_cancel(struct kaiocb *job)
+{
+
+	aio_complete(job, -1, ECANCELED);
 }
 
 static void
@@ -1432,45 +1485,6 @@ unref:
 	return (error);
 }
 
-/*
- * Wake up aio requests that may be serviceable now.
- */
-static void
-aio_swake_cb(struct socket *so, struct sockbuf *sb)
-{
-	struct kaiocb *job;
-	int opcode;
-
-	SOCKBUF_LOCK_ASSERT(sb);
-	if (sb == &so->so_snd)
-		opcode = LIO_WRITE;
-	else
-		opcode = LIO_READ;
-
-	sb->sb_flags &= ~SB_AIO;
-	mtx_lock(&aio_job_mtx);
-	TAILQ_FOREACH(job, &so->so_aiojobq, list) {
-		if (opcode == job->uaiocb.aio_lio_opcode) {
-			if (job->jobstate != JOBST_JOBQSOCK)
-				panic("invalid queue value");
-			/* XXX
-			 * We don't have actual sockets backend yet,
-			 * so we simply move the request to the generic
-			 * file I/O backend.
-			 *
-			 * Queue a single request for completion.
-			 * Once it has completed it will queue the next
-			 * request.
-			 */
-			TAILQ_REMOVE(&so->so_aiojobq, job, list);
-			TAILQ_INSERT_TAIL(&aio_jobs, job, list);
-			aio_kick_nowait(job->userproc);
-			break;
-		}
-	}
-	mtx_unlock(&aio_job_mtx);
-}
-
 static int
 convert_old_sigevent(struct osigevent *osig, struct sigevent *nsig)
 {
@@ -1745,7 +1759,8 @@ no_kqueue:
 	job->uaiocb._aiocb_private.error = EINPROGRESS;
 	job->userproc = p;
 	job->cred = crhold(td->td_ucred);
-	job->jobflags = 0;
+	job->jobflags = KAIOCB_QUEUEING;
+	job->jobstate = JOBST_NULL;
 	job->lio = lj;
 
 	/* XXX: fo_aio_queue check is temporary */
@@ -1753,13 +1768,32 @@ no_kqueue:
 		error = aio_queue_file(fp, job);
 	else
 		error = fo_aio_queue(fp, job);
+	if (error)
+		goto aqueue_fail;
+
+	AIO_LOCK(ki);
+	job->jobflags &= ~KAIOCB_QUEUEING;
+	TAILQ_INSERT_TAIL(&ki->kaio_all, job, allist);
+	ki->kaio_count++;
+	if (lj)
+		lj->lioj_count++;
+	atomic_add_int(&num_queue_count, 1);
+	if (job->jobstate == JOBST_JOBFINISHED) {
+		/*
+		 * The queue callback completed the request synchronously.
+		 * The bulk of the completion is deferred in that case
+		 * until this point.
+		 */
+		aio_bio_done_notify(p, job);
+	} else
+		TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, job, plist);
+	AIO_UNLOCK(ki);
+		
 aqueue_fail:
-	if (error) {
-		if (fp)
-			fdrop(fp, td);
-		uma_zfree(aiocb_zone, job);
-		ops->store_error(ujob, error);
-	}
+	if (fp)
+		fdrop(fp, td);
+	uma_zfree(aiocb_zone, job);
+	ops->store_error(ujob, error);
 	return (error);
 }
 
@@ -1779,50 +1813,6 @@ aio_queue_file(struct file *fp, struct kaiocb *job)
 	if (opcode == LIO_SYNC)
 		goto queueit;
 
-	if (fp && fp->f_type == DTYPE_SOCKET) {
-		/*
-		 * Alternate queueing for socket ops: Reach down into the
-		 * descriptor to get the socket data.  Then check to see if the
-		 * socket is ready to be read or written (based on the requested
-		 * operation).
-		 *
-		 * If it is not ready for io, then queue the job on the
-		 * socket, and set the flags so we get a call when sbnotify()
-		 * happens.
-		 *
-		 * Note if opcode is neither LIO_WRITE nor LIO_READ we lock
-		 * and unlock the snd sockbuf for no reason.
-		 */
-		so = fp->f_data;
-		error = (*so->so_proto->pr_usrreqs->pru_aio_queue)(so, job);
-		if (error == 0)
-			goto done;
-		sb = (opcode == LIO_READ) ? &so->so_rcv : &so->so_snd;
-		SOCKBUF_LOCK(sb);
-		if (((opcode == LIO_READ) && (!soreadable(so))) || ((opcode ==
-		    LIO_WRITE) && (!sowriteable(so)))) {
-			sb->sb_flags |= SB_AIO;
-
-			mtx_lock(&aio_job_mtx);
-			TAILQ_INSERT_TAIL(&so->so_aiojobq, job, list);
-			mtx_unlock(&aio_job_mtx);
-
-			AIO_LOCK(ki);
-			TAILQ_INSERT_TAIL(&ki->kaio_all, job, allist);
-			TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, job, plist);
-			job->jobstate = JOBST_JOBQSOCK;
-			ki->kaio_count++;
-			if (lj)
-				lj->lioj_count++;
-			AIO_UNLOCK(ki);
-			SOCKBUF_UNLOCK(sb);
-			atomic_add_int(&num_queue_count, 1);
-			error = 0;
-			goto done;
-		}
-		SOCKBUF_UNLOCK(sb);
-	}
-
 	if ((error = aio_qphysio(job->userproc, job)) == 0)
 		goto done;
 #if 0
@@ -1833,14 +1823,8 @@ aio_queue_file(struct file *fp, struct kaiocb *job)
 	}
 #endif
 queueit:
-	atomic_add_int(&num_queue_count, 1);
 
 	AIO_LOCK(ki);
-	ki->kaio_count++;
-	if (lj)
-		lj->lioj_count++;
-	TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, job, plist);
-	TAILQ_INSERT_TAIL(&ki->kaio_all, job, allist);
 	if (opcode == LIO_SYNC) {
 		TAILQ_FOREACH(job2, &ki->kaio_jobqueue, plist) {
 			if (job2->fd_file == job->fd_file &&
