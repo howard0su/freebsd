@@ -1344,24 +1344,21 @@ aio_daemon(void *_id)
 		 * thereby freeing resources.
 		 */
 		if ((aiop->aiothreadflags & AIOP_FREE) &&
-		    (num_aio_procs > target_aio_procs)) {
-			TAILQ_REMOVE(&aio_freeproc, aiop, list);
-			num_aio_procs--;
-			mtx_unlock(&aio_job_mtx);
-			uma_zfree(aiop_zone, aiop);
-			free_unr(aiod_unr, id);
-			vmspace_free(myvm);
-
-			KASSERT(mycp->p_vmspace == myvm,
-			    ("AIOD: bad vmspace for exiting daemon"));
-			KASSERT(myvm->vm_refcnt > 1,
-			    ("AIOD: bad vm refcnt for exiting daemon: %d",
-			    myvm->vm_refcnt));
-			kproc_exit(0);
-		}
+		    (num_aio_procs > target_aio_procs))
+			break;
 	}
+	TAILQ_REMOVE(&aio_freeproc, aiop, list);
+	num_aio_procs--;
 	mtx_unlock(&aio_job_mtx);
-	panic("shouldn't be here\n");
+	uma_zfree(aiop_zone, aiop);
+	free_unr(aiod_unr, id);
+	vmspace_free(myvm);
+
+	KASSERT(mycp->p_vmspace == myvm,
+	    ("AIOD: bad vmspace for exiting daemon"));
+	KASSERT(myvm->vm_refcnt > 1,
+	    ("AIOD: bad vm refcnt for exiting daemon: %d", myvm->vm_refcnt));
+	kproc_exit(0);
 }
 
 /*
