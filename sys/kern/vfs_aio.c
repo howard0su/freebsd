@@ -1354,13 +1354,9 @@ aio_daemon(void *_id)
 
 			KASSERT(mycp->p_vmspace == myvm,
 			    ("AIOD: bad vmspace for exiting daemon"));
-#ifdef DIAGNOSTIC
-			if (myvm->vm_refcnt <= 1) {
-				printf("AIOD: bad vm refcnt for"
-				    " exiting daemon: %d\n",
-				    myvm->vm_refcnt);
-			}
-#endif
+			KASSERT(myvm->vm_refcnt > 1,
+			    ("AIOD: bad vm refcnt for exiting daemon: %d",
+			    myvm->vm_refcnt));
 			kproc_exit(0);
 		}
 	}
