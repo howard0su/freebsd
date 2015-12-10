@@ -1202,17 +1202,13 @@ aio_daemon(void *_id)
 		TAILQ_INSERT_HEAD(&aio_freeproc, aiop, list);
 		aiop->aiothreadflags |= AIOP_FREE;
 
-		if (msleep(aiop->aiothread, &aio_job_mtx, PRIBIO, "aiordy",
-		    aiod_lifetime) != EWOULDBLOCK)
-			continue;
-		if (!TAILQ_EMPTY(&aio_jobs))
-			continue;
-
 		/*
 		 * If daemon is inactive for a long time, allow it to exit,
 		 * thereby freeing resources.
 		 */
-		if ((aiop->aiothreadflags & AIOP_FREE) &&
+		if (msleep(aiop->aiothread, &aio_job_mtx, PRIBIO, "aiordy",
+		    aiod_lifetime) == EWOULDBLOCK && TAILQ_EMPTY(&aio_jobs) &&
+		    (aiop->aiothreadflags & AIOP_FREE) &&
 		    (num_aio_procs > target_aio_procs))
 			break;
 	}
