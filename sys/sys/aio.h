@@ -175,9 +175,10 @@ struct kaiocb {
 	aio_cancel_fn *cancel_fn;
 };
 
-void	aio_complete(struct aiocblist *aiocbe, long status, int error);
-bool	aio_completed(struct aiocblist *aiocbe);
-bool	aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn *func);
+void	aio_complete(struct kaiocb *job, long status, int error);
+bool	aio_completed(struct kaiocb *job);
+bool	aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn *func);
+void	aio_switch_vmspace(struct kaiocb *job);
 
 #endif
 

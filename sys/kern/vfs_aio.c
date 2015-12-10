@@ -1164,7 +1164,7 @@ aio_cancel(struct kaiocb *job)
 	aio_complete(job, -1, ECANCELED);
 }
 
-static void
+void
 aio_switch_vmspace(struct kaiocb *job)
 {
 
@@ -1181,7 +1181,7 @@ aio_daemon(void *_id)
 	struct kaiocb *job;
 	struct aioproc *aiop;
 	struct kaioinfo *ki;
-	struct proc *p, *userp;
+	struct proc *p;
 	struct vmspace *myvm;
 	struct thread *td = curthread;
 	int id = (intptr_t)_id;
@@ -1225,7 +1225,6 @@ aio_daemon(void *_id)
 		 */
 		while ((job = aio_selectjob(aiop)) != NULL) {
 			mtx_unlock(&aio_job_mtx);
-			userp = job->userproc;
 
 			/*
 			 * Connect to process address space for user program.
