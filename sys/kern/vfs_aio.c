@@ -1048,6 +1048,41 @@ notification_done:
 	}
 }
 
+static void
+aio_switch_vmspace_low(struct vmspace *newvm)
+{
+	struct vmspace *oldvm;
+
+	oldvm = curproc->p_vmspace;
+	if (oldvm == newvm)
+		return;
+
+	/*
+	 * Point to the new address space and refer to it.
+	 */
+	curproc->p_vmspace = newvm;
+	atomic_add_int(&newvm->vm_refcnt, 1);
+
+	/* Activate the new mapping. */
+	pmap_activate(curthread);
+
+	/* Remove the daemon's reference to the old address space. */
+	vmspace_free(oldvm);
+}
+
+static void
+aio_switch_vmspace(struct aiocbelist *aiocbe)
+{
+
+	/*
+	 * User processes will not change their vmspace until any
+	 * active AIO jobs are cancelled, so we do not need to use
+	 * PROC_VMSPACE_LOCK() here or the more expensive
+	 * vmspace_acquire_ref().
+	 */
+	aio_switch_vmspace_low(aiocbe->userproc->p_vmspace);
+}
+
 /*
  * The AIO daemon, most of the actual work is done in aio_process_*,
  * but the setup (and address space mgmt) is done in this routine.
@@ -1058,16 +1093,19 @@ aio_daemon(void *_id)
 	struct aiocblist *aiocbe;
 	struct aiothreadlist *aiop;
 	struct kaioinfo *ki;
-	struct proc *curcp, *mycp, *userp;
+	struct proc *mycp;
 	struct vmspace *myvm, *tmpvm;
 	struct thread *td = curthread;
 	int id = (intptr_t)_id;
 
 	/*
-	 * Local copies of curproc (cp) and vmspace (myvm)
+	 * Grab an extra reference on the daemon's vmspace so that it
+	 * doesn't get freed by jobs that switch to a different
+	 * vmspace.
 	 */
-	mycp = td->td_proc;
-	myvm = mycp->p_vmspace;
+	mycp = curproc;
+	myvm = myp->p_vmspace;
+	atomic_add_int(&mycp->p_vmspace->vm_refcnt, 1);
 
 	KASSERT(mycp->p_textvp == NULL, ("kthread has a textvp"));
 
@@ -1109,39 +1147,11 @@ aio_daemon(void *_id)
 		 */
 		while ((aiocbe = aio_selectjob(aiop)) != NULL) {
 			mtx_unlock(&aio_job_mtx);
-			userp = aiocbe->userproc;
 
 			/*
 			 * Connect to process address space for user program.
 			 */
-			if (userp != curcp) {
-				/*
-				 * Save the current address space that we are
-				 * connected to.
-				 */
-				tmpvm = mycp->p_vmspace;
-
-				/*
-				 * Point to the new user address space, and
-				 * refer to it.
-				 */
-				mycp->p_vmspace = userp->p_vmspace;
-				atomic_add_int(&mycp->p_vmspace->vm_refcnt, 1);
-
-				/* Activate the new mapping. */
-				pmap_activate(FIRST_THREAD_IN_PROC(mycp));
-
-				/*
-				 * If the old address space wasn't the daemons
-				 * own address space, then we need to remove the
-				 * daemon's reference from the other process
-				 * that it was acting on behalf of.
-				 */
-				if (tmpvm != myvm) {
-					vmspace_free(tmpvm);
-				}
-				curcp = userp;
-			}
+			aio_switch_vmspace(aiocbe);
 
 			ki = userp->p_aioinfo;
 
@@ -1175,29 +1185,9 @@ aio_daemon(void *_id)
 		/*
 		 * Disconnect from user address space.
 		 */
-		if (curcp != mycp) {
-
+		if (mycp->p_vmspace != myvm) {
 			mtx_unlock(&aio_job_mtx);
-
-			/* Get the user address space to disconnect from. */
-			tmpvm = mycp->p_vmspace;
-
-			/* Get original address space for daemon. */
-			mycp->p_vmspace = myvm;
-
-			/* Activate the daemon's address space. */
-			pmap_activate(FIRST_THREAD_IN_PROC(mycp));
-#ifdef DIAGNOSTIC
-			if (tmpvm == myvm) {
-				printf("AIOD: vmspace problem -- %d\n",
-				    mycp->p_pid);
-			}
-#endif
-			/* Remove our vmspace reference. */
-			vmspace_free(tmpvm);
-
-			curcp = mycp;
-
+			aio_switch_vmspace_low(myvm);
 			mtx_lock(&aio_job_mtx);
 			/*
 			 * We have to restart to avoid race, we only sleep if
@@ -1226,11 +1216,15 @@ aio_daemon(void *_id)
 					mtx_unlock(&aio_job_mtx);
 					uma_zfree(aiop_zone, aiop);
 					free_unr(aiod_unr, id);
+					vmspace_free(myvm);
+
+					KASSERT(mycp->p_vmspace == myvm,
+					    ("AIOD: bad vmspace for exiting daemon"));
 #ifdef DIAGNOSTIC
-					if (mycp->p_vmspace->vm_refcnt <= 1) {
+					if (myvm->vm_refcnt <= 1) {
 						printf("AIOD: bad vm refcnt for"
 						    " exiting daemon: %d\n",
-						    mycp->p_vmspace->vm_refcnt);
+						    myvm->vm_refcnt);
 					}
 #endif
 					kproc_exit(0);
