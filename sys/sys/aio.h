@@ -149,6 +149,7 @@ struct sockbuf;
 #include <sys/signalvar.h>
 
 typedef void (aio_cancel_fn)(struct aiocblist *);
+typedef void (aio_task_fn)(struct aiocblist *);
 
 struct kaiocb {
 	TAILQ_ENTRY(kaiocb) list;	/* (b) internal list of for backend */
@@ -173,8 +174,10 @@ struct kaiocb {
 	uint64_t seqno;			/* (*) job number */
 	int	pending;		/* (a) number of pending I/O, aio_fsync only */
 	aio_cancel_fn *cancel_fn;
+	aio_task_fn *task_fn;
 };
 
+void	aio_schedule(struct kaiocb *job, aio_task_fn *func);
 void	aio_complete(struct kaiocb *job, long status, int error);
 bool	aio_completed(struct kaiocb *job);
 bool	aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn *func);
