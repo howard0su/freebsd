@@ -729,6 +729,15 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 		func = cbe->cancel_fn;
 
 		/*
+		 * If there is no cancel routine, just leave the job
+		 * marked as cancelled.  The job should be in active
+		 * use by a caller who should complete it normally or
+		 * when it fails to install a cancel routine.
+		 */
+		if (func == NULL)
+			return (0);
+
+		/*
 		 * Set the CANCELLING flag so that aio_complete() will
 		 * defer completions of this cbe.  This prevents the
 		 * cbe from being freed out from under the cancel
@@ -799,7 +808,8 @@ restart:
 
 	/* Wait for all running I/O to be finished */
 	if (TAILQ_FIRST(&ki->kaio_bufqueue) ||
-	    TAILQ_FIRST(&ki->kaio_jobqueue)) {
+	    TAILQ_FIRST(&ki->kaio_jobqueue) ||
+	    ki->kaio_active_count != 0) {
 		ki->kaio_flags |= KAIO_WAKEUP;
 		msleep(&p->p_aioinfo, AIO_MTX(ki), PRIBIO, "aioprn", hz);
 		goto restart;
@@ -840,12 +850,17 @@ aio_selectjob(struct aiothreadlist *aiop)
 	struct proc *userp;
 
 	mtx_assert(&aio_job_mtx, MA_OWNED);
+restart:
 	TAILQ_FOREACH(aiocbe, &aio_jobs, list) {
 		userp = aiocbe->userproc;
 		ki = userp->p_aioinfo;
 
 		if (ki->kaio_active_count < ki->kaio_maxactive_count) {
 			TAILQ_REMOVE(&aio_jobs, aiocbe, list);
+			if (!aio_clear_cancel_function(aiocbe)) {
+				aio_cancel(aiocbe);
+				goto restart;
+			}
 			/* Account for currently active jobs. */
 			ki->kaio_active_count++;
 			aiocbe->jobstate = JOBST_JOBRUNNING;
@@ -1116,6 +1131,34 @@ notification_done:
 	}
 }
 
+/*
+ * Cancel routine theory of operation.
+ *
+ * When queueing a request somewhere such that it can be cancelled, the
+ * caller should:
+ *
+ *  1) acquire lock that protects the associated queue
+ *  2) call aio_set_cancel_function() to install the cancel routine
+ *  3) if that fails, the request has a pending cancel and should be
+ *     cancelled via aio_cancel().
+ *  4) queue the request
+ *
+ * When dequeing a request to service it or hand it off to somewhere else,
+ * the caller should:
+ *
+ *  1) acquire the lock that protects the associated queue
+ *  2) dequeue the request
+ *  2) call aio_clear_cancel_function() to clear the cancel routine
+ *  3) if that fails, the cancel routine is about to be called.  The
+ *     caller should cancel the request
+ *
+ * The cancel routine should:
+ *
+ *  1) acquire the lock that protects the associated queue
+ *  2) check aio_completed().  If that is true, then the request was
+ *     cancelled or completed while the cancel function waited for
+ *     the lock, so just return
+ */
 bool
 aio_completed(struct aiocblist *aiocbe)
 {
@@ -1130,20 +1173,48 @@ aio_completed(struct aiocblist *aiocbe)
 }
 
 bool
-aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn *func)
+aio_clear_cancel_function(struct aiocblist *aiocbe)
+{
+	struct kaioinfo *ki;
+
+	ki = aiocbe->userproc->p_aioinfo;
+	AIO_LOCK(ki);
+	MPASS(aiocbe->jobstate == JOBST_JOBQPRIVATE);
+	MPASS(aiocbe->cancel_fn != NULL);
+	if (aiocbe->jobflags & AIOCBLIST_CANCELLING) {
+		AIO_UNLOCK(ki);
+		return (false);
+	}
+	aiocbe->cancel_fn = NULL;
+	AIO_UNLOCK(ki);
+	return (true);
+}
+
+static bool
+aio_set_cancel_function_locked(struct aiocblist *aiocbe, aio_cancel_fn *func)
 {
 	struct kaioinfo *ki;
 	
 	ki = aiocbe->userproc->p_aioinfo;
-	AIO_LOCK(ki);
-	if (aiocbe->jobflags & AIOCBLIST_CANCELLED) {
-		AIO_UNLOCK(ki);
+	AIO_LOCK_ASSERT(ki);
+	if (aiocbe->jobflags & AIOCBLIST_CANCELLED)
 		return (false);
-	}
 	aiocbe->jobstate = JOBST_JOBQPRIVATE;	
 	aiocbe->cancel_fn = func;
-	AIO_UNLOCK(ki);
 	return (true);
+}
+
+bool
+aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn *func)
+{
+	struct kaioinfo *ki;
+	bool installed;
+	
+	ki = aiocbe->userproc->p_aioinfo;
+	AIO_LOCK(ki);
+	installed = aio_set_cancel_function_locked(aiocbe, func);
+	AIO_UNLOCK(ki);
+	return (installed);
 }
 
 void
@@ -1215,6 +1286,43 @@ aio_switch_vmspace(struct aiocbelist *aiocbe)
 }
 
 /*
+ * XXX: Transition stub
+ */
+static void
+aio_default_handle(struct aiocblist *aiocbe)
+{
+	struct kaioinfo *ki;
+
+	/*
+	 * Connect to process address space for user program.
+	 */
+	aio_switch_vmspace(aiocbe);
+
+	/* Do the I/O function. */
+	switch(aiocbe->uaiocb.aio_lio_opcode) {
+	case LIO_READ:
+	case LIO_WRITE:
+		aio_process_rw(aiocbe);
+		break;
+	case LIO_SYNC:
+		aio_process_sync(aiocbe);
+		break;
+	case LIO_MLOCK:
+		aio_process_mlock(aiocbe);
+		break;
+	}
+
+	/* XXX: Eventually aio_complete(). */
+	ki = aiocbe->userproc->p_aioinfo;
+	AIO_LOCK(ki);
+	TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
+	aio_bio_done_notify(userp, aiocbe);
+	AIO_UNLOCK(ki);
+
+}
+
+
+/*
  * The AIO daemon, most of the actual work is done in aio_process_*,
  * but the setup (and address space mgmt) is done in this routine.
  */
@@ -1279,38 +1387,12 @@ aio_daemon(void *_id)
 		while ((aiocbe = aio_selectjob(aiop)) != NULL) {
 			mtx_unlock(&aio_job_mtx);
 
-			/*
-			 * Connect to process address space for user program.
-			 */
-			aio_switch_vmspace(aiocbe);
-
-			ki = userp->p_aioinfo;
-
-			/* Do the I/O function. */
-			switch(aiocbe->uaiocb.aio_lio_opcode) {
-			case LIO_READ:
-			case LIO_WRITE:
-				aio_process_rw(aiocbe);
-				break;
-			case LIO_SYNC:
-				aio_process_sync(aiocbe);
-				break;
-			case LIO_MLOCK:
-				aio_process_mlock(aiocbe);
-				break;
-			}
+			ki = aiocbe->userproc->p_aioinfo;
+			aiocbe->task_fn(aiocbe);
 
 			mtx_lock(&aio_job_mtx);
 			/* Decrement the active job count. */
 			ki->kaio_active_count--;
-			mtx_unlock(&aio_job_mtx);
-
-			AIO_LOCK(ki);
-			TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
-			aio_bio_done_notify(userp, aiocbe);
-			AIO_UNLOCK(ki);
-
-			mtx_lock(&aio_job_mtx);
 		}
 
 		/*
@@ -1322,8 +1404,7 @@ aio_daemon(void *_id)
 			mtx_lock(&aio_job_mtx);
 			/*
 			 * We have to restart to avoid race, we only sleep if
-			 * no job can be selected, that should be
-			 * curcp == mycp.
+			 * no job can be selected.
 			 */
 			continue;
 		}
@@ -1850,6 +1931,36 @@ aqueue_fail:
 	return (error);
 }
 
+static void
+aio_cancel_daemon_job(struct aiocblist *aiocbe)
+{
+
+	mtx_lock(&aio_job_mtx);
+	if (aio_completed(aiocbe)) {
+		mtx_unlock(&aio_job_mtx);
+		return;
+	}
+	TAILQ_REMOVE(&aio_jobs, cbe, list);
+	mtx_unlock(&aio_job_mtx);
+	aio_cancel(aiocbe);
+}
+
+void
+aio_schedule(struct aiocblist *aiocbe, aio_task_fn *func)
+{
+
+	mtx_lock(&aio_job_mtx);
+	if (!aio_set_cancel_function(aiocbe, aio_cancel_daemon_job)) {
+		mtx_unlock(&aio_job_mtx);
+		aio_cancel(aiocbe);
+		return;
+	}
+	aiocbe->task_fn = func;
+	TAILQ_INSERT_TAIL(&aio_jobs, aiocbe, list);
+	aio_kick_nowait(aiocbe->userproc);
+	mtx_unlock(&aio_job_mtx);
+}
+
 int
 aio_queue_file(struct file *fp, struct aiocblist *aiocbe)
 {
@@ -1877,8 +1988,8 @@ aio_queue_file(struct file *fp, struct aiocblist *aiocbe)
 #endif
 queueit:
 
-	AIO_LOCK(ki);
 	if (opcode == LIO_SYNC) {
+		AIO_LOCK(ki);
 		TAILQ_FOREACH(cb, &ki->kaio_jobqueue, plist) {
 			if (cb->fd_file == aiocbe->fd_file &&
 			    cb->uaiocb.aio_lio_opcode != LIO_SYNC &&
@@ -1899,15 +2010,11 @@ queueit:
 			TAILQ_INSERT_TAIL(&ki->kaio_syncqueue, aiocbe, list);
 			aiocbe->jobstate = JOBST_JOBQSYNC;
 			AIO_UNLOCK(ki);
-			goto done;
+			return (0);
 		}
+		AIO_UNLOCK(ki);
 	}
-	mtx_lock(&aio_job_mtx);
-	TAILQ_INSERT_TAIL(&aio_jobs, aiocbe, list);
-	aiocbe->jobstate = JOBST_JOBQGLOBAL;
-	aio_kick_nowait(aiocbe->userproc);
-	mtx_unlock(&aio_job_mtx);
-	AIO_UNLOCK(ki);
+	aio_schedule(aiocbe, aio_default_handle);
 	error = 0;
 done:
 	return (error);
