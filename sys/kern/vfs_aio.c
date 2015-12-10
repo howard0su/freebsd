@@ -1202,34 +1202,35 @@ aio_daemon(void *_id)
 		TAILQ_INSERT_HEAD(&aio_freeproc, aiop, list);
 		aiop->aiothreadflags |= AIOP_FREE;
 
+		if (msleep(aiop->aiothread, &aio_job_mtx, PRIBIO, "aiordy",
+		    aiod_lifetime) != EWOULDBLOCK)
+			continue;
+		if (!TAILQ_EMPTY(&aio_jobs))
+			continue;
+
 		/*
 		 * If daemon is inactive for a long time, allow it to exit,
 		 * thereby freeing resources.
 		 */
-		if (msleep(aiop->aiothread, &aio_job_mtx, PRIBIO, "aiordy",
-		    aiod_lifetime)) {
-			if (TAILQ_EMPTY(&aio_jobs)) {
-				if ((aiop->aiothreadflags & AIOP_FREE) &&
-				    (num_aio_procs > target_aio_procs)) {
-					TAILQ_REMOVE(&aio_freeproc, aiop, list);
-					num_aio_procs--;
-					mtx_unlock(&aio_job_mtx);
-					uma_zfree(aiop_zone, aiop);
-					free_unr(aiod_unr, id);
-					vmspace_free(myvm);
+		if ((aiop->aiothreadflags & AIOP_FREE) &&
+		    (num_aio_procs > target_aio_procs)) {
+			TAILQ_REMOVE(&aio_freeproc, aiop, list);
+			num_aio_procs--;
+			mtx_unlock(&aio_job_mtx);
+			uma_zfree(aiop_zone, aiop);
+			free_unr(aiod_unr, id);
+			vmspace_free(myvm);
 
-					KASSERT(mycp->p_vmspace == myvm,
-					    ("AIOD: bad vmspace for exiting daemon"));
+			KASSERT(mycp->p_vmspace == myvm,
+			    ("AIOD: bad vmspace for exiting daemon"));
 #ifdef DIAGNOSTIC
-					if (myvm->vm_refcnt <= 1) {
-						printf("AIOD: bad vm refcnt for"
-						    " exiting daemon: %d\n",
-						    myvm->vm_refcnt);
-					}
-#endif
-					kproc_exit(0);
-				}
+			if (myvm->vm_refcnt <= 1) {
+				printf("AIOD: bad vm refcnt for"
+				    " exiting daemon: %d\n",
+				    myvm->vm_refcnt);
 			}
+#endif
+			kproc_exit(0);
 		}
 	}
 	mtx_unlock(&aio_job_mtx);
