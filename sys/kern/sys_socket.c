@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/aio.h>
 #include <sys/domain.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -72,6 +73,7 @@ extern fo_kqfilter_t soo_kqfilter;
 static fo_stat_t soo_stat;
 static fo_close_t soo_close;
 static fo_fill_kinfo_t soo_fill_kinfo;
+static fo_aio_queue_t soo_aio_queue;
 
 struct fileops	socketops = {
 	.fo_read = soo_read,
@@ -86,6 +88,7 @@ struct fileops	socketops = {
 	.fo_chown = invfo_chown,
 	.fo_sendfile = invfo_sendfile,
 	.fo_fill_kinfo = soo_fill_kinfo,
+	.fo_aio_queue = soo_aio_queue,
 	.fo_flags = DFLAG_PASSABLE
 };
 
@@ -362,4 +365,69 @@ soo_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 	strncpy(kif->kf_path, so->so_proto->pr_domain->dom_name,
 	    sizeof(kif->kf_path));
 	return (0);	
+}
+
+/* XXX: Should probably become a growable pool. */
+TASKQUEUE_DEFINE_THREAD(so_aio_tq);
+
+static void
+soo_aio_cancel(struct aiocblist *aiocbe)
+{
+	struct socket *so;
+	struct sockbuf *sb;
+
+	so = fp->f_data;
+	opcode = aiocbe->uaiocb.aio_lio_opcode;
+	if (opcode == LIO_READ)
+		sb = &so->so_rcv;
+	else {
+		MPASS(opcode == LIO_WRITE);
+		sb = &so->so_snd;
+	}
+
+	SOCKBUF_LOCK(sb);
+	if (aio_completed(aiocbe)) {
+		SOCKBUF_UNLOCK(sb);
+		return;
+	}
+	TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
+	aio_cancel(aiocbe);
+	SOCKBUF_UNLOCK(sb);
+}
+
+static int
+soo_aio_queue(struct file *fp, struct aiocblist *aiocbe)
+{
+	struct socket *so;
+	struct sockbuf *sb;
+	int error, opcode;
+
+	so = fp->f_data;
+	error = (*so->so_proto->pr_usrreqs->pru_aio_queue)(so, aiocbe);
+	if (error == 0)
+		return (0);
+
+	opcode = aiocbe->uaiocb.aio_lio_opcode;
+	switch (opcode) {
+	case LIO_READ:
+		sb = &so->so_rcv;
+		break;
+	case LIO_WRITE:
+		sb = &so->so_snd;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	SOCKBUF_LOCK(sb);
+	if (!aio_set_cancel_function(aiocbe, soo_aio_cancel))
+		panic("new job was cancelled");
+	TAILQ_INSERT_TAIL(&sb->sb_aiojobq, aiocbe, list);
+	if (opcode == LIO_READ && soreadable(so) ||
+	    opcode == LIO_WRITE && sowriteable(so))
+		taskqueue_enqueue(socket_aio_tq, &sb->sb_aiotask);
+	else
+		sb->sb_flags |= SB_AIO;
+	SOCKBUF_UNLOCK(sb);
+	return (0);
 }

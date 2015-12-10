@@ -148,7 +148,7 @@ struct sockbuf;
 #include <sys/event.h>  /* XXX: For knlist */
 #include <sys/signalvar.h>
 
-typedef int (aio_cancel_fn)(struct aiocblist *);
+typedef void (aio_cancel_fn)(struct aiocblist *);
 
 struct aiocblist {
 	TAILQ_ENTRY(aiocblist) list;	/* (b) internal list of for backend */
@@ -175,10 +175,9 @@ struct aiocblist {
 	aio_cancel_fn *cancel_fn;
 };
 
-extern void (*aio_swake)(struct socket *, struct sockbuf *);
-
-void	aio_queue(struct aiocblist *aiocbe, aio_cancel_fn *func);
 void	aio_complete(struct aiocblist *aiocbe, long status, int error);
+bool	aio_completed(struct aiocblist *aiocbe);
+bool	aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn *func);
 
 #endif
 

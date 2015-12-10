@@ -313,8 +313,10 @@ sowakeup(struct socket *so, struct sockbuf *sb)
 		}
 	} else
 		ret = SU_OK;
-	if (sb->sb_flags & SB_AIO)
-		aio_swake(so, sb);
+	if (sb->sb_flags & SB_AIO) {
+		taskqueue_enqueue(socket_aio_tq, &sb->sb_aiotask);
+		sb->sb_flags &= ~SB_AIO;
+	}
 	SOCKBUF_UNLOCK(sb);
 	if (ret == SU_ISCONNECTED)
 		soisconnected(so);
