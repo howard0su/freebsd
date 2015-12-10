@@ -178,6 +178,7 @@ struct aiocblist {
 void	aio_complete(struct aiocblist *aiocbe, long status, int error);
 bool	aio_completed(struct aiocblist *aiocbe);
 bool	aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn *func);
+void	aio_switch_vmspace(struct aiocblist *aiocbe);
 
 #endif
 
