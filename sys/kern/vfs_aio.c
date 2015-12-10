@@ -513,7 +513,7 @@ aio_unload(void)
 	if (error)
 		return error;
 	async_io_version = 0;
-	taskqueue_free(taskqueue_aiod_bio);
+	taskqueue_free(taskqueue_aiod_kick);
 	delete_unrhdr(aiod_unr);
 	uma_zdestroy(kaio_zone);
 	uma_zdestroy(aiop_zone);
