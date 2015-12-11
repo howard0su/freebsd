@@ -29,6 +29,6 @@
 #ifndef __SYSDECODE_H__
 #define	__SYSDECODE_H__
 
-int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len, int _decimal);
+int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len);
 
 #endif /* !__SYSDECODE_H__ */

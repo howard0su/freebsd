@@ -1541,7 +1541,7 @@ ktruser(int len, void *p)
 {
 	unsigned char *cp;
 
-	if (sysdecode_utrace(stdout, p, len, decimal)) {
+	if (sysdecode_utrace(stdout, p, len)) {
 		printf("\n");
 		return;
 	}

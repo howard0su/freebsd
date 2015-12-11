@@ -59,8 +59,8 @@ struct utrace_rtld {
 	char name[MAXPATHLEN];
 };
 
-static void
-print_utrace_rtld(FILE *fp, void *p, size_t len, int decimal)
+static int
+print_utrace_rtld(FILE *fp, void *p, size_t len)
 {
 	struct utrace_rtld *ut = p;
 	unsigned char *cp;
@@ -135,16 +135,9 @@ print_utrace_rtld(FILE *fp, void *p, size_t len, int decimal)
 		    ut->name);
 		break;
 	default:
-		cp = p;
-		cp += 4;
-		len -= 4;
-		fprintf(fp, "RTLD: %zu ", len);
-		while (len--)
-			if (decimal)
-				fprintf(fp, " %d", *cp++);
-			else
-				fprintf(fp, " %02x", *cp++);
+		return (0);
 	}
+	return (1);
 }
 
 struct utrace_malloc {
@@ -169,12 +162,11 @@ print_utrace_malloc(FILE *fp, void *p)
 }
 
 int
-sysdecode_utrace(FILE *fp, void *p, size_t len, int decimal)
+sysdecode_utrace(FILE *fp, void *p, size_t len)
 {
 
 	if (len >= 8 && bcmp(p, "RTLD", 4) == 0) {
-		print_utrace_rtld(fp, p, len, decimal);
-		return (1);
+		return (print_utrace_rtld(fp, p, len));
 	}
 
 	if (len == sizeof(struct utrace_malloc)) {
