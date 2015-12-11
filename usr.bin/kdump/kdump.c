@@ -336,8 +336,6 @@ main(int argc, char *argv[])
 
 	strerror_init();
 	localtime_init();
-	sysdecode_set_int_format(decimal ? DECIMAL : HEXADECIMAL);
-	sysdecode_set_flags_format(KDUMP);
 #ifdef HAVE_LIBCAPSICUM
 	if (resolv != 0) {
 		if (cappwdgrp_setup(&cappwd, &capgrp) < 0) {
@@ -1543,7 +1541,7 @@ ktruser(int len, void *p)
 {
 	unsigned char *cp;
 
-	if (sysdecode_utrace(stdout, p, len)) {
+	if (sysdecode_utrace(stdout, p, len, decimal)) {
 		printf("\n");
 		return;
 	}

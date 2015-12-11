@@ -44,7 +44,6 @@ __FBSDID("$FreeBSD$");
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sysdecode.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -141,9 +140,6 @@ main(int ac, char **av)
 	if ((pid == 0 && ac == 0) ||
 	    (pid != 0 && ac != 0))
 		usage();
-
-	sysdecode_set_int_format(DECIMAL);
-	sysdecode_set_flags_format(TRUSS);
 
 	if (fname != NULL) { /* Use output file */
 		/*

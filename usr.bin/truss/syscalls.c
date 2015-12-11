@@ -1106,7 +1106,7 @@ print_utrace(FILE *fp, void *utrace_addr, size_t len)
 	unsigned char *utrace_buffer;
 
 	fprintf(fp, "{ ");
-	if (sysdecode_utrace(fp, utrace_addr, len)) {
+	if (sysdecode_utrace(fp, utrace_addr, len, 0)) {
 		fprintf(fp, " }");
 		return;
 	}
