@@ -7,6 +7,7 @@ LIB=	sysdecode
 SRCS=	utrace.c
 INCS=	sysdecode.h
 
-#MAN+=	sysdecode_utrace.3
+MAN+=	sysdecode.3 \
+#	sysdecode_utrace.3
 
 .include <bsd.lib.mk>
