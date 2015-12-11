@@ -29,20 +29,6 @@
 #ifndef __SYSDECODE_H__
 #define	__SYSDECODE_H__
 
-enum sysdecode_int_format {
-	DECIMAL = 1,
-	HEXADECIMAL,
-};
-
-enum sysdecode_flags_format {
-	KDUMP = 1,
-	TRUSS
-};
-
-enum sysdecode_flags_format sysdecode_get_flags_format(void);
-enum sysdecode_int_format sysdecode_get_int_format(void);
-int	sysdecode_set_flags_format(enum sysdecode_flags_format _format);
-int	sysdecode_set_int_format(enum sysdecode_int_format _format);
 int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len, int _decimal);
 
 #endif /* !__SYSDECODE_H__ */

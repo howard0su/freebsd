@@ -36,8 +36,6 @@ __FBSDID("$FreeBSD$");
 #include <strings.h>
 #include <sysdecode.h>
 
-#include "local.h"
-
 #define	UTRACE_DLOPEN_START		1
 #define	UTRACE_DLOPEN_STOP		2
 #define	UTRACE_DLCLOSE_START		3
