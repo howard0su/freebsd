@@ -923,6 +923,7 @@ aio_process_rw(struct aiocblist *aiocbe)
 	    aiocbe->uaiocb.aio_lio_opcode == LIO_WRITE,
 	    ("%s: opcode %d", __func__, aiocbe->uaiocb.aio_lio_opcode));
 
+	aio_switch_vmspace(aiocbe);
 	td = curthread;
 	td_savedcred = td->td_ucred;
 	td->td_ucred = aiocbe->cred;
@@ -983,8 +984,6 @@ aio_process_rw(struct aiocblist *aiocbe)
 	}
 
 	cnt -= auio.uio_resid;
-	cb->_aiocb_private.error = error;
-	cb->_aiocb_private.status = cnt;
 	td->td_ucred = td_savedcred;
 
 	/*
@@ -1029,6 +1028,8 @@ aio_process_rw(struct aiocblist *aiocbe)
 		mtx_unlock(&aio_job_mtx);
 		SOCKBUF_UNLOCK(sb);
 	}
+
+	aio_complete(cb, cnt, error);
 }
 
 static void
@@ -1036,7 +1037,6 @@ aio_process_sync(struct aiocblist *aiocbe)
 {
 	struct thread *td = curthread;
 	struct ucred *td_savedcred = td->td_ucred;
-	struct aiocb *cb = &aiocbe->uaiocb;
 	struct file *fp = aiocbe->fd_file;
 	int error = 0;
 
@@ -1046,9 +1046,8 @@ aio_process_sync(struct aiocblist *aiocbe)
 	td->td_ucred = aiocbe->cred;
 	if (fp->f_vnode != NULL)
 		error = aio_fsync_vnode(td, fp->f_vnode);
-	cb->_aiocb_private.error = error;
-	cb->_aiocb_private.status = 0;
 	td->td_ucred = td_savedcred;
+	aio_complete(aiocbe, 0, error);
 }
 
 static void
@@ -1060,10 +1059,10 @@ aio_process_mlock(struct aiocblist *aiocbe)
 	KASSERT(aiocbe->uaiocb.aio_lio_opcode == LIO_MLOCK,
 	    ("%s: opcode %d", __func__, aiocbe->uaiocb.aio_lio_opcode));
 
+	aio_switch_vmspace(aiocbe);
 	error = vm_mlock(aiocbe->userproc, aiocbe->cred,
 	    __DEVOLATILE(void *, cb->aio_buf), cb->aio_nbytes);
-	cb->_aiocb_private.error = error;
-	cb->_aiocb_private.status = 0;
+	aio_complete(aiocbe, 0, error);
 }
 
 static void
@@ -1286,43 +1285,6 @@ aio_switch_vmspace(struct aiocbelist *aiocbe)
 }
 
 /*
- * XXX: Transition stub
- */
-static void
-aio_default_handle(struct aiocblist *aiocbe)
-{
-	struct kaioinfo *ki;
-
-	/*
-	 * Connect to process address space for user program.
-	 */
-	aio_switch_vmspace(aiocbe);
-
-	/* Do the I/O function. */
-	switch(aiocbe->uaiocb.aio_lio_opcode) {
-	case LIO_READ:
-	case LIO_WRITE:
-		aio_process_rw(aiocbe);
-		break;
-	case LIO_SYNC:
-		aio_process_sync(aiocbe);
-		break;
-	case LIO_MLOCK:
-		aio_process_mlock(aiocbe);
-		break;
-	}
-
-	/* XXX: Eventually aio_complete(). */
-	ki = aiocbe->userproc->p_aioinfo;
-	AIO_LOCK(ki);
-	TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
-	aio_bio_done_notify(userp, aiocbe);
-	AIO_UNLOCK(ki);
-
-}
-
-
-/*
  * The AIO daemon, most of the actual work is done in aio_process_*,
  * but the setup (and address space mgmt) is done in this routine.
  */
@@ -1388,7 +1350,7 @@ aio_daemon(void *_id)
 			mtx_unlock(&aio_job_mtx);
 
 			ki = aiocbe->userproc->p_aioinfo;
-			aiocbe->task_fn(aiocbe);
+			aiocbe->handle_fn(aiocbe);
 
 			mtx_lock(&aio_job_mtx);
 			/* Decrement the active job count. */
@@ -1946,7 +1908,7 @@ aio_cancel_daemon_job(struct aiocblist *aiocbe)
 }
 
 void
-aio_schedule(struct aiocblist *aiocbe, aio_task_fn *func)
+aio_schedule(struct aiocblist *aiocbe, aio_handle_fn *func)
 {
 
 	mtx_lock(&aio_job_mtx);
@@ -1955,7 +1917,7 @@ aio_schedule(struct aiocblist *aiocbe, aio_task_fn *func)
 		aio_cancel(aiocbe);
 		return;
 	}
-	aiocbe->task_fn = func;
+	aiocbe->handle_fn = func;
 	TAILQ_INSERT_TAIL(&aio_jobs, aiocbe, list);
 	aio_kick_nowait(aiocbe->userproc);
 	mtx_unlock(&aio_job_mtx);
@@ -2014,8 +1976,24 @@ queueit:
 		}
 		AIO_UNLOCK(ki);
 	}
-	aio_schedule(aiocbe, aio_default_handle);
-	error = 0;
+
+	switch (opcode) {
+	case LIO_READ:
+	case LIO_WRITE:
+		aio_schedule(aiocbe, aio_process_rw);
+		error = 0;
+		break;
+	case LIO_SYNC:
+		aio_schedule(aiocbe, aio_process_sync);
+		error = 0;
+		break;
+	case LIO_MLOCK:
+		aio_schedule(aiocbe, aio_process_mlock);
+		error = 0;
+		break;
+	default:
+		error = EINVAL;
+	}
 done:
 	return (error);
 }
