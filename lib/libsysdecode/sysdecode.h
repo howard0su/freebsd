@@ -44,10 +44,13 @@ enum sysdecode_flags_format {
 };
 
 int	sysdecode_abi_to_freebsd_errno(enum sysdecode_abi _abi, int _error);
+void	sysdecode_atfd(FILE *_fp, int _fd, int _decimal);
 int	sysdecode_freebsd_to_abi_errno(enum sysdecode_abi _abi, int _error);
 enum sysdecode_flags_format sysdecode_get_flags_format(void);
 const char *sysdecode_ioctlname(unsigned long _val);
+void	sysdecode_semctl_op(FILE *_fp, int _cmd);
 int	sysdecode_set_flags_format(enum sysdecode_flags_format _format);
+void	sysdecode_signal(FILE *_fp, int _sig);
 const char *sysdecode_syscallname(enum sysdecode_abi _abi, unsigned int _code);
 int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len);
 
