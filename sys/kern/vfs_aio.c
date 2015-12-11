@@ -309,7 +309,7 @@ static TAILQ_HEAD(,aiothreadlist) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
 static struct mtx aio_job_mtx;
 static struct mtx aio_sock_mtx;
-static TAILQ_HEAD(,aiocblist) aio_jobs;			/* (c) Async job list */
+static TAILQ_HEAD(,aio_task) aio_jobs;			/* (c) Async job list */
 static struct unrhdr *aiod_unr;
 
 void		aio_init_aioinfo(struct proc *p);
@@ -842,21 +842,27 @@ restart:
 /*
  * Select a job to run (called by an AIO daemon).
  */
-static struct aiocblist *
+static struct aio_task *
 aio_selectjob(struct aiothreadlist *aiop)
 {
+	struct aio_task *task;
 	struct aiocblist *aiocbe;
 	struct kaioinfo *ki;
 	struct proc *userp;
 
 	mtx_assert(&aio_job_mtx, MA_OWNED);
 restart:
-	TAILQ_FOREACH(aiocbe, &aio_jobs, list) {
+	TAILQ_FOREACH(task, &aio_jobs, list) {
+		aiocbe = task->aiocbe;
+		if (aiocbe == NULL) {
+			TAILQ_REMOVE(&aio_jobs, task, list);
+			break;
+		}
 		userp = aiocbe->userproc;
 		ki = userp->p_aioinfo;
 
 		if (ki->kaio_active_count < ki->kaio_maxactive_count) {
-			TAILQ_REMOVE(&aio_jobs, aiocbe, list);
+			TAILQ_REMOVE(&aio_jobs, task, list);
 			if (!aio_clear_cancel_function(aiocbe)) {
 				aio_cancel(aiocbe);
 				goto restart;
@@ -867,7 +873,7 @@ restart:
 			break;
 		}
 	}
-	return (aiocbe);
+	return (task);
 }
 
 /*
@@ -1291,6 +1297,7 @@ aio_switch_vmspace(struct aiocbelist *aiocbe)
 static void
 aio_daemon(void *_id)
 {
+	struct aio_task *task;
 	struct aiocblist *aiocbe;
 	struct aiothreadlist *aiop;
 	struct kaioinfo *ki;
@@ -1330,12 +1337,6 @@ aio_daemon(void *_id)
 	mtx_lock(&aio_job_mtx);
 	for (;;) {
 		/*
-		 * curcp is the current daemon process context.
-		 * userp is the current user process context.
-		 */
-		curcp = mycp;
-
-		/*
 		 * Take daemon off of free queue
 		 */
 		if (aiop->aiothreadflags & AIOP_FREE) {
@@ -1346,15 +1347,20 @@ aio_daemon(void *_id)
 		/*
 		 * Check for jobs.
 		 */
-		while ((aiocbe = aio_selectjob(aiop)) != NULL) {
+		while ((task = aio_selectjob(aiop)) != NULL) {
 			mtx_unlock(&aio_job_mtx);
 
-			ki = aiocbe->userproc->p_aioinfo;
-			aiocbe->handle_fn(aiocbe);
+			aiocbe = task->aiocbe;
+			if (aiocbe != NULL)
+				ki = aiocbe->userproc->p_aioinfo;
+			else
+				ki = NULL;
+			task->func(task->arg);
 
 			mtx_lock(&aio_job_mtx);
 			/* Decrement the active job count. */
-			ki->kaio_active_count--;
+			if (ki != NULL)
+				ki->kaio_active_count--;
 		}
 
 		/*
@@ -1902,9 +1908,19 @@ aio_cancel_daemon_job(struct aiocblist *aiocbe)
 		mtx_unlock(&aio_job_mtx);
 		return;
 	}
-	TAILQ_REMOVE(&aio_jobs, cbe, list);
+	TAILQ_REMOVE(&aio_jobs, &cbe->task, list);
 	mtx_unlock(&aio_job_mtx);
 	aio_cancel(aiocbe);
+}
+
+void
+aio_schedule_task(struct aio_task *task)
+{
+
+	mtx_lock(&aio_job_mtx);
+	TAILQ_INSERT_TAIL(&aio_jobs, &aiocbe->task, list);
+	aio_kick_nowait(NULL);
+	mtx_unlock(&aio_job_mtx);
 }
 
 void
@@ -1917,8 +1933,10 @@ aio_schedule(struct aiocblist *aiocbe, aio_handle_fn *func)
 		aio_cancel(aiocbe);
 		return;
 	}
-	aiocbe->handle_fn = func;
-	TAILQ_INSERT_TAIL(&aio_jobs, aiocbe, list);
+	aiocbe->task.func = func;
+	aiocbe->task.arg = aiocbe;
+	aiocbe->task.aiocbe = aiocbe;
+	TAILQ_INSERT_TAIL(&aio_jobs, &aiocbe->task, list);
 	aio_kick_nowait(aiocbe->userproc);
 	mtx_unlock(&aio_job_mtx);
 }
@@ -2009,6 +2027,8 @@ aio_kick_nowait(struct proc *userp)
 		TAILQ_REMOVE(&aio_freeproc, aiop, list);
 		aiop->aiothreadflags &= ~AIOP_FREE;
 		wakeup(aiop->aiothread);
+		return;
+	}
 	} else if (((num_aio_resv_start + num_aio_procs) < max_aio_procs) &&
 	    ((ki->kaio_active_count + num_aio_resv_start) <
 	    ki->kaio_maxactive_count)) {
