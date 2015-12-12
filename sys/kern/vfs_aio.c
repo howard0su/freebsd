@@ -268,7 +268,6 @@ struct kaioinfo {
 	TAILQ_HEAD(,kaiocb) kaio_done;	/* (a) done queue for process */
 	TAILQ_HEAD(,aioliojob) kaio_liojoblist; /* (a) list of lio jobs */
 	TAILQ_HEAD(,kaiocb) kaio_jobqueue;	/* (a) job queue for process */
-	TAILQ_HEAD(,kaiocb) kaio_bufqueue;	/* (a) buffer job queue */
 	TAILQ_HEAD(,kaiocb) kaio_syncqueue;	/* (a) queue for aio_fsync */
 	struct	task kaio_task;		/* (*) task to kick aio processes */
 };
@@ -551,7 +550,6 @@ aio_init_aioinfo(struct proc *p)
 	TAILQ_INIT(&ki->kaio_all);
 	TAILQ_INIT(&ki->kaio_done);
 	TAILQ_INIT(&ki->kaio_jobqueue);
-	TAILQ_INIT(&ki->kaio_bufqueue);
 	TAILQ_INIT(&ki->kaio_liojoblist);
 	TAILQ_INIT(&ki->kaio_syncqueue);
 	TASK_INIT(&ki->kaio_task, 0, aio_kick_helper, p);
@@ -785,9 +783,7 @@ restart:
 	}
 
 	/* Wait for all running I/O to be finished */
-	if (TAILQ_FIRST(&ki->kaio_bufqueue) ||
-	    TAILQ_FIRST(&ki->kaio_jobqueue) ||
-	    ki->kaio_active_count != 0) {
+	if (TAILQ_FIRST(&ki->kaio_jobqueue) || ki->kaio_active_count != 0) {
 		ki->kaio_flags |= KAIO_WAKEUP;
 		msleep(&p->p_aioinfo, AIO_MTX(ki), PRIBIO, "aioprn", hz);
 		goto restart;
@@ -1408,16 +1404,8 @@ aio_qphysio(struct proc *p, struct kaiocb *job)
 	}
 
 	AIO_LOCK(ki);
-	ki->kaio_count++;
 	if (!unmap)
 		ki->kaio_buffer_count++;
-	lj = job->lio;
-	if (lj)
-		lj->lioj_count++;
-	TAILQ_INSERT_TAIL(&ki->kaio_bufqueue, job, plist);
-	TAILQ_INSERT_TAIL(&ki->kaio_all, job, allist);
-	job->jobstate = JOBST_JOBQBUF;
-	cb->_aiocb_private.status = cb->aio_nbytes;
 	AIO_UNLOCK(ki);
 
 	bp->bio_length = cb->aio_nbytes;
@@ -1462,14 +1450,8 @@ aio_qphysio(struct proc *p, struct kaiocb *job)
 
 doerror:
 	AIO_LOCK(ki);
-	job->jobstate = JOBST_NULL;
-	TAILQ_REMOVE(&ki->kaio_bufqueue, job, plist);
-	TAILQ_REMOVE(&ki->kaio_all, job, allist);
-	ki->kaio_count--;
 	if (!unmap)
 		ki->kaio_buffer_count--;
-	if (lj)
-		lj->lioj_count--;
 	AIO_UNLOCK(ki);
 	if (pbuf) {
 		relpbuf(pbuf, NULL);
@@ -1760,8 +1742,11 @@ no_kqueue:
 	job->jobstate = JOBST_NULL;
 	job->lio = lj;
 
+	if (opcode == LIO_MLOCK) {
+		aio_schedule(job, aio_process_mlock);
+		error = 0;
 	/* XXX: fo_aio_queue check is temporary */
-	if (fp == NULL || fp->f_ops->fo_aio_queue == NULL)
+	} else if (fp->f_ops->fo_aio_queue == NULL)
 		error = aio_queue_file(fp, job);
 	else
 		error = fo_aio_queue(fp, job);
@@ -1858,14 +1843,6 @@ queueit:
 				job->pending++;
 			}
 		}
-		TAILQ_FOREACH(job2, &ki->kaio_bufqueue, plist) {
-			if (job2->fd_file == job->fd_file &&
-			    job2->uaiocb.aio_lio_opcode != LIO_SYNC &&
-			    job2->seqno < job->seqno) {
-				job2->jobflags |= KAIOCB_CHECKSYNC;
-				job->pending++;
-			}
-		}
 		if (job->pending != 0) {
 			TAILQ_INSERT_TAIL(&ki->kaio_syncqueue, job, list);
 			job->jobstate = JOBST_JOBQSYNC;
@@ -1883,10 +1860,6 @@ queueit:
 		break;
 	case LIO_SYNC:
 		aio_schedule(job, aio_process_sync);
-		error = 0;
-		break;
-	case LIO_MLOCK:
-		aio_schedule(job, aio_process_mlock);
 		error = 0;
 		break;
 	default:
@@ -2473,35 +2446,36 @@ aio_physwakeup(struct bio *bp)
 	struct kaiocb *job = (struct kaiocb *)bp->bio_caller1;
 	struct proc *userp;
 	struct kaioinfo *ki;
-	int nblks;
+	size_t nbytes;
+	int error, nblks;
 
 	/* Release mapping into kernel space. */
+	userp = job->userproc;
+	ki = userp->p_aioinfo;
 	if (job->pbuf) {
 		pmap_qremove((vm_offset_t)job->pbuf->b_data, job->npages);
 		relpbuf(job->pbuf, NULL);
 		job->pbuf = NULL;
 		atomic_subtract_int(&num_buf_aio, 1);
+		AIO_LOCK(ki);
+		ki->kaio_buffer_count--;
+		AIO_UNLOCK(ki);
 	}
 	vm_page_unhold_pages(job->pages, job->npages);
 
 	bp = job->bp;
 	job->bp = NULL;
-	userp = job->userproc;
-	ki = userp->p_aioinfo;
-	AIO_LOCK(ki);
-	job->uaiocb._aiocb_private.status -= bp->bio_resid;
-	job->uaiocb._aiocb_private.error = 0;
+	nbytes = job->uaiocb.aio_nbytes - bp->bio_resid;
+	error = 0;
 	if (bp->bio_flags & BIO_ERROR)
-		job->uaiocb._aiocb_private.error = bp->bio_error;
-	nblks = btodb(job->uaiocb.aio_nbytes);
+		error = bp->bio_error;
+	nblks = btodb(nbytes);
 	if (job->uaiocb.aio_lio_opcode == LIO_WRITE)
 		job->outputcharge += nblks;
 	else
 		job->inputcharge += nblks;
-	TAILQ_REMOVE(&userp->p_aioinfo->kaio_bufqueue, job, plist);
-	ki->kaio_buffer_count--;
-	aio_bio_done_notify(userp, job);
-	AIO_UNLOCK(ki);
+
+	aio_complete(job, nbytes, error);
 
 	g_destroy_bio(bp);
 }
