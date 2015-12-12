@@ -367,8 +367,173 @@ soo_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 	return (0);	
 }
 
-/* XXX: Should probably become a growable pool. */
-TASKQUEUE_DEFINE_THREAD(so_aio_tq);
+static void
+soo_aio_process(struct aiocblist *aiocbe)
+{
+	struct ucred *td_savedcred;
+	struct thread *td;
+	struct file *fp;
+	struct socket *so;
+	struct sockbuf *sb;
+	struct uio uio;
+	struct iovec iov;
+	size_t cnt;
+	int error, flags;
+	bool cancelled, requeued;
+
+	aio_switch_vmspace(aiocbe);
+	td = curthread;
+	fp = aiocbe->fd_file;
+	so = fp->f_data;
+
+retry:
+	td_savedcred = td->td_ucred;
+	td->td_ucred = aiocbe->cred;
+
+	cnt = aiocbe->uaiocb.aio_nbytes;
+	iov.iov_base = (void *)(uintptr_t)aiocbe->uaiocb.aio_buf;
+	iov.iov_len = cnt;
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;
+	uio.uio_offset = 0;
+	uio.uio_resid = cnt;
+	uio.uio_segflg = UIO_USERSPACE;
+	uio.uio_td = td;
+	flags = MSG_NBIO;
+
+	/* TODO: Charge ru_msg* to aiocbe. */
+
+	if (aiocbe->uaiocb.aio_lio_opcode == LIO_READ) {
+		uio.uio_rw = UIO_READ;
+#ifdef MAC
+		error = mac_socket_check_receive(fp->f_cred, so);
+		if (error == 0)
+			
+#endif
+			error = soreceive(so, NULL, uio, NULL, NULL, &flags);
+	} else {
+		uio.uio_rw = UIO_WRITE;
+#ifdef MAC
+		error = mac_socket_check_send(fp->f_cred, so);
+		if (error == 0)
+#endif
+			error = sosend(so, NULL, uio, NULL, NULL, flags, td);
+		if (error == EPIPE && (so->so_options & SO_NOSIGPIPE) == 0) {
+			PROC_LOCK(aiocbe->userproc);
+			kern_psignal(aiocbe->userproc, SIGPIPE);
+			PROC_UNLOCK(aiocbe->userproc);
+		}
+	}
+
+	cnt -= uio.uio_resid;
+	td->td_ucred = td_savedcred;
+
+	cancelled = false;
+	requeued = false;
+	sb = aiocbe->uaiocb.aio_lio_opcode == LIO_READ ? &so->so_rcv :
+	    &so->so_snd;
+	SOCKBUF_LOCK(sb);
+	sb->sb_flags & ~SB_AIO_RUNNING;
+
+	/* XXX: Not sure if this is needed? */
+	if (cnt != 0 && (error == ERESTART || error == EINTR ||
+	    error == EWOULDBLOCK))
+		error = 0;
+	if (error == EWOULDBLOCK) {
+		/*
+		 * A read() or write() on the socket raced with this
+		 * request.  If the socket is now ready, try again.
+		 * If it is not, place this request at the head of the
+		 * queue to try again when the socket is ready.
+		 */
+		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(sb)) {
+			sb->sb_flags |= SB_AIO_RUNNING;
+			SOCKBUF_UNLOCK(sb);
+			goto retry;
+		}
+		sb->sb_flags & ~SB_AIO_RUNNING;
+		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel)) {
+			MPASS(cnt == 0);
+			cancelled = true;
+		} else {
+			TAILQ_INSERT_HEAD(&sb->sb_aiojobq, aiocbe, list);
+			requeued = true;
+		}
+	}
+
+	/*
+	 * If there are pending requests, either queue the next request
+	 * if the socket is ready or set SB_AIO to request a wakeup
+	 * when the socket becomes ready.
+	 */
+	if (!TAILQ_EMPTY(&sb->sb_aiojobq)) {
+		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(sb))
+			soo_aio_wake(so, sb);
+		else
+			sb->sb_flags |= SB_AIO;
+	}
+	SOCKBUF_UNLOCK(sb);
+
+	if (cancelled)
+		aio_cancel(aiocbe);
+	else if (!requeued)
+		aio_complete(aiocbe, cnt, error);
+}
+
+void
+soo_aio_wake(struct socket *so, struct sockbuf *sb)
+{
+	struct aiocbe *aiocbe;
+
+	SOCKBUF_LOCK_ASSERT(sb);
+	sb->sb_flags &= ~SB_AIO;
+	while ((aiocbe = TAILQ_FIRST(&sb->sb_aiojobq)) != NULL) {
+		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
+		if (!aio_clear_cancel_function(aiocbe))
+			continue;
+
+		mtx_lock(&aio_job_mtx);
+		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel_running)) {
+			mtx_unlock(&aio_job_mtx);
+			aio_cancel(aiocbe);
+			continue;
+		}
+
+		aiocbe->handle_fn = soo_aio_process;
+		TAILQ_INSERT_TAIL(&aio_jobs, aiocbe, list);
+		aio_kick_nowait(aiocbe->userproc);
+		mtx_unlock(&aio_job_mtx);
+		sb->sb_flags |= SB_AIO_RUNNING;
+		return;
+	}
+}
+
+static void
+soo_aio_cancel_running(struct aiocblist *aiocbe)
+{
+	struct socket *so;
+	struct sockbuf *sb;
+
+	so = fp->f_data;
+	opcode = aiocbe->uaiocb.aio_lio_opcode;
+	if (opcode == LIO_READ)
+		sb = &so->so_rcv;
+	else {
+		MPASS(opcode == LIO_WRITE);
+		sb = &so->so_snd;
+	}
+
+	SOCKBUF_LOCK(sb);
+	mtx_lock(&aio_job_mtx);
+	if (!aio_cancel_cleared(aiocbe))
+		TAILQ_REMOVE(&aio_jobs, &cbe->task, list);
+	mtx_unlock(&aio_job_mtx);
+	sb->sb_flags &= ~SB_AIO_RUNNING;
+	soo_aio_wake(so, sb);
+	SOCKBUF_UNLOCK(sb);
+
+	aio_cancel(aiocbe);	
+}
 
 static void
 soo_aio_cancel(struct aiocblist *aiocbe)
@@ -386,13 +551,13 @@ soo_aio_cancel(struct aiocblist *aiocbe)
 	}
 
 	SOCKBUF_LOCK(sb);
-	if (aio_completed(aiocbe)) {
-		SOCKBUF_UNLOCK(sb);
-		return;
-	}
-	TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
-	aio_cancel(aiocbe);
+	if (!aio_cancel_cleared(aiocbe))
+		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
+	if (TAILQ_EMPTY(&sb->sb_aiojobq))
+		sb->sb_flags &= ~SB_AIO;
 	SOCKBUF_UNLOCK(sb);
+
+	aio_cancel(aiocbe);
 }
 
 static int
@@ -423,11 +588,12 @@ soo_aio_queue(struct file *fp, struct aiocblist *aiocbe)
 	if (!aio_set_cancel_function(aiocbe, soo_aio_cancel))
 		panic("new job was cancelled");
 	TAILQ_INSERT_TAIL(&sb->sb_aiojobq, aiocbe, list);
-	if (opcode == LIO_READ && soreadable(so) ||
-	    opcode == LIO_WRITE && sowriteable(so))
-		taskqueue_enqueue(socket_aio_tq, &sb->sb_aiotask);
-	else
-		sb->sb_flags |= SB_AIO;
+	if (!(sb->sb_flags & SB_AIO_RUNNING)) {
+		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(sb))
+			soo_aio_wake(so, sb);
+		else
+			sb->sb_flags |= SB_AIO;
+	}
 	SOCKBUF_UNLOCK(sb);
 	return (0);
 }

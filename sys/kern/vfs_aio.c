@@ -223,6 +223,7 @@ typedef struct oaiocb {
 #define	KAIOCB_CANCELLED	0x02
 #define	KAIOCB_CANCELLING	0x04
 #define	KAIOCB_CHECKSYNC	0x08
+#define	KAIOCB_CLEARED	0x10
 
 /*
  * AIO process info
@@ -298,7 +299,7 @@ struct aiocb_ops {
 static TAILQ_HEAD(,aioproc) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
 static struct mtx aio_job_mtx;
-static TAILQ_HEAD(,aio_task) aio_jobs;			/* (c) Async job list */
+static TAILQ_HEAD(,kaiocb) aio_jobs;			/* (c) Async job list */
 static struct unrhdr *aiod_unr;
 
 void		aio_init_aioinfo(struct proc *p);
@@ -831,35 +832,28 @@ restart:
 static struct aio_task *
 aio_selectjob(struct aioproc *aiop)
 {
-	struct aio_task *task;
 	struct kaiocb *job;
 	struct kaioinfo *ki;
 	struct proc *userp;
 
 	mtx_assert(&aio_job_mtx, MA_OWNED);
 restart:
-	TAILQ_FOREACH(task, &aio_jobs, list) {
-		job = task->job;
-		if (job == NULL) {
-			TAILQ_REMOVE(&aio_jobs, task, list);
-			break;
-		}
+	TAILQ_FOREACH(job, &aio_jobs, list) {
 		userp = job->userproc;
 		ki = userp->p_aioinfo;
 
 		if (ki->kaio_active_count < ki->kaio_maxactive_count) {
-			TAILQ_REMOVE(&aio_jobs, task, list);
-			if (!aio_clear_cancel_function(job)) {
-				aio_cancel(job);
+			TAILQ_REMOVE(&aio_jobs, job, list);
+			if (!aio_clear_cancel_function(job))
 				goto restart;
-			}
+
 			/* Account for currently active jobs. */
 			ki->kaio_active_count++;
 			job->jobstate = JOBST_JOBRUNNING;
 			break;
 		}
 	}
-	return (task);
+	return (job);
 }
 
 /*
@@ -961,67 +955,15 @@ aio_process_rw(struct kaiocb *job)
 		if (error == ERESTART || error == EINTR || error == EWOULDBLOCK)
 			error = 0;
 		if ((error == EPIPE) && (cb->aio_lio_opcode == LIO_WRITE)) {
-			int sigpipe = 1;
-			if (fp->f_type == DTYPE_SOCKET) {
-				so = fp->f_data;
-				if (so->so_options & SO_NOSIGPIPE)
-					sigpipe = 0;
-			}
-			if (sigpipe) {
-				PROC_LOCK(job->userproc);
-				kern_psignal(job->userproc, SIGPIPE);
-				PROC_UNLOCK(job->userproc);
-			}
+			PROC_LOCK(job->userproc);
+			kern_psignal(job->userproc, SIGPIPE);
+			PROC_UNLOCK(job->userproc);
 		}
 	}
 
 	cnt -= auio.uio_resid;
 	td->td_ucred = td_savedcred;
-
-	/*
-	 * If this request was for a socket, see if we need to queue
-	 * another request.
-	 */
-	if (fp->f_type == DTYPE_SOCKET) {
-		struct aiocblist *cbnext;
-		struct sockbuf *sb;
-		so = fp->f_data;
-
-		if (cb->aio_lio_opcode == LIO_WRITE)
-			sb = &so->so_snd;
-		else
-			sb = &so->so_rcv;
-		SOCKBUF_LOCK(sb);
-		mtx_lock(&aio_job_mtx);
-		TAILQ_FOREACH(cbnext, &so->so_aiojobq, list) {
-			MPASS(cbnext->jobstate == JOBST_JOBQSOCK);
-			if (cbnext->uaiocb.aio_lio_opcode != cb->aio_lio_opcode)
-				continue;
-
-			/*
-			 * If the socket buffer is ready, move this request
-			 * to the run queue.  Otherwise, set SB_AIO to
-			 * trigger another wakeup.
-			 *
-			 * Note that since this request has just completed,
-			 * there is no need to wake up another aio thread
-			 * if we queue a request.
-			 */
-			if ((cbnext->uaiocb.aio_lio_opcode == LIO_WRITE &&
-			    sowriteable(so)) ||
-			    (cbnext->uaiocb.aio_lio_opcode == LIO_READ &&
-			    soreadable(so))) {
-				TAILQ_REMOVE(&so->so_aiojobq, cbnext, list);
-				TAILQ_INSERT_TAIL(&aio_jobs, cbnext, list);
-			} else
-				sb->sb_flags |= SB_AIO;
-			break;
-		}
-		mtx_unlock(&aio_job_mtx);
-		SOCKBUF_UNLOCK(sb);
-	}
-
-	aio_complete(cb, cnt, error);
+	aio_complete(job, cnt, error);
 }
 
 static void
@@ -1135,22 +1077,22 @@ notification_done:
  *     cancelled via aio_cancel().
  *  4) queue the request
  *
- * When dequeing a request to service it or hand it off to somewhere else,
+ * When dequeueing a request to service it or hand it off to somewhere else,
  * the caller should:
  *
  *  1) acquire the lock that protects the associated queue
  *  2) dequeue the request
- *  2) call aio_clear_cancel_function() to clear the cancel routine
- *  3) if that fails, the cancel routine is about to be called.  The
- *     caller should cancel the request
+ *  3) call aio_clear_cancel_function() to clear the cancel routine
+ *  4) if that fails, the cancel routine is about to be called.  The
+ *     caller should ignore the request
  *
  * The cancel routine should:
  *
  *  1) acquire the lock that protects the associated queue
- *  2) check aio_completed().  If that is true, then the request was
- *     cancelled or completed while the cancel function waited for
- *     the lock, so just return
+ *  2) use aio_cancel_cleared() to determine if the request is already
+ *     dequeued due to a race with dequeueing thread
  */
+#if 0
 bool
 aio_completed(struct kaiocb *job)
 {
@@ -1163,7 +1105,21 @@ aio_completed(struct kaiocb *job)
 	AIO_UNLOCK(ki);
 	return (completed);
 }
+#endif
 
+bool
+aio_cancel_cleared(struct kaiocb *job)
+{
+	struct kaioinfo *ki;
+	bool cleared;
+	
+	ki = job->userproc->p_aioinfo;
+	AIO_LOCK(ki);
+	cleared = (job->jobflags & KAIOCB_CLEARED) != 0;
+	AIO_UNLOCK(ki);
+	return (cleared);
+}
+	
 bool
 aio_clear_cancel_function(struct kaiocb *job)
 {
@@ -1174,6 +1130,7 @@ aio_clear_cancel_function(struct kaiocb *job)
 	MPASS(job->jobstate == JOBST_JOBQPRIVATE);
 	MPASS(job->cancel_fn != NULL);
 	if (job->jobflags & KAIOCB_CANCELLING) {
+		job->jobflags |= KAIOCB_CLEARED;
 		AIO_UNLOCK(ki);
 		return (false);
 	}
@@ -1254,7 +1211,6 @@ aio_switch_vmspace(struct kaiocb *job)
 static void
 aio_daemon(void *_id)
 {
-	struct aio_task *task;
 	struct kaiocb *job;
 	struct aioproc *aiop;
 	struct kaioinfo *ki;
@@ -1300,20 +1256,15 @@ aio_daemon(void *_id)
 		/*
 		 * Check for jobs.
 		 */
-		while ((task = aio_selectjob(aiop)) != NULL) {
+		while ((job = aio_selectjob(aiop)) != NULL) {
 			mtx_unlock(&aio_job_mtx);
 
-			job = task->job;
-			if (job != NULL)
-				ki = job->userproc->p_aioinfo;
-			else
-				ki = NULL;
-			task->func(task->arg);
+			ki = job->userproc->p_aioinfo;
+			job->handle_fn(job);
 
 			mtx_lock(&aio_job_mtx);
 			/* Decrement the active job count. */
-			if (ki != NULL)
-				ki->kaio_active_count--;
+			ki->kaio_active_count--;
 		}
 
 		/*
@@ -1857,27 +1808,14 @@ aio_cancel_daemon_job(struct kaiocb *job)
 {
 
 	mtx_lock(&aio_job_mtx);
-	if (aio_completed(job)) {
-		mtx_unlock(&aio_job_mtx);
-		return;
-	}
-	TAILQ_REMOVE(&aio_jobs, &cbe->task, list);
+	if (!aio_cancel_cleared(job))
+		TAILQ_REMOVE(&aio_jobs, &cbe->task, list);
 	mtx_unlock(&aio_job_mtx);
 	aio_cancel(job);
 }
 
 void
-aio_schedule_task(struct aio_task *task)
-{
-
-	mtx_lock(&aio_job_mtx);
-	TAILQ_INSERT_TAIL(&aio_jobs, &job->task, list);
-	aio_kick_nowait(NULL);
-	mtx_unlock(&aio_job_mtx);
-}
-
-void
-aio_schedule(struct kaiocb *job, aio_handle_fn *func)
+aio_schedule(struct kaiocb *job, aio_handle_fn_t *func)
 {
 
 	mtx_lock(&aio_job_mtx);
@@ -1886,10 +1824,8 @@ aio_schedule(struct kaiocb *job, aio_handle_fn *func)
 		aio_cancel(job);
 		return;
 	}
-	job->task.func = func;
-	job->task.arg = job;
-	job->task.job = job;
-	TAILQ_INSERT_TAIL(&aio_jobs, &job->task, list);
+	job->handle_fn = func;
+	TAILQ_INSERT_TAIL(&aio_jobs, job, list);
 	aio_kick_nowait(job->userproc);
 	mtx_unlock(&aio_job_mtx);
 }
@@ -1980,8 +1916,6 @@ aio_kick_nowait(struct proc *userp)
 		TAILQ_REMOVE(&aio_freeproc, aiop, list);
 		aiop->aioprocflags &= ~AIOP_FREE;
 		wakeup(aiop->aioproc);
-		return;
-	}
 	} else if (num_aio_resv_start + num_aio_procs < max_aio_procs &&
 	    ki->kaio_active_count + num_aio_resv_start <
 	    ki->kaio_maxactive_count) {
