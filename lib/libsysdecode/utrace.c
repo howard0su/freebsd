@@ -60,10 +60,9 @@ struct utrace_rtld {
 };
 
 static int
-print_utrace_rtld(FILE *fp, void *p, size_t len)
+print_utrace_rtld(FILE *fp, void *p)
 {
 	struct utrace_rtld *ut = p;
-	unsigned char *cp;
 	void *parent;
 	int mode;
 
@@ -165,8 +164,8 @@ int
 sysdecode_utrace(FILE *fp, void *p, size_t len)
 {
 
-	if (len >= 8 && bcmp(p, "RTLD", 4) == 0) {
-		return (print_utrace_rtld(fp, p, len));
+	if (len == sizeof(struct utrace_rtld) && bcmp(p, "RTLD", 4) == 0) {
+		return (print_utrace_rtld(fp, p));
 	}
 
 	if (len == sizeof(struct utrace_malloc)) {
