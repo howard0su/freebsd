@@ -84,7 +84,6 @@ static u_long jobrefid;
 static uint64_t jobseqno;
 
 #define JOBST_NULL		0
-#define JOBST_JOBQSOCK		1
 #define JOBST_JOBQGLOBAL	2
 #define JOBST_JOBRUNNING	3
 #define JOBST_JOBFINISHED	4
@@ -711,14 +710,6 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 	case JOBST_JOBQGLOBAL:
 		mtx_lock(&aio_job_mtx);
 		TAILQ_REMOVE(&aio_jobs, cbe, list);
-		mtx_unlock(&aio_job_mtx);
-		break;
-	case JOBST_JOBQSOCK:
-		fp = cbe->fd_file;
-		MPASS(fp->f_type == DTYPE_SOCKET);
-		so = fp->f_data;
-		mtx_lock(&aio_job_mtx);
-		TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
 		mtx_unlock(&aio_job_mtx);
 		break;
 	case JOBST_JOBQSYNC:
