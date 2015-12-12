@@ -150,19 +150,6 @@ struct sockbuf;
 
 typedef void aio_cancel_fn_t(struct aiocblist *);
 typedef void aio_handle_fn_t(struct aiocblist *);
-typedef void aio_task_fn_t(void *);
-
-/*
- * XXX: This is a lot like a taskqueue task, the aio daemons use
- * special logic to choose tasks that makes it difficult to use
- * taskqueue directly.
- */
-struct aio_task {
-	TAILQ_ENTRY(aio_task) list;
-	aio_task_fn_t *func;
-	void	*arg;
-	struct aiocblist *aiocbe;
-};
 
 struct aiocblist {
 	TAILQ_ENTRY(aiocblist) list;	/* (b) internal list for backend */
@@ -188,9 +175,11 @@ struct aiocblist {
 	int	pending;		/* (a) number of pending I/O, aio_fsync only */
 	aio_cancel_fn *cancel_fn;
 	aio_task_fn *handle_fn;
-	struct	aio_task task;
 };
 
+bool	aio_cancel_cleared(struct aiocblist *aiocbe);
+void	aio_cancel(struct aiocblist *aiocbe);
+void	aio_cancel_scheduled_job(struct aiocblist *aiocbe);
 void	aio_schedule(struct aiocblist *aiocbe, aio_handle_fn_t *func);
 void	aio_complete(struct aiocblist *aiocbe, long status, int error);
 bool	aio_completed(struct aiocblist *aiocbe);

@@ -393,8 +393,6 @@ soalloc(struct vnet *vnet)
 	sx_init(&so->so_rcv.sb_sx, "so_rcv_sx");
 	TAILQ_INIT(&so->so_snd.sb_aiojobq);
 	TAILQ_INIT(&so->so_rcv.sb_aiojobq);
-	TASK_INIT(&so->so_snd.sb_aiotask, 0, soo_aio_snd, so);
-	TASK_INIT(&so->so_rcv.sb_aiotask, 0, soo_aio_rcv, so);
 #ifdef VIMAGE
 	VNET_ASSERT(vnet != NULL, ("%s:%d vnet is NULL, so=%p",
 	    __func__, __LINE__, so));
@@ -3083,54 +3081,6 @@ soo_kqfilter(struct file *fp, struct knote *kn)
 	sb->sb_flags |= SB_KNOTE;
 	SOCKBUF_UNLOCK(sb);
 	return (0);
-}
-
-/*
- * Used as the cancel routine when an AIO job is active.  The job will be
- * completed when the corresponding non-blocking I/O completes, so there
- * is nothing to do to force it to cancel.
- */
-static void
-soo_aio_active_cancel(struct aiocblist *aiocbe)
-{
-}
-
-struct user_buffer {
-	vm_page_t *pp;
-	int pages;
-};
-
-static int
-hold_aio_buffer(struct aiocblist *aiocbe, struct user_buffer *ub,
-    vm_prot_t prot)
-{
-	vm_offset_t start, end;
-	vm_page_t *pp;
-	int actual, alloc;
-
-	/*
-	 * Since the start and end may not be page aligned, allocate
-	 * room for a partial page at both ends of the buffer.
-	 */
-	alloc = howmany(aiocbe->uaiocb.aio_nbytes, PAGE_SIZE) + 2;
-	pp = malloc(alloc * sizeof(*pp), M_SOAIO, M_WAITOK | M_ZERO);
-	actual = vm_fault_quick_hold_pages(&aiocbe->userproc->p_vmspace->vm_map,
-	    aiocbe->uaiocb.aio_buf, aiocbe->uaiocb.aio_nbytes, prot, pp, alloc);
-	if (actual == -1) {
-		free(pp, M_SOAIO);
-		return (EFAULT);
-	}
-	ub->pp = pp;
-	ub->pages = actual;
-	return (0);
-}
-
-static int
-release_user_buffer(struct user_buffer *ub)
-{
-
-	vm_page_unhold_pages(ub->pp, ub->actual);
-	free(ub->pp, M_SOAIO);
 }
 
 static void
