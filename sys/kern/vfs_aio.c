@@ -83,9 +83,6 @@ static u_long jobrefid;
  */
 static uint64_t jobseqno;
 
-#define JOBST_NULL		0
-#define JOBST_JOBFINISHED	4
-
 #ifndef MAX_AIO_PER_PROC
 #define MAX_AIO_PER_PROC	32
 #endif
@@ -225,6 +222,7 @@ typedef struct oaiocb {
 #define	AIOCBLIST_CANCELLING	0x04
 #define AIOCBLIST_CHECKSYNC	0x08
 #define	AIOCBLIST_CLEARED	0x10
+#define	AIOCBLIST_FINISHED	0x20
 
 /*
  * AIO process info
@@ -618,7 +616,7 @@ aio_free_entry(struct aiocblist *aiocbe)
 	MPASS(ki != NULL);
 
 	AIO_LOCK_ASSERT(ki, MA_OWNED);
-	MPASS(aiocbe->jobstate == JOBST_JOBFINISHED);
+	MPASS(aiocbe->jobflags & AIOCBLIST_FINISHED);
 
 	atomic_subtract_int(&num_queue_count, 1);
 
@@ -651,7 +649,6 @@ aio_free_entry(struct aiocblist *aiocbe)
 	PROC_UNLOCK(p);
 
 	MPASS(aiocbe->bp == NULL);
-	aiocbe->jobstate = JOBST_NULL;
 	AIO_UNLOCK(ki);
 
 	/*
@@ -698,8 +695,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 	int cancelled, error;
 
 	AIO_LOCK_ASSERT(ki, MA_OWNED);
-	if (cbe->jobflags & AIOCBLIST_CANCELLED ||
-	    cbe->jobstate == JOBST_JOBFINISHED)
+	if (cbe->jobflags & (AIOCBLIST_CANCELLED | AIOCBLIST_FINISHED))
 		return (0);
 	MPASS((cbe->jobflags & AIOCBLIST_CANCELLING) == 0);
 	cbe->jobflags |= AIOCBLIST_CANCELLED;
@@ -727,7 +723,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 	func(cbe);
 	AIO_LOCK(ki);
 	cbe->jobflags &= ~AIOCBLIST_CANCELLING;
-	if (cbe->jobstate == JOBST_JOBFINISHED) {
+	if (cbe->jobflags & AIOCBLIST_FINISHED) {
 		cancelled = cbe->uaiocb._aiocb_private.error == ECANCELED;
 		TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
 		aio_bio_done_notify(p, aiocbe);
@@ -995,7 +991,7 @@ aio_bio_done_notify(struct proc *userp, struct aiocblist *aiocbe)
 			lj_done = 1;
 	}
 	TAILQ_INSERT_TAIL(&ki->kaio_done, aiocbe, plist);
-	aiocbe->jobstate = JOBST_JOBFINISHED;
+	MPASS(aiocbe->jobflags & AIOCBLIST_FINISHED);
 
 	if (ki->kaio_flags & KAIO_RUNDOWN)
 		goto notification_done;
@@ -1100,7 +1096,7 @@ aio_completed(struct aiocblist *aiocbe)
 	
 	ki = aiocbe->userproc->p_aioinfo;
 	AIO_LOCK(ki);
-	completed = aiocbe->jobstate == JOBST_JOBFINISHED;
+	completed = aiocbe->jobflags & AIOCBLIST_FINISHED;
 	AIO_UNLOCK(ki);
 	return (completed);
 }
@@ -1176,11 +1172,11 @@ aio_complete(struct aiocblist *aiocbe, long status, int error)
 	ki = userp->p_aioinfo;
 
 	AIO_LOCK(ki);
-	KASSERT(aiocbe->jobstate != JOBST_JOBFINISHED,
+	KASSERT(!(aiocbe->jobflags & AIOCBLIST_FINISHED),
 	    ("duplicate aio_complete"));
-	if (aiocbe->jobflags & (AIOCBLIST_QUEUEING | AIOCBLIST_CANCELLING))
-		aiocbe->jobstate = JOBST_JOBFINISHED;
-	else {
+	aiocbe->jobflags |= AIOCBLIST_FINISHED;
+	if (aiocbe->jobflags & (AIOCBLIST_QUEUEING | AIOCBLIST_CANCELLING) ==
+	    0) {
 		TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
 		aio_bio_done_notify(userp, aiocbe);
 	}
@@ -1783,7 +1779,6 @@ no_kqueue:
 	aiocbe->userproc = p;
 	aiocbe->cred = crhold(td->td_ucred);
 	aiocbe->jobflags = AIOCBLIST_QUEUEING;
-	aiocbe->jobstate = JOBST_NULL;
 	aiocbe->lio = lj;
 
 	if (opcode == LIO_MLOCK) {
@@ -1804,7 +1799,7 @@ no_kqueue:
 	if (lj)
 		lj->lioj_count++;
 	atomic_add_int(&num_queue_count, 1);
-	if (aiocbe->jobstate == JOBST_JOBFINISHED) {
+	if (aiocbe->jobflags & AIOCBLIST_FINISHED) {
 		/*
 		 * The queue callback completed the request synchronously.
 		 * The bulk of the completion is deferred in that case
@@ -2012,7 +2007,7 @@ kern_aio_return(struct thread *td, struct aiocb *uaiocb, struct aiocb_ops *ops)
 			break;
 	}
 	if (cb != NULL) {
-		MPASS(cb->jobstate == JOBST_JOBFINISHED);
+		MPASS(cb->jobflags & AIOCBLIST_FINISHED);
 		status = cb->uaiocb._aiocb_private.status;
 		error = cb->uaiocb._aiocb_private.error;
 		td->td_retval[0] = status;
@@ -2081,7 +2076,7 @@ kern_aio_suspend(struct thread *td, int njoblist, struct aiocb **ujoblist,
 				if (cb->uuaiocb == ujoblist[i]) {
 					if (cbfirst == NULL)
 						cbfirst = cb;
-					if (cb->jobstate == JOBST_JOBFINISHED)
+					if (cb->jobflags & AIOCBLIST_FINISHED)
 						goto RETURN;
 				}
 			}
@@ -2227,7 +2222,7 @@ kern_aio_error(struct thread *td, struct aiocb *aiocbp, struct aiocb_ops *ops)
 	AIO_LOCK(ki);
 	TAILQ_FOREACH(cb, &ki->kaio_all, allist) {
 		if (cb->uuaiocb == aiocbp) {
-			if (cb->jobstate == JOBST_JOBFINISHED)
+			if (cb->jobflags & AIOCBLIST_FINISHED)
 				td->td_retval[0] =
 					cb->uaiocb._aiocb_private.error;
 			else
@@ -2591,7 +2586,7 @@ kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
 	}
 
 	if (cb != NULL) {
-		MPASS(cb->jobstate == JOBST_JOBFINISHED);
+		MPASS(cb->jobflags & AIOCBLIST_FINISHED);
 		uuaiocb = cb->uuaiocb;
 		status = cb->uaiocb._aiocb_private.status;
 		error = cb->uaiocb._aiocb_private.error;
@@ -2696,7 +2691,7 @@ filt_aio(struct knote *kn, long hint)
 	struct aiocblist *aiocbe = kn->kn_ptr.p_aio;
 
 	kn->kn_data = aiocbe->uaiocb._aiocb_private.error;
-	if (aiocbe->jobstate != JOBST_JOBFINISHED)
+	if (!(aiocbe->jobflags & AIOCBLIST_FINISHED))
 		return (0);
 	kn->kn_flags |= EV_EOF;
 	return (1);
