@@ -704,57 +704,44 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 		return (0);
 	MPASS((cbe->jobflags & AIOCBLIST_CANCELLING) == 0);
 	cbe->jobflags |= AIOCBLIST_CANCELLED;
-	switch (cbe->jobstate) {
-	case JOBST_JOBQPRIVATE:
-		func = cbe->cancel_fn;
 
-		/*
-		 * If there is no cancel routine, just leave the job
-		 * marked as cancelled.  The job should be in active
-		 * use by a caller who should complete it normally or
-		 * when it fails to install a cancel routine.
-		 */
-		if (func == NULL)
-			return (0);
+	func = cbe->cancel_fn;
 
-		/*
-		 * Set the CANCELLING flag so that aio_complete() will
-		 * defer completions of this cbe.  This prevents the
-		 * cbe from being freed out from under the cancel
-		 * callback.  After the callback any deferred
-		 * completion (whether from the callback or any other
-		 * source) will be completed.
-		 */
-		cbe->jobflags |= AIOCBLIST_CANCELLING;
-		AIO_UNLOCK(ki);
-		func(cbe);
-		AIO_LOCK(ki);
-		cbe->jobflags &= ~AIOCBLIST_CANCELLING;
-		if (cbe->jobstate == JOBST_JOBFINISHED) {
-			cancelled = cbe->uaiocb._aiocb_private.error ==
-			    ECANCELED;
-			TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
-			aio_bio_done_notify(p, aiocbe);
-		} else {
-			/*
-			 * The cancel callback might have scheduled an
-			 * operation to cancel this request, but it is
-			 * only counted as cancelled if the request is
-			 * cancelled when the callback returns.
-			 */
-			cancelled = 0;
-		}
-		return (cancelled);
-	default:
+	/*
+	 * If there is no cancel routine, just leave the job marked as
+	 * cancelled.  The job should be in active use by a caller who
+	 * should complete it normally or when it fails to install a
+	 * cancel routine.
+	 */
+	if (func == NULL)
 		return (0);
-	}
 
-	cbe->jobstate = JOBST_JOBFINISHED;
-	cbe->uaiocb._aiocb_private.status = -1;
-	cbe->uaiocb._aiocb_private.error = ECANCELED;
-	TAILQ_REMOVE(&ki->kaio_jobqueue, cbe, plist);
-	aio_bio_done_notify(p, cbe);
-	return (1);
+	/*
+	 * Set the CANCELLING flag so that aio_complete() will defer
+	 * completions of this cbe.  This prevents the cbe from being
+	 * freed out from under the cancel callback.  After the
+	 * callback any deferred completion (whether from the callback
+	 * or any other source) will be completed.
+	 */
+	cbe->jobflags |= AIOCBLIST_CANCELLING;
+	AIO_UNLOCK(ki);
+	func(cbe);
+	AIO_LOCK(ki);
+	cbe->jobflags &= ~AIOCBLIST_CANCELLING;
+	if (cbe->jobstate == JOBST_JOBFINISHED) {
+		cancelled = cbe->uaiocb._aiocb_private.error == ECANCELED;
+		TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
+		aio_bio_done_notify(p, aiocbe);
+	} else {
+		/*
+		 * The cancel callback might have scheduled an
+		 * operation to cancel this request, but it is
+		 * only counted as cancelled if the request is
+		 * cancelled when the callback returns.
+		 */
+		cancelled = 0;
+	}
+	return (cancelled);
 }
 
 /*
