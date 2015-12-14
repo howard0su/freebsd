@@ -172,8 +172,8 @@ struct aiocblist {
 	ksiginfo_t ksi;			/* (a) realtime signal info */
 	uint64_t seqno;			/* (*) job number */
 	int	pending;		/* (a) number of pending I/O, aio_fsync only */
-	aio_cancel_fn *cancel_fn;
-	aio_task_fn *handle_fn;
+	aio_cancel_fn_t *cancel_fn;
+	aio_handle_fn_t *handle_fn;
 };
 
 bool	aio_cancel_cleared(struct aiocblist *aiocbe);

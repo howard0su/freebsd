@@ -689,7 +689,7 @@ aio_proc_rundown_exec(void *arg, struct proc *p, struct image_params *imgp __unu
 static int
 aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 {
-	aio_cancel_fn *func;
+	aio_cancel_fn_t *func;
 	struct file *fp;
 	struct socket *so;
 	int cancelled, error;
@@ -1134,7 +1134,7 @@ aio_clear_cancel_function(struct aiocblist *aiocbe)
 }
 
 static bool
-aio_set_cancel_function_locked(struct aiocblist *aiocbe, aio_cancel_fn *func)
+aio_set_cancel_function_locked(struct aiocblist *aiocbe, aio_cancel_fn_t *func)
 {
 	struct kaioinfo *ki;
 	
@@ -1147,7 +1147,7 @@ aio_set_cancel_function_locked(struct aiocblist *aiocbe, aio_cancel_fn *func)
 }
 
 bool
-aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn *func)
+aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn_t *func)
 {
 	struct kaioinfo *ki;
 	bool installed;
