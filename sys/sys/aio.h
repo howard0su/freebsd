@@ -156,7 +156,6 @@ struct kaiocb {
 	TAILQ_ENTRY(kaiocb) plist;	/* (a) list of jobs for each backend */
 	TAILQ_ENTRY(kaiocb) allist;	/* (a) list of all jobs in proc */
 	int	jobflags;		/* (a) job flags */
-	int	jobstate;		/* (b) job state */
 	int	inputcharge;		/* (*) input blocks */
 	int	outputcharge;		/* (*) output blocks */
 	struct	bio *bp;		/* (*) BIO backend BIO pointer */
