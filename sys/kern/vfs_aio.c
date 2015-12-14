@@ -84,11 +84,8 @@ static u_long jobrefid;
 static uint64_t jobseqno;
 
 #define JOBST_NULL		0
-#define JOBST_JOBQGLOBAL	2
 #define JOBST_JOBRUNNING	3
 #define JOBST_JOBFINISHED	4
-#define JOBST_JOBQBUF		5
-#define JOBST_JOBQSYNC		6
 #define	JOBST_JOBQPRIVATE	7
 
 #ifndef MAX_AIO_PER_PROC
@@ -269,7 +266,9 @@ struct kaioinfo {
 	TAILQ_HEAD(,aioliojob) kaio_liojoblist; /* (a) list of lio jobs */
 	TAILQ_HEAD(,kaiocb) kaio_jobqueue;	/* (a) job queue for process */
 	TAILQ_HEAD(,kaiocb) kaio_syncqueue;	/* (a) queue for aio_fsync */
+	TAILQ_HEAD(,kaiocb) kaio_syncready;  /* (a) second q for aio_fsync */
 	struct	task kaio_task;		/* (*) task to kick aio processes */
+	struct	task kaio_sync_task;	/* (*) task to schedule fsync jobs */
 };
 
 #define AIO_LOCK(ki)		mtx_lock(&(ki)->kaio_mtx)
@@ -552,7 +551,9 @@ aio_init_aioinfo(struct proc *p)
 	TAILQ_INIT(&ki->kaio_jobqueue);
 	TAILQ_INIT(&ki->kaio_liojoblist);
 	TAILQ_INIT(&ki->kaio_syncqueue);
+	TAILQ_INIT(&ki->kaio_syncready);
 	TASK_INIT(&ki->kaio_task, 0, aio_kick_helper, p);
+	TASK_INIT(&ki->kaio_task, 0, aio_schedule_fsync, ki);
 	PROC_LOCK(p);
 	if (p->p_aioinfo == NULL) {
 		p->p_aioinfo = ki;
@@ -688,19 +689,9 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct kaiocb *job)
 	if (job->jobflags & KAIOCB_CANCELLED ||
 	    job->jobstate == JOBST_JOBFINISHED)
 		return (0);
-	MPASS((job->jobflags & KAIOCB_CANCELLING) == 0);
-	job->jobflags |= KAIOCB_CANCELLED;
-	switch (job->jobstate) {
-	case JOBST_JOBQGLOBAL:
-		mtx_lock(&aio_job_mtx);
-		TAILQ_REMOVE(&aio_jobs, job, list);
-		mtx_unlock(&aio_job_mtx);
-		break;
-	case JOBST_JOBQSYNC:
-		mtx_lock(&aio_job_mtx);
-		TAILQ_REMOVE(&ki->kaio_syncqueue, job, list);
-		mtx_unlock(&aio_job_mtx);
-		break;
+	MPASS((cbe->jobflags & KAIOCB_CANCELLING) == 0);
+	cbe->jobflags |= KAIOCB_CANCELLED;
+	switch (cbe->jobstate) {
 	case JOBST_JOBQPRIVATE:
 		func = job->cancel_fn;
 
@@ -740,7 +731,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct kaiocb *job)
 			 */
 			cancelled = 0;
 		}
-		return (0);
+		return (cancelled);
 	default:
 		return (0);
 	}
@@ -808,6 +799,7 @@ restart:
 	}
 	AIO_UNLOCK(ki);
 	taskqueue_drain(taskqueue_aiod_kick, &ki->kaio_task);
+	taskqueue_drain(taskqueue_aiod_kick, &ki->kaio_sync_task);
 	mtx_destroy(&ki->kaio_mtx);
 	uma_zfree(kaio_zone, ki);
 	p->p_aioinfo = NULL;
@@ -993,6 +985,7 @@ aio_bio_done_notify(struct proc *userp, struct kaiocb *job)
 	struct kaioinfo *ki;
 	struct kaiocb *sjob, *sjobn;
 	int lj_done;
+	bool schedule_fsync;
 
 	ki = userp->p_aioinfo;
 	AIO_LOCK_ASSERT(ki, MA_OWNED);
@@ -1031,25 +1024,47 @@ aio_bio_done_notify(struct proc *userp, struct kaiocb *job)
 
 notification_done:
 	if (job->jobflags & KAIOCB_CHECKSYNC) {
+		schedule_fsync = false;
 		TAILQ_FOREACH_SAFE(sjob, &ki->kaio_syncqueue, list, sjobn) {
 			if (job->fd_file == sjob->fd_file &&
 			    job->seqno < sjob->seqno) {
 				if (--sjob->pending == 0) {
-					mtx_lock(&aio_job_mtx);
-					sjob->jobstate = JOBST_JOBQGLOBAL;
 					TAILQ_REMOVE(&ki->kaio_syncqueue, sjob,
 					    list);
-					TAILQ_INSERT_TAIL(&aio_jobs, sjob, list);
-					aio_kick_nowait(userp);
-					mtx_unlock(&aio_job_mtx);
+					if (!aio_clear_cancel_function(sjob))
+						continue;
+					TAILQ_INSERT_TAIL(&ki->kaio_syncready,
+					    sjob, list);
+					schedule_fsync = true;
 				}
 			}
 		}
+		if (schedule_fsync)
+			taskqueue_enqueue(taskqueue_aiod_kick,
+			    &ki->kaio_sync_task);
 	}
 	if (ki->kaio_flags & KAIO_WAKEUP) {
 		ki->kaio_flags &= ~KAIO_WAKEUP;
 		wakeup(&userp->p_aioinfo);
 	}
+}
+
+static void
+aio_schedule_fsync(void *context, int pending)
+{
+	struct kaioinfo *ki;
+	struct kaiocb *job;
+
+	ki = context;
+	AIO_LOCK(ki);
+	while (!TAILQ_EMPTY(&ki->kaio_syncready)) {
+		job = TAILQ_FIRST(&ki->kaio_syncready);
+		TAILQ_REMOVE(&ki->kaio_syncready, job, list);
+		AIO_UNLOCK(ki);
+		aio_schedule(job, aio_process_sync);
+		AIO_LOCK(ki);
+	}
+	AIO_UNLOCK(ki);
 }
 
 /*
@@ -1785,7 +1800,7 @@ aio_cancel_daemon_job(struct kaiocb *job)
 
 	mtx_lock(&aio_job_mtx);
 	if (!aio_cancel_cleared(job))
-		TAILQ_REMOVE(&aio_jobs, &cbe->task, list);
+		TAILQ_REMOVE(&aio_jobs, job, list);
 	mtx_unlock(&aio_job_mtx);
 	aio_cancel(job);
 }
@@ -1804,6 +1819,17 @@ aio_schedule(struct kaiocb *job, aio_handle_fn_t *func)
 	TAILQ_INSERT_TAIL(&aio_jobs, job, list);
 	aio_kick_nowait(job->userproc);
 	mtx_unlock(&aio_job_mtx);
+}
+
+static void
+aio_cancel_sync(struct kaiocb *job)
+{
+
+	mtx_lock(&aio_job_mtx);
+	if (!aio_cancel_cleared(job))
+		TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
+	mtx_unlock(&aio_job_mtx);
+	aio_cancel(job);
 }
 
 int
@@ -1844,8 +1870,12 @@ queueit:
 			}
 		}
 		if (job->pending != 0) {
+			if (!aio_set_cancel_function(job, aio_cancel_sync)) {
+				AIO_UNLOCK(ki);
+				aio_cancel(job);
+				return (0);
+			}
 			TAILQ_INSERT_TAIL(&ki->kaio_syncqueue, job, list);
-			job->jobstate = JOBST_JOBQSYNC;
 			AIO_UNLOCK(ki);
 			return (0);
 		}
