@@ -181,7 +181,6 @@ void	aio_cancel(struct aiocblist *aiocbe);
 void	aio_cancel_scheduled_job(struct aiocblist *aiocbe);
 void	aio_schedule(struct aiocblist *aiocbe, aio_handle_fn_t *func);
 void	aio_complete(struct aiocblist *aiocbe, long status, int error);
-bool	aio_completed(struct aiocblist *aiocbe);
 bool	aio_set_cancel_function(struct aiocblist *aiocbe,
 	    aio_cancel_fn_t *func);
 void	aio_switch_vmspace(struct aiocblist *aiocbe);
