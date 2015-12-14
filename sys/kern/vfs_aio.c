@@ -1073,21 +1073,6 @@ aio_schedule_fsync(void *context, int pending)
  *  2) use aio_cancel_cleared() to determine if the request is already
  *     dequeued due to a race with dequeueing thread
  */
-#if 0
-bool
-aio_completed(struct kaiocb *job)
-{
-	struct kaioinfo *ki;
-	bool completed;
-	
-	ki = job->userproc->p_aioinfo;
-	AIO_LOCK(ki);
-	completed = job->jobflags & KAIOCB_FINISHED;
-	AIO_UNLOCK(ki);
-	return (completed);
-}
-#endif
-
 bool
 aio_cancel_cleared(struct kaiocb *job)
 {
