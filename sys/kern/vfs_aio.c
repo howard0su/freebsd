@@ -85,7 +85,6 @@ static uint64_t jobseqno;
 
 #define JOBST_NULL		0
 #define JOBST_JOBFINISHED	4
-#define	JOBST_JOBQPRIVATE	7
 
 #ifndef MAX_AIO_PER_PROC
 #define MAX_AIO_PER_PROC	32
@@ -1113,7 +1112,6 @@ aio_clear_cancel_function(struct kaiocb *job)
 
 	ki = job->userproc->p_aioinfo;
 	AIO_LOCK(ki);
-	MPASS(job->jobstate == JOBST_JOBQPRIVATE);
 	MPASS(job->cancel_fn != NULL);
 	if (job->jobflags & KAIOCB_CANCELLING) {
 		job->jobflags |= KAIOCB_CLEARED;
@@ -1134,7 +1132,6 @@ aio_set_cancel_function_locked(struct kaiocb *job, aio_cancel_fn *func)
 	AIO_LOCK_ASSERT(ki);
 	if (job->jobflags & KAIOCB_CANCELLED)
 		return (false);
-	job->jobstate = JOBST_JOBQPRIVATE;	
 	job->cancel_fn = func;
 	return (true);
 }
