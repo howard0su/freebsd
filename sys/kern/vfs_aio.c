@@ -1119,30 +1119,20 @@ aio_clear_cancel_function(struct kaiocb *job)
 	return (true);
 }
 
-static bool
-aio_set_cancel_function_locked(struct kaiocb *job, aio_cancel_fn_t *func)
-{
-	struct kaioinfo *ki;
-
-	ki = job->userproc->p_aioinfo;
-	AIO_LOCK_ASSERT(ki);
-	if (job->jobflags & KAIOCB_CANCELLED)
-		return (false);
-	job->cancel_fn = func;
-	return (true);
-}
-
 bool
 aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn_t *func)
 {
 	struct kaioinfo *ki;
-	bool installed;
 
 	ki = job->userproc->p_aioinfo;
 	AIO_LOCK(ki);
-	installed = aio_set_cancel_function_locked(job, func);
+	if (job->jobflags & KAIOCB_CANCELLED) {
+		AIO_UNLOCK(ki);
+		return (false);
+	}
+	job->cancel_fn = func;
 	AIO_UNLOCK(ki);
-	return (installed);
+	return (true);
 }
 
 void
