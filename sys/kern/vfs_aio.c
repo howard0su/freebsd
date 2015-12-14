@@ -675,7 +675,7 @@ aio_proc_rundown_exec(void *arg, struct proc *p,
 static int
 aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct kaiocb *job)
 {
-	aio_cancel_fn *func;
+	aio_cancel_fn_t *func;
 	struct file *fp;
 	struct socket *so;
 	int cancelled, error;
@@ -1120,7 +1120,7 @@ aio_clear_cancel_function(struct kaiocb *job)
 }
 
 static bool
-aio_set_cancel_function_locked(struct kaiocb *job, aio_cancel_fn *func)
+aio_set_cancel_function_locked(struct kaiocb *job, aio_cancel_fn_t *func)
 {
 	struct kaioinfo *ki;
 
@@ -1133,7 +1133,7 @@ aio_set_cancel_function_locked(struct kaiocb *job, aio_cancel_fn *func)
 }
 
 bool
-aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn *func)
+aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn_t *func)
 {
 	struct kaioinfo *ki;
 	bool installed;
