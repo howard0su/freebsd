@@ -84,7 +84,6 @@ static u_long jobrefid;
 static uint64_t jobseqno;
 
 #define JOBST_NULL		0
-#define JOBST_JOBRUNNING	3
 #define JOBST_JOBFINISHED	4
 #define	JOBST_JOBQPRIVATE	7
 
@@ -842,7 +841,6 @@ restart:
 
 			/* Account for currently active jobs. */
 			ki->kaio_active_count++;
-			aiocbe->jobstate = JOBST_JOBRUNNING;
 			break;
 		}
 	}
