@@ -1133,30 +1133,20 @@ aio_clear_cancel_function(struct aiocblist *aiocbe)
 	return (true);
 }
 
-static bool
-aio_set_cancel_function_locked(struct aiocblist *aiocbe, aio_cancel_fn_t *func)
-{
-	struct kaioinfo *ki;
-	
-	ki = aiocbe->userproc->p_aioinfo;
-	AIO_LOCK_ASSERT(ki);
-	if (aiocbe->jobflags & AIOCBLIST_CANCELLED)
-		return (false);
-	aiocbe->cancel_fn = func;
-	return (true);
-}
-
 bool
 aio_set_cancel_function(struct aiocblist *aiocbe, aio_cancel_fn_t *func)
 {
 	struct kaioinfo *ki;
-	bool installed;
 	
 	ki = aiocbe->userproc->p_aioinfo;
 	AIO_LOCK(ki);
-	installed = aio_set_cancel_function_locked(aiocbe, func);
+	if (aiocbe->jobflags & AIOCBLIST_CANCELLED) {
+		AIO_UNLOCK(ki);
+		return (false);
+	}
+	aiocbe->cancel_fn = func;
 	AIO_UNLOCK(ki);
-	return (installed);
+	return (true);
 }
 
 void
