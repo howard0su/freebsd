@@ -8,9 +8,8 @@ SRCS=	ioctl.c utrace.c
 INCS=	sysdecode.h
 
 MAN+=	sysdecode.3 \
+	sysdecode_ioctlname.3 \
 	sysdecode_utrace.3
-
-#MAN+=	sysdecode_ioctlname.3
 
 CLEANFILES= ioctl.c
 
