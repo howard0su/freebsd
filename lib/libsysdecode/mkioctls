@@ -1,9 +1,6 @@
 #!/bin/sh
 #
 # $FreeBSD$
-#
-# When editing this script, keep in mind that truss also uses it.
-#
 
 set -e
 
