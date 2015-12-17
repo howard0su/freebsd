@@ -21,6 +21,10 @@ CPP+=	-m32
 CFLAGS+=-DPF
 .endif
 
+# Workaround duplicate declarations in <netinet/ip_compat.h>
+CFLAGS.gcc.ioctl.c+= -Wno-redundant-decls
+CFLAGS.gcc+=	${CFLAGS.gcc.${.IMPSRC}}
+
 ioctl.c: mkioctls
 	env MACHINE=${MACHINE} CPP="${CPP}" \
 		/bin/sh ${.CURDIR}/mkioctls ${DESTDIR}${INCLUDEDIR} > ${.TARGET}
