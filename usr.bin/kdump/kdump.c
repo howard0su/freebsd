@@ -693,7 +693,7 @@ dumpheader(struct ktr_header *kth)
 int nsyscalls = sizeof (syscallnames) / sizeof (syscallnames[0]);
 
 static void
-ioctlname(unsigned long val, int decimal)
+ioctlname(unsigned long val)
 {
 	const char *str;
 
@@ -754,7 +754,7 @@ ktrsyscall(struct ktr_syscall *ktr, u_int flags)
 			case SYS_ioctl: {
 				print_number(ip, narg, c);
 				putchar(c);
-				ioctlname(*ip, decimal);
+				ioctlname(*ip);
 				c = ',';
 				ip++;
 				narg--;
