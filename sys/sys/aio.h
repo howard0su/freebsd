@@ -151,6 +151,8 @@ struct sockbuf;
 typedef void aio_cancel_fn_t(struct aiocblist *);
 typedef void aio_handle_fn_t(struct aiocblist *);
 
+TAILQ_HEAD(aiocbhead,aiocblist);
+
 struct aiocblist {
 	TAILQ_ENTRY(aiocblist) list;	/* (b) internal list for backend */
 	TAILQ_ENTRY(aiocblist) plist;	/* (a) list of jobs for each backend */
@@ -178,12 +180,18 @@ struct aiocblist {
 
 bool	aio_cancel_cleared(struct aiocblist *aiocbe);
 void	aio_cancel(struct aiocblist *aiocbe);
-void	aio_cancel_scheduled_job(struct aiocblist *aiocbe);
-void	aio_schedule(struct aiocblist *aiocbe, aio_handle_fn_t *func);
+bool	aio_clear_cancel_function(struct aiocblist *aiocbe);
 void	aio_complete(struct aiocblist *aiocbe, long status, int error);
+void	aio_schedule(struct aiocblist *aiocbe, aio_handle_fn_t *func);
 bool	aio_set_cancel_function(struct aiocblist *aiocbe,
 	    aio_cancel_fn_t *func);
 void	aio_switch_vmspace(struct aiocblist *aiocbe);
+
+/* XXX: Hacks for the current socket code. */
+void	aio_cancel_scheduled_job(struct aiocblist *aiocbe);
+void	aio_kick_nowait(struct proc *userp);
+extern struct mtx aio_job_mtx;
+extern struct aiocbhead aio_jobs;
 
 #endif
 

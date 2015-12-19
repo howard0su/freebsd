@@ -301,9 +301,9 @@ struct aiocb_ops {
 
 static TAILQ_HEAD(,aiothreadlist) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
-static struct mtx aio_job_mtx;
+struct mtx aio_job_mtx;
 static struct mtx aio_sock_mtx;
-static TAILQ_HEAD(,aiocblist) aio_jobs;			/* (c) Async job list */
+struct aiocbhead aio_jobs;			/* (c) Async job list */
 static struct unrhdr *aiod_unr;
 
 void		aio_init_aioinfo(struct proc *p);
@@ -312,6 +312,7 @@ static int	aio_free_entry(struct aiocblist *aiocbe);
 static void	aio_process_rw(struct aiocblist *aiocbe);
 static void	aio_process_sync(struct aiocblist *aiocbe);
 static void	aio_process_mlock(struct aiocblist *aiocbe);
+static void	aio_schedule_fsync(void *context, int pending);
 static int	aio_newproc(int *);
 int		aio_aqueue(struct thread *td, struct aiocb *job,
 			struct aioliojob *lio, int type, struct aiocb_ops *ops);
@@ -325,7 +326,6 @@ static int	aio_unload(void);
 static void	aio_bio_done_notify(struct proc *userp,
 		    struct aiocblist *aiocbe);
 static int	aio_kick(struct proc *userp);
-static void	aio_kick_nowait(struct proc *userp);
 static void	aio_kick_helper(void *context, int pending);
 static int	filt_aioattach(struct knote *kn);
 static void	filt_aiodetach(struct knote *kn);
@@ -564,7 +564,7 @@ aio_init_aioinfo(struct proc *p)
 	TAILQ_INIT(&ki->kaio_syncqueue);
 	TAILQ_INIT(&ki->kaio_syncready);
 	TASK_INIT(&ki->kaio_task, 0, aio_kick_helper, p);
-	TASK_INIT(&ki->kaio_task, 0, aio_schedule_fsync, ki);
+	TASK_INIT(&ki->kaio_sync_task, 0, aio_schedule_fsync, ki);
 	PROC_LOCK(p);
 	if (p->p_aioinfo == NULL) {
 		p->p_aioinfo = ki;
@@ -690,9 +690,7 @@ static int
 aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 {
 	aio_cancel_fn_t *func;
-	struct file *fp;
-	struct socket *so;
-	int cancelled, error;
+	int cancelled;
 
 	AIO_LOCK_ASSERT(ki, MA_OWNED);
 	if (cbe->jobflags & (AIOCBLIST_CANCELLED | AIOCBLIST_FINISHED))
@@ -725,8 +723,8 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct aiocblist *cbe)
 	cbe->jobflags &= ~AIOCBLIST_CANCELLING;
 	if (cbe->jobflags & AIOCBLIST_FINISHED) {
 		cancelled = cbe->uaiocb._aiocb_private.error == ECANCELED;
-		TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
-		aio_bio_done_notify(p, aiocbe);
+		TAILQ_REMOVE(&ki->kaio_jobqueue, cbe, plist);
+		aio_bio_done_notify(p, cbe);
 	} else {
 		/*
 		 * The cancel callback might have scheduled an
@@ -803,7 +801,7 @@ restart:
 /*
  * Select a job to run (called by an AIO daemon).
  */
-static struct aio_task *
+static struct aiocblist *
 aio_selectjob(struct aiothreadlist *aiop)
 {
 	struct aiocblist *aiocbe;
@@ -870,7 +868,6 @@ aio_process_rw(struct aiocblist *aiocbe)
 	struct thread *td;
 	struct aiocb *cb;
 	struct file *fp;
-	struct socket *so;
 	struct uio auio;
 	struct iovec aiov;
 	int cnt;
@@ -1046,7 +1043,7 @@ static void
 aio_schedule_fsync(void *context, int pending)
 {
 	struct kaioinfo *ki;
-	struct aiocbe *scb;
+	struct aiocblist *scb;
 
 	ki = context;
 	AIO_LOCK(ki);
@@ -1150,7 +1147,7 @@ aio_complete(struct aiocblist *aiocbe, long status, int error)
 	KASSERT(!(aiocbe->jobflags & AIOCBLIST_FINISHED),
 	    ("duplicate aio_complete"));
 	aiocbe->jobflags |= AIOCBLIST_FINISHED;
-	if (aiocbe->jobflags & (AIOCBLIST_QUEUEING | AIOCBLIST_CANCELLING) ==
+	if ((aiocbe->jobflags & (AIOCBLIST_QUEUEING | AIOCBLIST_CANCELLING)) ==
 	    0) {
 		TAILQ_REMOVE(&ki->kaio_jobqueue, aiocbe, plist);
 		aio_bio_done_notify(userp, aiocbe);
@@ -1190,7 +1187,7 @@ aio_switch_vmspace_low(struct vmspace *newvm)
 }
 
 void
-aio_switch_vmspace(struct aiocbelist *aiocbe)
+aio_switch_vmspace(struct aiocblist *aiocbe)
 {
 
 	/*
@@ -1213,7 +1210,7 @@ aio_daemon(void *_id)
 	struct aiothreadlist *aiop;
 	struct kaioinfo *ki;
 	struct proc *mycp;
-	struct vmspace *myvm, *tmpvm;
+	struct vmspace *myvm;
 	struct thread *td = curthread;
 	int id = (intptr_t)_id;
 
@@ -1223,8 +1220,8 @@ aio_daemon(void *_id)
 	 * vmspace.
 	 */
 	mycp = curproc;
-	myvm = myp->p_vmspace;
-	atomic_add_int(&mycp->p_vmspace->vm_refcnt, 1);
+	myvm = mycp->p_vmspace;
+	atomic_add_int(&myvm->vm_refcnt, 1);
 
 	KASSERT(mycp->p_textvp == NULL, ("kthread has a textvp"));
 
@@ -1362,7 +1359,6 @@ aio_qphysio(struct proc *p, struct aiocblist *aiocbe)
 	struct cdevsw *csw;
 	struct cdev *dev;
 	struct kaioinfo *ki;
-	struct aioliojob *lj;
 	int error, ref, unmap, poff;
 	vm_prot_t prot;
 
@@ -1823,10 +1819,12 @@ aio_schedule(struct aiocblist *aiocbe, aio_handle_fn_t *func)
 static void
 aio_cancel_sync(struct aiocblist *aiocbe)
 {
+	struct kaioinfo *ki;
 
+	ki = aiocbe->userproc->p_aioinfo;
 	mtx_lock(&aio_job_mtx);
 	if (!aio_cancel_cleared(aiocbe))
-		TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
+		TAILQ_REMOVE(&ki->kaio_syncqueue, aiocbe, list);
 	mtx_unlock(&aio_job_mtx);
 	aio_cancel(aiocbe);
 }
@@ -1837,8 +1835,6 @@ aio_queue_file(struct file *fp, struct aiocblist *aiocbe)
 	struct aiocblist *cb;
 	struct aioliojob *lj;
 	struct kaioinfo *ki;
-	struct socket *so;
-	struct sockbuf *sb;
 	int error, opcode;
 
 	lj = aiocbe->lio;
@@ -1900,7 +1896,7 @@ done:
 	return (error);
 }
 
-static void
+void
 aio_kick_nowait(struct proc *userp)
 {
 	struct kaioinfo *ki = userp->p_aioinfo;
