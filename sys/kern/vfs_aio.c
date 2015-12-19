@@ -1209,7 +1209,7 @@ aio_daemon(void *_id)
 	struct aiocblist *aiocbe;
 	struct aiothreadlist *aiop;
 	struct kaioinfo *ki;
-	struct proc *mycp;
+	struct proc *p;
 	struct vmspace *myvm;
 	struct thread *td = curthread;
 	int id = (intptr_t)_id;
@@ -1219,11 +1219,11 @@ aio_daemon(void *_id)
 	 * doesn't get freed by jobs that switch to a different
 	 * vmspace.
 	 */
-	mycp = curproc;
-	myvm = mycp->p_vmspace;
+	p = td->td_proc;
+	myvm = p->p_vmspace;
 	atomic_add_int(&myvm->vm_refcnt, 1);
 
-	KASSERT(mycp->p_textvp == NULL, ("kthread has a textvp"));
+	KASSERT(p->p_textvp == NULL, ("kthread has a textvp"));
 
 	/*
 	 * Allocate and ready the aio control info.  There is one aiop structure
@@ -1269,7 +1269,7 @@ aio_daemon(void *_id)
 		/*
 		 * Disconnect from user address space.
 		 */
-		if (mycp->p_vmspace != myvm) {
+		if (p->p_vmspace != myvm) {
 			mtx_unlock(&aio_job_mtx);
 			aio_switch_vmspace_low(myvm);
 			mtx_lock(&aio_job_mtx);
@@ -1302,7 +1302,7 @@ aio_daemon(void *_id)
 	free_unr(aiod_unr, id);
 	vmspace_free(myvm);
 
-	KASSERT(mycp->p_vmspace == myvm,
+	KASSERT(p->p_vmspace == myvm,
 	    ("AIOD: bad vmspace for exiting daemon"));
 	KASSERT(myvm->vm_refcnt > 1,
 	    ("AIOD: bad vm refcnt for exiting daemon: %d", myvm->vm_refcnt));
