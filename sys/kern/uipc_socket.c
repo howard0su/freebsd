@@ -3089,54 +3089,6 @@ soo_kqfilter(struct file *fp, struct knote *kn)
 	return (0);
 }
 
-static void
-soo_aio_rcv(void *context, int pending)
-{
-	struct socket *so;
-	struct sockbuf *sb;
-	struct aiocblist *aiocbe;
-	struct user_buffer *ub;
-	struct mbuf *m;
-	struct uio uio;
-	int error, flags;
-
-	so = context;
-	sb = &so->so_rcv;
-	SOCKBUF_LOCK(sb);
-	while (soreadable(so)) {
-		if (TAILQ_EMPTY(&sb->sb_aiojobq))
-			break;
-
-		/* Grab the first request to service next. */
-		cbe = TAILQ_FIRST(&sb->sb_aiojobq);
-		if (!aio_set_cancel_function(aiocbe, soo_aio_active_cancel))
-			continue;
-		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
-		SOCKBUF_UNLOCK(sb);
-
-		/*
-		 * XXX: If a user buffer is partially valid but the
-		 * valid part is long enough to hold a short read, this
-		 * will fail when the short read would have succeeded
-		 * via read(2).
-		 */
-		error = hold_aio_buffer(aiocbe, &ub, VM_PROT_WRITE);
-		if (error) {
-			aio_complete(aiocbe, -1, error);
-			SOCKBUF_LOCK(sb);
-			continue;
-		}
-
-		memset(&uio, 0, sizeof(uio));
-		uio->uio_resid = aiocbe->uaiocb.aio_nbytes;
-		flags = 
-		error = soreceive(so, NULL, &uio, &m, NULL, &flags);
-		release_user_buffer(ub);
-		SOCKBUF_LOCK(sb);
-	}
-	SOCKBUF_UNLOCK(sb);
-}
-
 /*
  * Some routines that return EOPNOTSUPP for entry points that are not
  * supported by a protocol.  Fill in as needed.

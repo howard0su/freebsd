@@ -75,6 +75,8 @@ static fo_close_t soo_close;
 static fo_fill_kinfo_t soo_fill_kinfo;
 static fo_aio_queue_t soo_aio_queue;
 
+static void	soo_aio_cancel(struct aiocblist *aiocbe);
+
 struct fileops	socketops = {
 	.fo_read = soo_read,
 	.fo_write = soo_write,
@@ -410,14 +412,14 @@ retry:
 		if (error == 0)
 			
 #endif
-			error = soreceive(so, NULL, uio, NULL, NULL, &flags);
+			error = soreceive(so, NULL, &uio, NULL, NULL, &flags);
 	} else {
 		uio.uio_rw = UIO_WRITE;
 #ifdef MAC
 		error = mac_socket_check_send(fp->f_cred, so);
 		if (error == 0)
 #endif
-			error = sosend(so, NULL, uio, NULL, NULL, flags, td);
+			error = sosend(so, NULL, &uio, NULL, NULL, flags, td);
 		if (error == EPIPE && (so->so_options & SO_NOSIGPIPE) == 0) {
 			PROC_LOCK(aiocbe->userproc);
 			kern_psignal(aiocbe->userproc, SIGPIPE);
@@ -433,7 +435,7 @@ retry:
 	sb = aiocbe->uaiocb.aio_lio_opcode == LIO_READ ? &so->so_rcv :
 	    &so->so_snd;
 	SOCKBUF_LOCK(sb);
-	sb->sb_flags & ~SB_AIO_RUNNING;
+	sb->sb_flags &= ~SB_AIO_RUNNING;
 
 	/* XXX: Not sure if this is needed? */
 	if (cnt != 0 && (error == ERESTART || error == EINTR ||
@@ -446,12 +448,11 @@ retry:
 		 * If it is not, place this request at the head of the
 		 * queue to try again when the socket is ready.
 		 */
-		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(sb)) {
+		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so)) {
 			sb->sb_flags |= SB_AIO_RUNNING;
 			SOCKBUF_UNLOCK(sb);
 			goto retry;
 		}
-		sb->sb_flags & ~SB_AIO_RUNNING;
 		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel)) {
 			MPASS(cnt == 0);
 			cancelled = true;
@@ -467,8 +468,8 @@ retry:
 	 * when the socket becomes ready.
 	 */
 	if (!TAILQ_EMPTY(&sb->sb_aiojobq)) {
-		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(sb))
-			soo_aio_wake(so, sb);
+		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so))
+			sowakeup_aio(so, sb);
 		else
 			sb->sb_flags |= SB_AIO;
 	}
@@ -480,10 +481,38 @@ retry:
 		aio_complete(aiocbe, cnt, error);
 }
 
-void
-soo_aio_wake(struct socket *so, struct sockbuf *sb)
+static void
+soo_aio_cancel_running(struct aiocblist *aiocbe)
 {
-	struct aiocbe *aiocbe;
+	struct socket *so;
+	struct sockbuf *sb;
+	int opcode;
+
+	so = aiocbe->fd_file->f_data;
+	opcode = aiocbe->uaiocb.aio_lio_opcode;
+	if (opcode == LIO_READ)
+		sb = &so->so_rcv;
+	else {
+		MPASS(opcode == LIO_WRITE);
+		sb = &so->so_snd;
+	}
+
+	SOCKBUF_LOCK(sb);
+	mtx_lock(&aio_job_mtx);
+	if (!aio_cancel_cleared(aiocbe))
+		TAILQ_REMOVE(&aio_jobs, aiocbe, list);
+	mtx_unlock(&aio_job_mtx);
+	sb->sb_flags &= ~SB_AIO_RUNNING;
+	sowakeup_aio(so, sb);
+	SOCKBUF_UNLOCK(sb);
+
+	aio_cancel(aiocbe);	
+}
+
+void
+sowakeup_aio(struct socket *so, struct sockbuf *sb)
+{
+	struct aiocblist *aiocbe;
 
 	SOCKBUF_LOCK_ASSERT(sb);
 	sb->sb_flags &= ~SB_AIO;
@@ -509,39 +538,13 @@ soo_aio_wake(struct socket *so, struct sockbuf *sb)
 }
 
 static void
-soo_aio_cancel_running(struct aiocblist *aiocbe)
-{
-	struct socket *so;
-	struct sockbuf *sb;
-
-	so = fp->f_data;
-	opcode = aiocbe->uaiocb.aio_lio_opcode;
-	if (opcode == LIO_READ)
-		sb = &so->so_rcv;
-	else {
-		MPASS(opcode == LIO_WRITE);
-		sb = &so->so_snd;
-	}
-
-	SOCKBUF_LOCK(sb);
-	mtx_lock(&aio_job_mtx);
-	if (!aio_cancel_cleared(aiocbe))
-		TAILQ_REMOVE(&aio_jobs, &cbe->task, list);
-	mtx_unlock(&aio_job_mtx);
-	sb->sb_flags &= ~SB_AIO_RUNNING;
-	soo_aio_wake(so, sb);
-	SOCKBUF_UNLOCK(sb);
-
-	aio_cancel(aiocbe);	
-}
-
-static void
 soo_aio_cancel(struct aiocblist *aiocbe)
 {
 	struct socket *so;
 	struct sockbuf *sb;
+	int opcode;
 
-	so = fp->f_data;
+	so = aiocbe->fd_file->f_data;
 	opcode = aiocbe->uaiocb.aio_lio_opcode;
 	if (opcode == LIO_READ)
 		sb = &so->so_rcv;
@@ -589,8 +592,8 @@ soo_aio_queue(struct file *fp, struct aiocblist *aiocbe)
 		panic("new job was cancelled");
 	TAILQ_INSERT_TAIL(&sb->sb_aiojobq, aiocbe, list);
 	if (!(sb->sb_flags & SB_AIO_RUNNING)) {
-		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(sb))
-			soo_aio_wake(so, sb);
+		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so))
+			sowakeup_aio(so, sb);
 		else
 			sb->sb_flags |= SB_AIO;
 	}
