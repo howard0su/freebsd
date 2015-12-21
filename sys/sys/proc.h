@@ -579,6 +579,7 @@ struct proc {
 	struct itimers	*p_itimers;	/* (c) POSIX interval timers. */
 	struct procdesc	*p_procdesc;	/* (e) Process descriptor, if any. */
 	u_int		p_treeflag;	/* (e) P_TREE flags */
+	int		p_exitingthreads; /* (c) Count of exiting threads. */
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_magic
 
