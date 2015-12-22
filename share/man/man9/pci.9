@@ -708,7 +708,7 @@ containing the MSI-X Pending Bit Array (PBA) for device
 If the device does not support MSI-X,
 then
 .Fn pci_msix_pba_bar
-returns negative one.
+returns -1.
 .Pp
 The
 .Fn pci_msix_tab;e_bar
@@ -718,7 +718,7 @@ containing the MSI-X vector table for device
 If the device does not support MSI-X,
 then
 .Fn pci_msix_table_bar
-returns negative one.
+returns -1.
 .Pp
 The
 .Fn pci_alloc_msix
