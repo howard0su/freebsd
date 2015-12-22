@@ -30,6 +30,8 @@
 #ifndef _MACHINE_CPUTYPES_H_
 #define	_MACHINE_CPUTYPES_H_
 
+#include <x86/cputypes.h>
+
 /*
  * Classes of processor.
  */
