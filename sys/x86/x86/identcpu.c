@@ -118,9 +118,11 @@ u_int	cpu_maxphyaddr;		/* Max phys addr width in bits */
 char machine[] = MACHINE;
 
 SYSCTL_UINT(_hw, OID_AUTO, via_feature_rng, CTLFLAG_RD,
-	&via_feature_rng, 0, "VIA RNG feature available in CPU");
+    &via_feature_rng, 0,
+    "VIA RNG feature available in CPU");
 SYSCTL_UINT(_hw, OID_AUTO, via_feature_xcrypt, CTLFLAG_RD,
-	&via_feature_xcrypt, 0, "VIA xcrypt feature available in CPU");
+    &via_feature_xcrypt, 0,
+    "VIA xcrypt feature available in CPU");
 
 #ifdef __amd64__
 #ifdef SCTL_MASK32
