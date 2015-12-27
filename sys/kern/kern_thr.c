@@ -324,6 +324,20 @@ kern_thr_exit(struct thread *td)
 
 	p = td->td_proc;
 
+	/*
+	 * If all of the threads in a process call this routine to
+	 * exit (e.g. all threads call pthread_exit()), exactly one
+	 * thread should return to the caller to terminate the process
+	 * instead of the thread.
+	 *
+	 * Checking p_numthreads alone is not sufficient since threads
+	 * might be committed to terminating while the PROC_LOCK is
+	 * dropped in either ptracestop() or while removing this thread
+	 * from the tidhash.  Instead, the p_exitingthreads field holds
+	 * the count of threads in either of those states and a thread
+	 * is considered the "last" thread if all of the other threads
+	 * in a process are already terminating.
+	 */
 	PROC_LOCK(p);
 	if (p->p_numthreads == p->p_exitingthreads + 1) {
 		while (p->p_exitingthreads > 0)
