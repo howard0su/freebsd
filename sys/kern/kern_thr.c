@@ -340,16 +340,6 @@ kern_thr_exit(struct thread *td)
 	 */
 	PROC_LOCK(p);
 	if (p->p_numthreads == p->p_pendingexits + 1) {
-		while (p->p_pendingexits > 0)
-			mtx_sleep(&p->p_pendingexits, &p->p_mtx, 0,
-			    "threxit", 0);
-
-		/*
-		 * Exiting threads should not be able to spawn additional
-		 * threads.
-		 */
-		KASSERT(p->p_numthreads == 1, ("exiting threads mismatch"));
-
 		/*
 		 * Ignore attempts to shut down last thread in the
 		 * proc.  This will actually call _exit(2) in the
@@ -367,8 +357,6 @@ kern_thr_exit(struct thread *td)
 	tidhash_remove(td);
 	PROC_LOCK(p);
 	p->p_pendingexits--;
-	if (p->p_pendingexits == 0)
-		wakeup(&p->p_pendingexits);
 
 	/*
 	 * The check above should prevent all other threads from this
