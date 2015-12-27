@@ -333,15 +333,15 @@ kern_thr_exit(struct thread *td)
 	 * Checking p_numthreads alone is not sufficient since threads
 	 * might be committed to terminating while the PROC_LOCK is
 	 * dropped in either ptracestop() or while removing this thread
-	 * from the tidhash.  Instead, the p_exitingthreads field holds
+	 * from the tidhash.  Instead, the p_pendingexits field holds
 	 * the count of threads in either of those states and a thread
 	 * is considered the "last" thread if all of the other threads
 	 * in a process are already terminating.
 	 */
 	PROC_LOCK(p);
-	if (p->p_numthreads == p->p_exitingthreads + 1) {
-		while (p->p_exitingthreads > 0)
-			mtx_sleep(&p->p_exitingthreads, &p->p_mtx, 0,
+	if (p->p_numthreads == p->p_pendingexits + 1) {
+		while (p->p_pendingexits > 0)
+			mtx_sleep(&p->p_pendingexits, &p->p_mtx, 0,
 			    "threxit", 0);
 
 		/*
@@ -359,16 +359,16 @@ kern_thr_exit(struct thread *td)
 		return (0);
 	}
 
-	p->p_exitingthreads++;
+	p->p_pendingexits++;
 	td->td_dbgflags |= TDB_EXIT;
 	if (p->p_flag & P_TRACED && p->p_flag2 & P2_LWP_EVENTS)
 		ptracestop(td, SIGTRAP);
 	PROC_UNLOCK(p);
 	tidhash_remove(td);
 	PROC_LOCK(p);
-	p->p_exitingthreads--;
-	if (p->p_exitingthreads == 0)
-		wakeup(&p->p_exitingthreads);
+	p->p_pendingexits--;
+	if (p->p_pendingexits == 0)
+		wakeup(&p->p_pendingexits);
 
 	/*
 	 * The check above should prevent all other threads from this
