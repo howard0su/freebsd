@@ -1317,15 +1317,18 @@ ATF_TC_BODY(ptrace__lwp_events_exec, tc)
 
 	ATF_REQUIRE(ptrace(PT_CONTINUE, fpid, (caddr_t)1, 0) == 0);
 
-	/* The next event should be for the main thread's death. */
+	/*
+	 * The next event should be for the main thread's death due to
+	 * single threading from execve().
+	 */
 	wpid = waitpid(fpid, &status, 0);
 	ATF_REQUIRE(wpid == fpid);
 	ATF_REQUIRE(WIFSTOPPED(status));
 	ATF_REQUIRE(WSTOPSIG(status) == SIGTRAP);
-		
+
 	ATF_REQUIRE(ptrace(PT_LWPINFO, wpid, (caddr_t)&pl, sizeof(pl)) != -1);
 	ATF_REQUIRE((pl.pl_flags & (PL_FLAG_EXITED | PL_FLAG_SCE)) ==
-	    (PL_FLAG_EXITED | PL_FLAG_SCE));
+	    (PL_FLAG_EXITED));
 	ATF_REQUIRE(pl.pl_lwpid == lwps[0]);
 
 	ATF_REQUIRE(ptrace(PT_CONTINUE, fpid, (caddr_t)1, 0) == 0);
