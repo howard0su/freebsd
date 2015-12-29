@@ -1780,6 +1780,7 @@ no_kqueue:
 	} else
 		TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, aiocbe, plist);
 	AIO_UNLOCK(ki);
+	return (0);
 		
 aqueue_fail:
 	if (fp)
