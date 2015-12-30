@@ -699,7 +699,12 @@ syscallname(u_int code, u_int sv_flags)
 			break;
 #if defined(__amd64__) || defined(__i386__)
 		case SV_ABI_LINUX:
-			name = sysdecode_linux(code);
+#ifdef __amd64__
+			if (sv_flags & SV_ILP32)
+				name = sysdecode_linux32(code);
+			else
+#endif
+				name = sysdecode_linux(code);
 			break;
 #endif
 		default:
