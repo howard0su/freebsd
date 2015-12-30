@@ -29,7 +29,7 @@
 #ifndef __SYSDECODE_H__
 #define	__SYSDECODE_H__
 
-#if defined(__amd64__)
+#if defined(__amd64__) || defined(__aarch64__)
 const char *sysdecode_cloudabi64(unsigned int _code);
 #endif
 const char *sysdecode_freebsd(unsigned int _code);
