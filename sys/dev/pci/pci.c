@@ -70,6 +70,8 @@ __FBSDID("$FreeBSD$");
 #include "pcib_if.h"
 #include "pci_if.h"
 
+#define bootverbose 1
+
 #define	PCIR_IS_BIOS(cfg, reg)						\
 	(((cfg)->hdrtype == PCIM_HDRTYPE_NORMAL && reg == PCIR_BIOS) ||	\
 	 ((cfg)->hdrtype == PCIM_HDRTYPE_BRIDGE && reg == PCIR_BIOS_1))
@@ -613,7 +615,9 @@ pci_read_device(device_t pcib, int d, int b, int s, int f, size_t size)
 
 	devlist_entry = NULL;
 
+	printf("pci%d:%d:%d:%d: checking for a device: ", d, b, s, f);
 	if (REG(PCIR_DEVVENDOR, 4) != 0xfffffffful) {
+		printf("found\n");
 		devlist_entry = malloc(size, M_DEVBUF, M_WAITOK | M_ZERO);
 
 		cfg = &devlist_entry->cfg;
@@ -643,6 +647,7 @@ pci_read_device(device_t pcib, int d, int b, int s, int f, size_t size)
 		pci_fixancient(cfg);
 		pci_hdrtypedata(pcib, b, s, f, cfg);
 
+		pci_printf(cfg, "before pci_read_cap\n");
 		if (REG(PCIR_STATUS, 2) & PCIM_STATUS_CAPPRESENT)
 			pci_read_cap(pcib, cfg);
 
@@ -666,7 +671,8 @@ pci_read_device(device_t pcib, int d, int b, int s, int f, size_t size)
 
 		pci_numdevs++;
 		pci_generation++;
-	}
+	} else
+		printf("none\n");
 	return (devlist_entry);
 #undef REG
 }
@@ -3599,10 +3605,14 @@ pci_add_child(device_t bus, struct pci_devinfo *dinfo)
 	dinfo->cfg.dev = device_add_child(bus, NULL, -1);
 	device_set_ivars(dinfo->cfg.dev, dinfo);
 	resource_list_init(&dinfo->resources);
+	pci_printf(&dinfo->cfg, "before pci_cfg_save\n");
 	pci_cfg_save(dinfo->cfg.dev, dinfo, 0);
+	pci_printf(&dinfo->cfg, "before pci_cfg_restore\n");
 	pci_cfg_restore(dinfo->cfg.dev, dinfo);
 	pci_print_verbose(dinfo);
+	pci_printf(&dinfo->cfg, "before pci_add_resources\n");
 	pci_add_resources(bus, dinfo->cfg.dev, 0, 0);
+	pci_printf(&dinfo->cfg, "before pci_child_added\n");
 	pci_child_added(dinfo->cfg.dev);
 }
 
