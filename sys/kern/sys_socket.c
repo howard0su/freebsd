@@ -49,6 +49,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/filio.h>			/* XXX */
 #include <sys/sockio.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/uio.h>
 #include <sys/ucred.h>
 #include <sys/un.h>
@@ -64,6 +65,17 @@ __FBSDID("$FreeBSD$");
 #include <netinet/in_pcb.h>
 
 #include <security/mac/mac_framework.h>
+
+static SYSCTL_NODE(_kern_ipc, OID_AUTO, aio, CTLFLAG_RD, NULL,
+    "socket AIO stats");
+
+static int empty_results;
+SYSCTL_INT(_kern_ipc_aio, OID_AUTO, empty_results, CTLFLAG_RD, &empty_results,
+    0, "socket operation returned EAGAIN");
+
+static int empty_retries;
+SYSCTL_INT(_kern_ipc_aio, OID_AUTO, empty_retries, CTLFLAG_RD, &empty_retries,
+    0, "socket operation retries");
 
 static fo_rdwr_t soo_read;
 static fo_rdwr_t soo_write;
@@ -448,8 +460,10 @@ retry:
 		 * If it is not, place this request at the head of the
 		 * queue to try again when the socket is ready.
 		 */
+		empty_results++;
 		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so)) {
 			sb->sb_flags |= SB_AIO_RUNNING;
+			empty_retries++;
 			SOCKBUF_UNLOCK(sb);
 			goto retry;
 		}
