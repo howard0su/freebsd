@@ -1075,14 +1075,14 @@ aio_cancel_cleared(struct kaiocb *job)
 {
 	struct kaioinfo *ki;
 	bool cleared;
-	
+
 	ki = job->userproc->p_aioinfo;
 	AIO_LOCK(ki);
 	cleared = (job->jobflags & KAIOCB_CLEARED) != 0;
 	AIO_UNLOCK(ki);
 	return (cleared);
 }
-	
+
 bool
 aio_clear_cancel_function(struct kaiocb *job)
 {
@@ -1693,7 +1693,7 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	error = kqfd_register(kqfd, &kev, td, 1);
 	if (error)
 		goto aqueue_fail;
-	
+
 no_kqueue:
 
 	ops->store_error(ujob, EINPROGRESS);
@@ -1732,7 +1732,7 @@ no_kqueue:
 		TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, job, plist);
 	AIO_UNLOCK(ki);
 	return (0);
-		
+
 aqueue_fail:
 	if (fp)
 		fdrop(fp, td);
@@ -1791,7 +1791,7 @@ aio_queue_file(struct file *fp, struct kaiocb *job)
 
 	lj = job->lio;
 	ki = job->userproc->p_aioinfo;
-	opcode = job->uaiocb.aio_lio_opcode;	
+	opcode = job->uaiocb.aio_lio_opcode;
 	if (opcode == LIO_SYNC)
 		goto queueit;
 

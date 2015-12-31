@@ -410,7 +410,7 @@ retry:
 #ifdef MAC
 		error = mac_socket_check_receive(fp->f_cred, so);
 		if (error == 0)
-			
+
 #endif
 			error = soreceive(so, NULL, &uio, NULL, NULL, &flags);
 	} else {
@@ -506,7 +506,7 @@ soo_aio_cancel_running(struct aiocblist *aiocbe)
 	sowakeup_aio(so, sb);
 	SOCKBUF_UNLOCK(sb);
 
-	aio_cancel(aiocbe);	
+	aio_cancel(aiocbe);
 }
 
 void
