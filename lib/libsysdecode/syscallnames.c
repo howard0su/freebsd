@@ -66,7 +66,7 @@ sysdecode_freebsd32(unsigned int code)
 
 #if defined(__amd64__) || defined(__aarch64__)
 static
-#include <sys/compat/cloudabi64/cloudabi64_syscalls.c>
+#include <compat/cloudabi64/cloudabi64_syscalls.c>
 
 const char *
 sysdecode_cloudabi64(unsigned int code)
