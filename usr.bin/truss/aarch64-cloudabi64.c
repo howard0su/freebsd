@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD$");
 
 #include <errno.h>
 #include <stdio.h>
+#include <sysdecode.h>
 
 #include "cloudabi.h"
 #include "truss.h"
