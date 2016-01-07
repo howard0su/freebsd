@@ -341,6 +341,8 @@ int	getsock_cap(struct thread *td, int fd, cap_rights_t *rightsp,
 	    struct file **fpp, u_int *fflagp);
 void	soabort(struct socket *so);
 int	soaccept(struct socket *so, struct sockaddr **nam);
+void	soaio_rcv(void *context, int pending);
+void	soaio_snd(void *context, int pending);
 int	socheckuid(struct socket *so, uid_t uid);
 int	sobind(struct socket *so, struct sockaddr *nam, struct thread *td);
 int	sobindat(int fd, struct socket *so, struct sockaddr *nam,
