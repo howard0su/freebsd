@@ -130,12 +130,12 @@ static SYSCTL_NODE(_vfs, OID_AUTO, aio, CTLFLAG_RW, 0, "Async IO management");
 static int max_aio_procs = MAX_AIO_PROCS;
 SYSCTL_INT(_vfs_aio, OID_AUTO, max_aio_procs,
 	CTLFLAG_RW, &max_aio_procs, 0,
-	"Maximum number of kernel threads to use for handling async IO ");
+	"Maximum number of kernel processes to use for handling async IO ");
 
 static int num_aio_procs = 0;
 SYSCTL_INT(_vfs_aio, OID_AUTO, num_aio_procs,
 	CTLFLAG_RD, &num_aio_procs, 0,
-	"Number of presently active kernel threads for async IO");
+	"Number of presently active kernel processes for async IO");
 
 /*
  * The code will adjust the actual number of AIO processes towards this
@@ -143,7 +143,7 @@ SYSCTL_INT(_vfs_aio, OID_AUTO, num_aio_procs,
  */
 static int target_aio_procs = TARGET_AIO_PROCS;
 SYSCTL_INT(_vfs_aio, OID_AUTO, target_aio_procs, CTLFLAG_RW, &target_aio_procs,
-	0, "Preferred number of ready kernel threads for async IO");
+	0, "Preferred number of ready kernel processes for async IO");
 
 static int max_queue_count = MAX_AIO_QUEUE;
 SYSCTL_INT(_vfs_aio, OID_AUTO, max_aio_queue, CTLFLAG_RW, &max_queue_count, 0,
@@ -157,7 +157,7 @@ static int num_buf_aio = 0;
 SYSCTL_INT(_vfs_aio, OID_AUTO, num_buf_aio, CTLFLAG_RD, &num_buf_aio, 0,
     "Number of aio requests presently handled by the buf subsystem");
 
-/* Number of async I/O thread in the process of being started */
+/* Number of async I/O processes in the process of being started */
 /* XXX This should be local to aio_aqueue() */
 static int num_aio_resv_start = 0;
 
@@ -210,8 +210,8 @@ typedef struct oaiocb {
  * Current, there is only two backends: BIO and generic file I/O.
  * socket I/O is served by generic file I/O, this is not a good idea, since
  * disk file I/O and any other types without O_NONBLOCK flag can block daemon
- * threads, if there is no thread to serve socket I/O, the socket I/O will be
- * delayed too long or starved, we should create some threads dedicated to
+ * processes, if there is no thread to serve socket I/O, the socket I/O will be
+ * delayed too long or starved, we should create some processes dedicated to
  * sockets to do non-blocking I/O, same for pipe and fifo, for these I/O
  * systems we really need non-blocking interface, fiddling O_NONBLOCK in file
  * structure is not safe because there is race between userland and aio
@@ -297,7 +297,7 @@ struct kaioinfo {
 						 *  NOT USED YET.
 						 */
 	TAILQ_HEAD(,aiocblist) kaio_syncqueue;	/* (a) queue for aio_fsync */
-	struct	task	kaio_task;	/* (*) task to kick aio threads */
+	struct	task	kaio_task;	/* (*) task to kick aio processes */
 };
 
 #define AIO_LOCK(ki)		mtx_lock(&(ki)->kaio_mtx)
@@ -361,7 +361,7 @@ static int	filt_lio(struct knote *kn, long hint);
 /*
  * Zones for:
  * 	kaio	Per process async io info
- *	aiop	async io thread data
+ *	aiop	async io process data
  *	aiocb	async io jobs
  *	aiol	list io job pointer - internal to aio_suspend XXX
  *	aiolio	list io jobs
