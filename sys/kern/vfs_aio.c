@@ -91,16 +91,8 @@ static uint64_t jobseqno;
 #define MAX_AIO_QUEUE_PER_PROC	256 /* Bigger than AIO_LISTIO_MAX */
 #endif
 
-#ifndef MAX_AIO_PROCS
-#define MAX_AIO_PROCS		32
-#endif
-
 #ifndef MAX_AIO_QUEUE
 #define	MAX_AIO_QUEUE		1024 /* Bigger than AIO_LISTIO_MAX */
-#endif
-
-#ifndef TARGET_AIO_PROCS
-#define TARGET_AIO_PROCS	4
 #endif
 
 #ifndef MAX_BUF_AIO
@@ -109,10 +101,6 @@ static uint64_t jobseqno;
 
 #ifndef AIOD_TIMEOUT_DEFAULT
 #define	AIOD_TIMEOUT_DEFAULT	(10 * hz)
-#endif
-
-#ifndef AIOD_LIFETIME_DEFAULT
-#define AIOD_LIFETIME_DEFAULT	(30 * hz)
 #endif
 
 FEATURE(aio, "Asynchronous I/O");
@@ -1162,7 +1150,7 @@ aio_cancel(struct aiocblist *aiocbe)
 	aio_complete(aiocbe, -1, ECANCELED);
 }
 
-static void
+void
 aio_switch_vmspace_low(struct vmspace *newvm)
 {
 	struct vmspace *oldvm;

@@ -139,9 +139,22 @@ __END_DECLS
 
 #else
 
+#ifndef MAX_AIO_PROCS
+#define MAX_AIO_PROCS		32
+#endif
+
+#ifndef TARGET_AIO_PROCS
+#define TARGET_AIO_PROCS	4
+#endif
+
+#ifndef AIOD_LIFETIME_DEFAULT
+#define AIOD_LIFETIME_DEFAULT	(30 * hz)
+#endif
+
 /* Forward declarations for prototypes below. */
 struct socket;
 struct sockbuf;
+struct vmspace;
 
 /* XXX: A bit of a hack to put this here for now. */
 #include <sys/queue.h>
@@ -186,6 +199,7 @@ void	aio_schedule(struct aiocblist *aiocbe, aio_handle_fn_t *func);
 bool	aio_set_cancel_function(struct aiocblist *aiocbe,
 	    aio_cancel_fn_t *func);
 void	aio_switch_vmspace(struct aiocblist *aiocbe);
+void	aio_switch_vmspace_low(struct vmspace *newvm);
 
 /* XXX: Hacks for the current socket code. */
 void	aio_cancel_scheduled_job(struct aiocblist *aiocbe);

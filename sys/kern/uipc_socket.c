@@ -134,6 +134,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/stat.h>
 #include <sys/sx.h>
 #include <sys/sysctl.h>
+#include <sys/taskqueue.h>
 #include <sys/uio.h>
 #include <sys/jail.h>
 #include <sys/syslog.h>
