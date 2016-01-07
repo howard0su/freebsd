@@ -381,25 +381,174 @@ soo_fill_kinfo(struct file *fp, struct kinfo_file *kif, struct filedesc *fdp)
 	return (0);	
 }
 
+static STAILQ_HEAD(, task) soaio_jobs;
+static struct mtx soaio_jobs_lock;
+static struct task soaio_kproc_task;
+static int soaio_starting, soaio_idle, soaio_queued;
+static struct unrhdr *soaio_kproc_unr;
+
+static int soaio_max_procs = MAX_AIO_PROCS;
+SYSCTL_INT(_kern_ipc_aio, OID_AUTO, max_procs, CTLFLAG_RW, &soaio_max_procs, 0,
+    "Maximum number of kernel processes to use for async socket IO");
+
+static int soaio_num_procs;
+SYSCTL_INT(_kern_ipc_aio, OID_AUTO, num_procs, CTLFLAG_RD, &soaio_num_procs, 0,
+    "Number of active kernel processes for async socket IO");
+
+static int soaio_target_procs = TARGET_AIO_PROCS;
+SYSCTL_INT(_kern_ipc_aio, OID_AUTO, target_procs, CTLFLAG_RD,
+    &soaio_target_procs, 0,
+    "Preferred number of ready kernel processes for async socket IO");
+
+static int soaio_lifetime = AIOD_TIMEOUT_DEFAULT;
+SYSCTL_INT(_kern_ipc_aio, OID_AUTO, lifetime, CTLFLAG_RW, &soaio_lifetime, 0,
+    "Maximum lifetime for idle aiod");
+
 static void
-soo_aio_process(struct aiocblist *aiocbe)
+soaio_kproc_loop(void *arg)
 {
-	struct ucred *td_savedcred;
+	struct proc *p;
+	struct vmspace *myvm;
+	struct task *task;
+	int error, id, pending;
+
+	id = (intptr_t)arg;
+
+	/*
+	 * Grab an extra reference on the daemon's vmspace so that it
+	 * doesn't get freed by jobs that switch to a different
+	 * vmspace.
+	 */
+	p = curproc;
+	myvm = p->p_vmspace;
+	atomic_add_int(&myvm->vm_refcnt, 1);
+
+	/* The daemon resides in its own pgrp. */
+	sys_setsid(curthread, NULL);
+	
+	mtx_lock(&soaio_jobs_lock);
+	MPASS(soaio_starting > 0);
+	soaio_starting--;
+	for (;;) {
+		while (!STAILQ_EMPTY(&soaio_jobs)) {
+			task = STAILQ_FIRST(&soaio_jobs);
+			STAILQ_REMOVE_HEAD(&soaio_jobs, ta_link);
+			soaio_queued--;
+			pending = task->ta_pending;
+			task->ta_pending = 0;
+			mtx_unlock(&soaio_jobs_lock);
+
+			task->ta_func(task->ta_context, pending);
+
+			mtx_unlock(&soaio_jobs_lock);
+		}
+		MPASS(soaio_queued == 0);
+
+		if (p->p_vmspace != myvm) {
+			mtx_unlock(&soaio_jobs_lock);
+			aio_switch_vmspace_low(myvm);
+			mtx_lock(&soaio_jobs_lock);
+			continue;
+		}
+
+		soaio_idle++;
+		error = mtx_sleep(&soaio_idle, &soaio_jobs_lock, 0, "-",
+		    soaio_lifetime);
+		soaio_idle--;
+		if (error == EWOULDBLOCK && STAILQ_EMPTY(&soaio_jobs) &&
+		    soaio_num_procs > soaio_target_procs)
+			break;
+	}
+	soaio_num_procs--;
+	mtx_unlock(&soaio_jobs_lock);
+	free_unr(soaio_kproc_unr, id);
+	kproc_exit(0);
+}
+
+static void
+soaio_kproc_create(void *context, int pending)
+{
+	struct proc *p;
+	int error, id;
+
+	mtx_lock(&soaio_jobs_lock);
+	for (;;) {
+		if (soaio_num_procs < soaio_target_procs) {
+			/* Must create */
+		} else if (soaio_num_procs >= soaio_max_procs) {
+			/*
+			 * Hit the limit on kernel processes, don't
+			 * create another one.
+			 */
+			break;
+		} else if (soaio_queued <= soaio_idle + soaio_starting) {
+			/*
+			 * No more AIO jobs waiting for a process to be
+			 * created, so stop.
+			 */
+			break;
+		}
+		mtx_unlock(&soaio_jobs_lock);
+
+		id = alloc_unr(soaio_kproc_unr);
+		error = kproc_create(soaio_kproc_loop, (void *)(intptr_t)id,
+		    &p, 0, 0, "soaiod%d", id);
+		if (error != 0) {
+			free_unr(soaio_kproc_unr, id);
+			return;
+		}
+
+		mtx_lock(&soaio_jobs_lock);
+		soaio_num_procs++;
+		soaio_starting++;
+	}
+	mtx_unlock(&soaio_jobs_lock);
+}
+
+static void
+soaio_enqueue(struct task *task)
+{
+
+	mtx_lock(&soaio_jobs_lock);
+	MPASS(task->ta_pending = 0);
+	task->ta_pending++;
+	STAILQ_INSERT_TAIL(&soaio_jobs, task, ta_link);
+	soaio_queued++;
+	if (soaio_queued <= soaio_idle)
+		wakeup_one(&soaio_idle);
+	else if (soaio_num_procs < soaio_max_procs)
+		taskqueue_enqueue(taskqueue_thread, soaio_kproc_task);
+	mtx_unlock(&soaio_jobs_lock);
+}
+
+static void
+soaio_init(void)
+{
+
+	STAILQ_INIT(&soaio_jobs);
+	mtx_init(&soaio_jobs_lock, "soaio jobs", NULL, MTX_DEF);
+	soaio_kproc_unr = new_unrhdr(1, INT_MAX, NULL);
+	TASK_INIT(&soaio_kproc_task, 0, soaio_kproc_create, NULL);
+	if (soaio_target_procs > 0)
+		taskqueue_enqueue(taskqueue_thread, soaio_kproc_task);
+}
+SYSINIT(soaio_init, SI_SUB_CONFIGURE, SI_ORDER_SECOND, soaio_init, NULL);
+
+static void
+soaio_process_job(struct socket *so, struct sockbuf *sb,
+    struct aiocblist *aiocbe)
+{
 	struct thread *td;
 	struct file *fp;
-	struct socket *so;
-	struct sockbuf *sb;
 	struct uio uio;
 	struct iovec iov;
 	size_t cnt;
 	int error, flags;
-	bool cancelled, requeued;
 
+	SOCKBUF_UNLOCK(sb);
 	aio_switch_vmspace(aiocbe);
 	td = curthread;
 	fp = aiocbe->fd_file;
-	so = fp->f_data;
-
 retry:
 	td_savedcred = td->td_ucred;
 	td->td_ucred = aiocbe->cred;
@@ -417,7 +566,7 @@ retry:
 
 	/* TODO: Charge ru_msg* to aiocbe. */
 
-	if (aiocbe->uaiocb.aio_lio_opcode == LIO_READ) {
+	if (sb == &so->so_rcv) {
 		uio.uio_rw = UIO_READ;
 #ifdef MAC
 		error = mac_socket_check_receive(fp->f_cred, so);
@@ -442,13 +591,6 @@ retry:
 	cnt -= uio.uio_resid;
 	td->td_ucred = td_savedcred;
 
-	cancelled = false;
-	requeued = false;
-	sb = aiocbe->uaiocb.aio_lio_opcode == LIO_READ ? &so->so_rcv :
-	    &so->so_snd;
-	SOCKBUF_LOCK(sb);
-	sb->sb_flags &= ~SB_AIO_RUNNING;
-
 	/* XXX: Not sure if this is needed? */
 	if (cnt != 0 && (error == ERESTART || error == EINTR ||
 	    error == EWOULDBLOCK))
@@ -460,95 +602,87 @@ retry:
 		 * If it is not, place this request at the head of the
 		 * queue to try again when the socket is ready.
 		 */
+		SOCKBUF_LOCK(sb);		
 		empty_results++;
 		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so)) {
-			sb->sb_flags |= SB_AIO_RUNNING;
 			empty_retries++;
 			SOCKBUF_UNLOCK(sb);
 			goto retry;
 		}
+
 		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel)) {
 			MPASS(cnt == 0);
-			cancelled = true;
+			SOCKBUF_UNLOCK(sb);
+			aio_cancel(aiocbe);
+			SOCKBUF_LOCK(sb);
 		} else {
 			TAILQ_INSERT_HEAD(&sb->sb_aiojobq, aiocbe, list);
-			requeued = true;
 		}
-	}
-
-	/*
-	 * If there are pending requests, either queue the next request
-	 * if the socket is ready or set SB_AIO to request a wakeup
-	 * when the socket becomes ready.
-	 */
-	if (!TAILQ_EMPTY(&sb->sb_aiojobq)) {
-		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so))
-			sowakeup_aio(so, sb);
-		else
-			sb->sb_flags |= SB_AIO;
-	}
-	SOCKBUF_UNLOCK(sb);
-
-	if (cancelled)
-		aio_cancel(aiocbe);
-	else if (!requeued)
+	} else {
 		aio_complete(aiocbe, cnt, error);
+		SOCKBUF_LOCK(sb);
+	}
 }
 
 static void
-soo_aio_cancel_running(struct aiocblist *aiocbe)
+soaio_process_sb(struct socket *so, struct sockbuf *sb)
 {
-	struct socket *so;
-	struct sockbuf *sb;
-	int opcode;
-
-	so = aiocbe->fd_file->f_data;
-	opcode = aiocbe->uaiocb.aio_lio_opcode;
-	if (opcode == LIO_READ)
-		sb = &so->so_rcv;
-	else {
-		MPASS(opcode == LIO_WRITE);
-		sb = &so->so_snd;
-	}
+	struct aiocblist *aiocbe;
 
 	SOCKBUF_LOCK(sb);
-	mtx_lock(&aio_job_mtx);
-	if (!aio_cancel_cleared(aiocbe))
-		TAILQ_REMOVE(&aio_jobs, aiocbe, list);
-	mtx_unlock(&aio_job_mtx);
-	sb->sb_flags &= ~SB_AIO_RUNNING;
-	sowakeup_aio(so, sb);
+	while ((aiocbe = TAILQ_FIRST(&sb->sb_aiojobq)) != NULL &&
+		sb == &so->so_rcv ? soreadable(so) : sowriteable(so)) {
+		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
+		if (!aio_clear_cancel_function(aiocbe))
+			continue;
+
+		soaio_process_job(so, sb, aiocbe);
+	}
+
+	/*
+	 * If there are still pending requests, the socket must not be
+	 * ready so set SB_AIO to request a wakeup when the socket
+	 * becomes ready.
+	 */
+	if (!TAILQ_EMPTY(&sb->sb_aiojobq))
+		sb->sb_flags |= SB_AIO;
 	SOCKBUF_UNLOCK(sb);
 
-	aio_cancel(aiocbe);
+	ACCEPT_LOCK();
+	SOCK_LOCK(so);
+	sorele(so);
+}
+
+void
+soaio_rcv(void *context, int pending)
+{
+	struct socket *so;
+
+	so = context;
+	soaio_process_sb(so, &so->so_rcv);
+}
+
+void
+soaio_snd(void *context, int pending)
+{
+	struct socket *so;
+
+	so = context;
+	soaio_process_sb(so, &so->so_snd);
 }
 
 void
 sowakeup_aio(struct socket *so, struct sockbuf *sb)
 {
-	struct aiocblist *aiocbe;
 
 	SOCKBUF_LOCK_ASSERT(sb);
 	sb->sb_flags &= ~SB_AIO;
-	while ((aiocbe = TAILQ_FIRST(&sb->sb_aiojobq)) != NULL) {
-		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
-		if (!aio_clear_cancel_function(aiocbe))
-			continue;
-
-		mtx_lock(&aio_job_mtx);
-		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel_running)) {
-			mtx_unlock(&aio_job_mtx);
-			aio_cancel(aiocbe);
-			continue;
-		}
-
-		aiocbe->handle_fn = soo_aio_process;
-		TAILQ_INSERT_TAIL(&aio_jobs, aiocbe, list);
-		aio_kick_nowait(aiocbe->userproc);
-		mtx_unlock(&aio_job_mtx);
-		sb->sb_flags |= SB_AIO_RUNNING;
-		return;
-	}
+	if (sb == &so->so_snd)
+		SOCK_LOCK(so);
+	soref(so);
+	if (sb == &so->so_snd)
+		SOCK_UNLOCK(so);
+	soaio_enqueue(&sb->sb_aiotask);
 }
 
 static void
