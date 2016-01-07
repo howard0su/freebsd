@@ -139,6 +139,18 @@ __END_DECLS
 
 #else
 
+#ifndef MAX_AIO_PROCS
+#define MAX_AIO_PROCS		32
+#endif
+
+#ifndef TARGET_AIO_PROCS
+#define TARGET_AIO_PROCS	4
+#endif
+
+#ifndef AIOD_LIFETIME_DEFAULT
+#define AIOD_LIFETIME_DEFAULT	(30 * hz)
+#endif
+
 /* Forward declarations for prototypes below. */
 struct socket;
 struct sockbuf;

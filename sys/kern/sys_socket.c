@@ -38,6 +38,8 @@ __FBSDID("$FreeBSD$");
 #include <sys/domain.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
+#include <sys/kernel.h>
+#include <sys/kthread.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/protosw.h>
@@ -50,6 +52,8 @@ __FBSDID("$FreeBSD$");
 #include <sys/sockio.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
+#include <sys/sysproto.h>
+#include <sys/taskqueue.h>
 #include <sys/uio.h>
 #include <sys/ucred.h>
 #include <sys/un.h>
@@ -65,6 +69,10 @@ __FBSDID("$FreeBSD$");
 #include <netinet/in_pcb.h>
 
 #include <security/mac/mac_framework.h>
+
+#include <vm/vm.h>
+#include <vm/pmap.h>
+#include <vm/vm_map.h>
 
 static SYSCTL_NODE(_kern_ipc, OID_AUTO, aio, CTLFLAG_RD, NULL,
     "socket AIO stats");
@@ -400,7 +408,7 @@ SYSCTL_INT(_kern_ipc_aio, OID_AUTO, target_procs, CTLFLAG_RD,
     &soaio_target_procs, 0,
     "Preferred number of ready kernel processes for async socket IO");
 
-static int soaio_lifetime = AIOD_TIMEOUT_DEFAULT;
+static int soaio_lifetime;
 SYSCTL_INT(_kern_ipc_aio, OID_AUTO, lifetime, CTLFLAG_RW, &soaio_lifetime, 0,
     "Maximum lifetime for idle aiod");
 
@@ -440,13 +448,13 @@ soaio_kproc_loop(void *arg)
 
 			task->ta_func(task->ta_context, pending);
 
-			mtx_unlock(&soaio_jobs_lock);
+			mtx_lock(&soaio_jobs_lock);
 		}
 		MPASS(soaio_queued == 0);
 
 		if (p->p_vmspace != myvm) {
 			mtx_unlock(&soaio_jobs_lock);
-			aio_switch_vmspace_low(myvm);
+			vmspace_switch_aio(myvm);
 			mtx_lock(&soaio_jobs_lock);
 			continue;
 		}
@@ -517,7 +525,7 @@ soaio_enqueue(struct task *task)
 	if (soaio_queued <= soaio_idle)
 		wakeup_one(&soaio_idle);
 	else if (soaio_num_procs < soaio_max_procs)
-		taskqueue_enqueue(taskqueue_thread, soaio_kproc_task);
+		taskqueue_enqueue(taskqueue_thread, &soaio_kproc_task);
 	mtx_unlock(&soaio_jobs_lock);
 }
 
@@ -525,19 +533,21 @@ static void
 soaio_init(void)
 {
 
+	soaio_lifetime = AIOD_LIFETIME_DEFAULT;
 	STAILQ_INIT(&soaio_jobs);
 	mtx_init(&soaio_jobs_lock, "soaio jobs", NULL, MTX_DEF);
 	soaio_kproc_unr = new_unrhdr(1, INT_MAX, NULL);
 	TASK_INIT(&soaio_kproc_task, 0, soaio_kproc_create, NULL);
 	if (soaio_target_procs > 0)
-		taskqueue_enqueue(taskqueue_thread, soaio_kproc_task);
+		taskqueue_enqueue(taskqueue_thread, &soaio_kproc_task);
 }
-SYSINIT(soaio_init, SI_SUB_CONFIGURE, SI_ORDER_SECOND, soaio_init, NULL);
+SYSINIT(soaio, SI_SUB_CONFIGURE, SI_ORDER_SECOND, soaio_init, NULL);
 
 static void
 soaio_process_job(struct socket *so, struct sockbuf *sb,
     struct aiocblist *aiocbe)
 {
+	struct ucred *td_savedcred;
 	struct thread *td;
 	struct file *fp;
 	struct uio uio;
@@ -646,6 +656,7 @@ soaio_process_sb(struct socket *so, struct sockbuf *sb)
 	 */
 	if (!TAILQ_EMPTY(&sb->sb_aiojobq))
 		sb->sb_flags |= SB_AIO;
+	sb->sb_flags &= ~SB_AIO_RUNNING;
 	SOCKBUF_UNLOCK(sb);
 
 	ACCEPT_LOCK();
@@ -677,6 +688,9 @@ sowakeup_aio(struct socket *so, struct sockbuf *sb)
 
 	SOCKBUF_LOCK_ASSERT(sb);
 	sb->sb_flags &= ~SB_AIO;
+	if (sb->sb_flags & SB_AIO_RUNNING)
+		return;
+	sb->sb_flags |= SB_AIO_RUNNING;
 	if (sb == &so->so_snd)
 		SOCK_LOCK(so);
 	soref(so);

@@ -91,24 +91,12 @@ static uint64_t jobseqno;
 #define MAX_AIO_QUEUE_PER_PROC	256 /* Bigger than AIO_LISTIO_MAX */
 #endif
 
-#ifndef MAX_AIO_PROCS
-#define MAX_AIO_PROCS		32
-#endif
-
 #ifndef MAX_AIO_QUEUE
 #define	MAX_AIO_QUEUE		1024 /* Bigger than AIO_LISTIO_MAX */
 #endif
 
-#ifndef TARGET_AIO_PROCS
-#define TARGET_AIO_PROCS	4
-#endif
-
 #ifndef MAX_BUF_AIO
 #define MAX_BUF_AIO		16
-#endif
-
-#ifndef AIOD_LIFETIME_DEFAULT
-#define AIOD_LIFETIME_DEFAULT	(30 * hz)
 #endif
 
 FEATURE(aio, "Asynchronous I/O");
