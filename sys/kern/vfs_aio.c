@@ -248,9 +248,6 @@ struct kaioinfo {
 	TAILQ_HEAD(,aiocblist) kaio_done;	/* (a) done queue for process */
 	TAILQ_HEAD(,aioliojob) kaio_liojoblist; /* (a) list of lio jobs */
 	TAILQ_HEAD(,aiocblist) kaio_jobqueue;	/* (a) job queue for process */
-	TAILQ_HEAD(,aiocblist) kaio_sockqueue;  /* (a) queue for aios waiting on sockets,
-						 *  NOT USED YET.
-						 */
 	TAILQ_HEAD(,aiocblist) kaio_syncqueue;	/* (a) queue for aio_fsync */
 	TAILQ_HEAD(,aiocblist) kaio_syncready;  /* (a) second q for aio_fsync */
 	struct	task	kaio_task;	/* (*) task to kick aio processes */
@@ -537,7 +534,6 @@ aio_init_aioinfo(struct proc *p)
 	TAILQ_INIT(&ki->kaio_done);
 	TAILQ_INIT(&ki->kaio_jobqueue);
 	TAILQ_INIT(&ki->kaio_liojoblist);
-	TAILQ_INIT(&ki->kaio_sockqueue);
 	TAILQ_INIT(&ki->kaio_syncqueue);
 	TAILQ_INIT(&ki->kaio_syncready);
 	TASK_INIT(&ki->kaio_task, 0, aio_kick_helper, p);
