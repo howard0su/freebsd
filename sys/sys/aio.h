@@ -164,8 +164,6 @@ struct vmspace;
 typedef void aio_cancel_fn_t(struct aiocblist *);
 typedef void aio_handle_fn_t(struct aiocblist *);
 
-TAILQ_HEAD(aiocbhead,aiocblist);
-
 struct aiocblist {
 	TAILQ_ENTRY(aiocblist) list;	/* (b) internal list for backend */
 	TAILQ_ENTRY(aiocblist) plist;	/* (a) list of jobs for each backend */
@@ -200,12 +198,6 @@ bool	aio_set_cancel_function(struct aiocblist *aiocbe,
 	    aio_cancel_fn_t *func);
 void	aio_switch_vmspace(struct aiocblist *aiocbe);
 void	aio_switch_vmspace_low(struct vmspace *newvm);
-
-/* XXX: Hacks for the current socket code. */
-void	aio_cancel_scheduled_job(struct aiocblist *aiocbe);
-void	aio_kick_nowait(struct proc *userp);
-extern struct mtx aio_job_mtx;
-extern struct aiocbhead aio_jobs;
 
 #endif
 
