@@ -395,7 +395,7 @@ soalloc(struct vnet *vnet)
 	TAILQ_INIT(&so->so_snd.sb_aiojobq);
 	TAILQ_INIT(&so->so_rcv.sb_aiojobq);
 	TASK_INIT(&so->so_snd.sb_aiotask, 0, soaio_snd, so);
-	TASK_INIT(&so->so_snd.sb_aiotask, 0, soaio_rcv, so);
+	TASK_INIT(&so->so_rcv.sb_aiotask, 0, soaio_rcv, so);
 #ifdef VIMAGE
 	VNET_ASSERT(vnet != NULL, ("%s:%d vnet is NULL, so=%p",
 	    __func__, __LINE__, so));
