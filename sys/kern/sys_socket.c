@@ -543,6 +543,12 @@ soaio_init(void)
 }
 SYSINIT(soaio, SI_SUB_VFS, SI_ORDER_ANY, soaio_init, NULL);
 
+static __inline int
+soaio_ready(struct socket *so, struct sockbuf *sb)
+{
+	return (sb == &so->so_rcv ? soreadable(so) : sowriteable(so));
+}
+
 static void
 soaio_process_job(struct socket *so, struct sockbuf *sb,
     struct aiocblist *aiocbe)
@@ -614,7 +620,7 @@ retry:
 		 */
 		SOCKBUF_LOCK(sb);		
 		empty_results++;
-		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so)) {
+		if (soaio_ready(so, sb)) {
 			empty_retries++;
 			SOCKBUF_UNLOCK(sb);
 			goto retry;
@@ -640,8 +646,8 @@ soaio_process_sb(struct socket *so, struct sockbuf *sb)
 	struct aiocblist *aiocbe;
 
 	SOCKBUF_LOCK(sb);
-	while ((aiocbe = TAILQ_FIRST(&sb->sb_aiojobq)) != NULL &&
-		sb == &so->so_rcv ? soreadable(so) : sowriteable(so)) {
+	while (!TAILQ_EMPTY(&sb->sb_aiojobq) && soaio_ready(so, sb)) {
+		aiocbe = TAILQ_FIRST(&sb->sb_aiojobq);
 		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
 		if (!aio_clear_cancel_function(aiocbe))
 			continue;
@@ -754,7 +760,7 @@ soo_aio_queue(struct file *fp, struct aiocblist *aiocbe)
 		panic("new job was cancelled");
 	TAILQ_INSERT_TAIL(&sb->sb_aiojobq, aiocbe, list);
 	if (!(sb->sb_flags & SB_AIO_RUNNING)) {
-		if (sb == &so->so_rcv ? soreadable(so) : sowriteable(so))
+		if (soaio_ready(so, sb))
 			sowakeup_aio(so, sb);
 		else
 			sb->sb_flags |= SB_AIO;
