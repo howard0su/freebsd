@@ -541,7 +541,7 @@ soaio_init(void)
 	if (soaio_target_procs > 0)
 		taskqueue_enqueue(taskqueue_thread, &soaio_kproc_task);
 }
-SYSINIT(soaio, SI_SUB_CONFIGURE, SI_ORDER_SECOND, soaio_init, NULL);
+SYSINIT(soaio, SI_SUB_VFS, SI_ORDER_ANY, soaio_init, NULL);
 
 static void
 soaio_process_job(struct socket *so, struct sockbuf *sb,
