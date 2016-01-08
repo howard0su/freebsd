@@ -282,7 +282,6 @@ struct aiocb_ops {
 static TAILQ_HEAD(,aiothreadlist) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
 static struct mtx aio_job_mtx;
-static struct mtx aio_sock_mtx;
 static TAILQ_HEAD(,aiocblist) aio_jobs;			/* (c) Async job list */
 static struct unrhdr *aiod_unr;
 
@@ -438,7 +437,6 @@ aio_onceonly(void)
 	TAILQ_INIT(&aio_freeproc);
 	sema_init(&aio_newproc_sem, 0, "aio_new_proc");
 	mtx_init(&aio_job_mtx, "aio_job", NULL, MTX_DEF);
-	mtx_init(&aio_sock_mtx, "aio_sock", NULL, MTX_DEF);
 	TAILQ_INIT(&aio_jobs);
 	aiod_unr = new_unrhdr(1, INT_MAX, NULL);
 	kaio_zone = uma_zcreate("AIO", sizeof(struct kaioinfo), NULL, NULL,
@@ -510,7 +508,6 @@ aio_unload(void)
 	EVENTHANDLER_DEREGISTER(process_exit, exit_tag);
 	EVENTHANDLER_DEREGISTER(process_exec, exec_tag);
 	mtx_destroy(&aio_job_mtx);
-	mtx_destroy(&aio_sock_mtx);
 	sema_destroy(&aio_newproc_sem);
 	p31b_setcfg(CTL_P1003_1B_AIO_LISTIO_MAX, -1);
 	p31b_setcfg(CTL_P1003_1B_AIO_MAX, -1);
