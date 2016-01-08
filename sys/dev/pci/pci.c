@@ -715,6 +715,9 @@ pci_read_cap(device_t pcib, pcicfgregs *cfg)
 		ptr = nextptr;
 		nextptr = REG(ptr + PCICAP_NEXTPTR, 1);
 
+		pci_printf(cfg, "reading cap at [%02x]: ID %02x, next%02x\n",
+		    ptr, REG(ptr + PCICAP_ID, 1), nextptr);
+
 		/* Process this entry */
 		switch (REG(ptr + PCICAP_ID, 1)) {
 		case PCIY_PMG:		/* PCI power management */
