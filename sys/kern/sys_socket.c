@@ -518,7 +518,7 @@ soaio_enqueue(struct task *task)
 {
 
 	mtx_lock(&soaio_jobs_lock);
-	MPASS(task->ta_pending = 0);
+	MPASS(task->ta_pending == 0);
 	task->ta_pending++;
 	STAILQ_INSERT_TAIL(&soaio_jobs, task, ta_link);
 	soaio_queued++;
