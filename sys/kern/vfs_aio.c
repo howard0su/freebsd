@@ -279,8 +279,9 @@ struct aiocb_ops {
 
 static TAILQ_HEAD(,aioproc) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
-struct mtx aio_job_mtx;
-struct kaiocbhead aio_jobs;			/* (c) Async job list */
+static struct mtx aio_job_mtx;
+static TAILQ_HEAD(,kaiocb) aio_jobs;			/* (c) Async job list */
+.
 static struct unrhdr *aiod_unr;
 
 void		aio_init_aioinfo(struct proc *p);
@@ -303,6 +304,7 @@ static void	aio_daemon(void *param);
 static int	aio_unload(void);
 static void	aio_bio_done_notify(struct proc *userp, struct kaiocb *job);
 static int	aio_kick(struct proc *userp);
+static void	aio_kick_nowait(struct proc *userp);
 static void	aio_kick_helper(void *context, int pending);
 static int	filt_aioattach(struct knote *kn);
 static void	filt_aiodetach(struct knote *kn);

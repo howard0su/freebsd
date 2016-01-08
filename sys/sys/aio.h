@@ -163,8 +163,6 @@ struct sockbuf;
 typedef void aio_cancel_fn_t(struct kaiocb *);
 typedef void aio_handle_fn_t(struct kaiocb *);
 
-TAILQ_HEAD(kaiocbhead,kaiocb);
-
 struct kaiocb {
 	TAILQ_ENTRY(kaiocb) list;	/* (b) internal list of for backend */
 	TAILQ_ENTRY(kaiocb) plist;	/* (a) list of jobs for each backend */
@@ -197,12 +195,6 @@ void	aio_complete(struct kaiocb *job, long status, int error);
 void	aio_schedule(struct kaiocb *job, aio_handle_fn_t *func);
 bool	aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn_t *func);
 void	aio_switch_vmspace(struct kaiocb *job);
-
-/* XXX: Hacks for the current socket code. */
-void	aio_cancel_scheduled_job(struct kaiocb *job);
-void	aio_kick_nowait(struct proc *userp);
-extern struct mtx aio_job_mtx;
-extern struct aiocbhead aio_jobs;
 
 #endif
 
