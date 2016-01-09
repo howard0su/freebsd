@@ -72,7 +72,11 @@ __FBSDID("$FreeBSD$");
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
+#include <vm/vm_extern.h>
 #include <vm/vm_map.h>
+#include <vm/vm_page.h>
+
+static MALLOC_DEFINE(M_SOAIO, "soaio", "socket AIO");
 
 static SYSCTL_NODE(_kern_ipc, OID_AUTO, aio, CTLFLAG_RD, NULL,
     "socket AIO stats");
@@ -657,7 +661,7 @@ static int
 hold_aio_buffer(struct aiocblist *aiocbe, struct user_buffer *ub,
     vm_prot_t prot)
 {
-       vm_offset_t start, end;
+       vm_offset_t start;
        vm_page_t *pp;
        int actual, alloc;
 
@@ -665,25 +669,26 @@ hold_aio_buffer(struct aiocblist *aiocbe, struct user_buffer *ub,
 	* Since the start and end may not be page aligned, allocate
 	* room for a partial page at both ends of the buffer.
 	*/
+       start = (vm_offset_t)aiocbe->uaiocb.aio_buf;
        alloc = howmany(aiocbe->uaiocb.aio_nbytes, PAGE_SIZE) + 2;
        pp = malloc(alloc * sizeof(*pp), M_SOAIO, M_WAITOK | M_ZERO);
        actual = vm_fault_quick_hold_pages(&aiocbe->userproc->p_vmspace->vm_map,
-	   aiocbe->uaiocb.aio_buf, aiocbe->uaiocb.aio_nbytes, prot, pp, alloc);
+	   start, aiocbe->uaiocb.aio_nbytes, prot, pp, alloc);
        if (actual == -1) {
 	       free(pp, M_SOAIO);
 	       return (EFAULT);
        }
        ub->pp = pp;
        ub->pages = actual;
-       ub->offset = (vm_offset_t)aiocbe->uaiocb.aio_buf & PAGE_MASK;
+       ub->offset = start & PAGE_MASK;
        return (0);
 }
 
-static int
+static void
 release_user_buffer(struct user_buffer *ub)
 {
 
-       vm_page_unhold_pages(ub->pp, ub->actual);
+       vm_page_unhold_pages(ub->pp, ub->pages);
        free(ub->pp, M_SOAIO);
 }
 
@@ -787,17 +792,19 @@ soaio_process_job(struct socket *so, struct sockbuf *sb,
     struct aiocblist *aiocbe)
 {
 	struct ucred *td_savedcred;
-	struct user_buffer *ub;
 	struct thread *td;
 	struct file *fp;
 	struct mbuf *m;
+	struct user_buffer ub;
 	struct uio uio;
-	struct iovec iov;
 	size_t cnt;
 	int error, flags;
 
 	SOCKBUF_UNLOCK(sb);
 
+	td = curthread;
+	fp = aiocbe->fd_file;
+retry:
 	/*
 	 * XXX: If a user buffer is partially valid but the valid part
 	 * is long enough to hold a short read, this will fail when
@@ -811,9 +818,6 @@ soaio_process_job(struct socket *so, struct sockbuf *sb,
 		return;
 	}
 
-	td = curthread;
-	fp = aiocbe->fd_file;
-retry:
 	td_savedcred = td->td_ucred;
 	td->td_ucred = aiocbe->cred;
 
@@ -833,15 +837,17 @@ retry:
 #endif
 			error = soreceive(so, NULL, &uio, &m, NULL, &flags);
 		cnt -= uio.uio_resid;
-		if (error == 0)
-			error = m_mbuftoub(ub, m, cnt);
+		if (error == 0) {
+			error = m_mbuftoub(&ub, m, cnt);
+			m_freem(m);
+		}
 	} else {
 #ifdef MAC
 		error = mac_socket_check_send(fp->f_cred, so);
 		if (error == 0)
 #endif
 		{
-			m = m_ubtombuf(ub, M_WAITOK, aiocbe->uaiocb.aio_nbytes,
+			m = m_ubtombuf(&ub, M_WAITOK, aiocbe->uaiocb.aio_nbytes,
 			    max_hdr, M_PKTHDR);
 			if (m == NULL)
 				error = EFAULT;
@@ -856,6 +862,7 @@ retry:
 		}
 	}
 
+	release_user_buffer(&ub);
 	td->td_ucred = td_savedcred;
 
 	/* XXX: Not sure if this is needed? */
