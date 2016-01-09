@@ -415,13 +415,16 @@ SYSCTL_INT(_kern_ipc_aio, OID_AUTO, lifetime, CTLFLAG_RW, &soaio_lifetime, 0,
 static void
 soaio_kproc_loop(void *arg)
 {
+#ifdef SWITCH_VMSPACE
 	struct proc *p;
 	struct vmspace *myvm;
+#endif
 	struct task *task;
 	int error, id, pending;
 
 	id = (intptr_t)arg;
 
+#ifdef SWITCH_VMSPACE
 	/*
 	 * Grab an extra reference on the daemon's vmspace so that it
 	 * doesn't get freed by jobs that switch to a different
@@ -430,6 +433,7 @@ soaio_kproc_loop(void *arg)
 	p = curproc;
 	myvm = p->p_vmspace;
 	atomic_add_int(&myvm->vm_refcnt, 1);
+#endif
 
 	/* The daemon resides in its own pgrp. */
 	sys_setsid(curthread, NULL);
@@ -452,12 +456,14 @@ soaio_kproc_loop(void *arg)
 		}
 		MPASS(soaio_queued == 0);
 
+#ifdef SWITCH_VMSPACE
 		if (p->p_vmspace != myvm) {
 			mtx_unlock(&soaio_jobs_lock);
 			aio_switch_vmspace_low(myvm);
 			mtx_lock(&soaio_jobs_lock);
 			continue;
 		}
+#endif
 
 		soaio_idle++;
 		error = mtx_sleep(&soaio_idle, &soaio_jobs_lock, 0, "-",
@@ -549,6 +555,7 @@ soaio_ready(struct socket *so, struct sockbuf *sb)
 	return (sb == &so->so_rcv ? soreadable(so) : sowriteable(so));
 }
 
+#ifdef SWITCH_VMSPACE
 static void
 soaio_process_job(struct socket *so, struct sockbuf *sb,
     struct aiocblist *aiocbe)
@@ -639,6 +646,251 @@ retry:
 		SOCKBUF_LOCK(sb);
 	}
 }
+#else
+struct user_buffer {
+       vm_page_t *pp;
+       int pages;
+       int offset;
+};
+
+static int
+hold_aio_buffer(struct aiocblist *aiocbe, struct user_buffer *ub,
+    vm_prot_t prot)
+{
+       vm_offset_t start, end;
+       vm_page_t *pp;
+       int actual, alloc;
+
+       /*
+	* Since the start and end may not be page aligned, allocate
+	* room for a partial page at both ends of the buffer.
+	*/
+       alloc = howmany(aiocbe->uaiocb.aio_nbytes, PAGE_SIZE) + 2;
+       pp = malloc(alloc * sizeof(*pp), M_SOAIO, M_WAITOK | M_ZERO);
+       actual = vm_fault_quick_hold_pages(&aiocbe->userproc->p_vmspace->vm_map,
+	   aiocbe->uaiocb.aio_buf, aiocbe->uaiocb.aio_nbytes, prot, pp, alloc);
+       if (actual == -1) {
+	       free(pp, M_SOAIO);
+	       return (EFAULT);
+       }
+       ub->pp = pp;
+       ub->pages = actual;
+       ub->offset = (vm_offset_t)aiocbe->uaiocb.aio_buf & PAGE_MASK;
+       return (0);
+}
+
+static int
+release_user_buffer(struct user_buffer *ub)
+{
+
+       vm_page_unhold_pages(ub->pp, ub->actual);
+       free(ub->pp, M_SOAIO);
+}
+
+/* Like m_uiotombuf() but copies data from a user_buffer. */
+static struct mbuf *
+m_ubtombuf(struct user_buffer *ub, int how, int len, int align, int flags)
+{
+	struct mbuf *m, *mb;
+	int error, length;
+	ssize_t total;
+	int progress = 0;
+
+	MPASS(len != 0);
+	total = len;
+
+	/*
+	 * The smallest unit returned by m_getm2() is a single mbuf
+	 * with pkthdr.  We can't align past it.
+	 */
+	if (align >= MHLEN)
+		return (NULL);
+
+	/*
+	 * Give us the full allocation or nothing.
+	 * If len is zero return the smallest empty mbuf.
+	 */
+	m = m_getm2(NULL, max(total + align, 1), how, MT_DATA, flags);
+	if (m == NULL)
+		return (NULL);
+	m->m_data += align;
+
+	/* Fall all mbufs with user_bufer data and update header information. */
+	for (mb = m; mb != NULL; mb = mb->m_next) {
+		struct iovec iov[1];
+		struct uio uio;
+
+		length = min(M_TRAILINGSPACE(mb), total - progress);
+
+		iov[0].iov_base = mtod(mb, void *);
+		iov[0].iov_len = length;
+		uio.uio_iov = iov;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = length;
+		uio.uio_segflg = UIO_SYSSPACE;
+		uio.uio_rw = UIO_READ;
+		error = uiomove_fromphys(ub->pp, ub->offset + progress, length,
+		    &uio);
+		if (error) {
+			m_freem(m);
+			return (NULL);
+		}
+
+		mb->m_len = length;
+		progress += length;
+		if (flags & M_PKTHDR)
+			m->m_pkthdr.len += length;
+	}
+	KASSERT(progress == total, ("%s: progress != total", __func__));
+
+	return (m);	
+}
+
+/* Like m_mbuftouio() but copies data to a user_buffer. */
+static int
+m_mbuftoub(struct user_buffer *ub, struct mbuf *m, int len)
+{
+	int error, length, total;
+	int progress = 0;
+
+	total = len;
+
+	/* Fill the uio with data from the mbufs. */
+	for (; m != NULL; m = m->m_next) {
+		struct iovec iov[1];
+		struct uio uio;
+
+		length = min(m->m_len, total - progress);
+
+		iov[0].iov_base = mtod(m, void *);
+		iov[0].iov_len = length;
+		uio.uio_iov = iov;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = length;
+		uio.uio_segflg = UIO_SYSSPACE;
+		uio.uio_rw = UIO_WRITE;
+		error = uiomove_fromphys(ub->pp, ub->offset + progress, length,
+		    &uio);
+		if (error)
+			return (error);
+
+		progress += length;
+	}
+
+	return (0);
+}
+
+static void
+soaio_process_job(struct socket *so, struct sockbuf *sb,
+    struct aiocblist *aiocbe)
+{
+	struct ucred *td_savedcred;
+	struct user_buffer *ub;
+	struct thread *td;
+	struct file *fp;
+	struct mbuf *m;
+	struct uio uio;
+	struct iovec iov;
+	size_t cnt;
+	int error, flags;
+
+	SOCKBUF_UNLOCK(sb);
+
+	/*
+	 * XXX: If a user buffer is partially valid but the valid part
+	 * is long enough to hold a short read, this will fail when
+	 * the short read would have succeeded via read(2).
+	 */
+	error = hold_aio_buffer(aiocbe, &ub, sb == &so->so_rcv ? VM_PROT_WRITE :
+		VM_PROT_READ);
+	if (error) {
+		aio_complete(aiocbe, -1, error);
+		SOCKBUF_LOCK(sb);
+		return;
+	}
+
+	td = curthread;
+	fp = aiocbe->fd_file;
+retry:
+	td_savedcred = td->td_ucred;
+	td->td_ucred = aiocbe->cred;
+
+	cnt = aiocbe->uaiocb.aio_nbytes;
+	flags = MSG_NBIO;
+
+	/* TODO: Charge ru_msg* to aiocbe. */
+
+	if (sb == &so->so_rcv) {
+		uio.uio_resid = cnt;
+		uio.uio_segflg = UIO_USERSPACE;
+		uio.uio_td = td;
+#ifdef MAC
+		error = mac_socket_check_receive(fp->f_cred, so);
+		if (error == 0)
+
+#endif
+			error = soreceive(so, NULL, &uio, &m, NULL, &flags);
+		cnt -= uio.uio_resid;
+		if (error == 0)
+			error = m_mbuftoub(ub, m, cnt);
+	} else {
+#ifdef MAC
+		error = mac_socket_check_send(fp->f_cred, so);
+		if (error == 0)
+#endif
+		{
+			m = m_ubtombuf(ub, M_WAITOK, aiocbe->uaiocb.aio_nbytes,
+			    max_hdr, M_PKTHDR);
+			if (m == NULL)
+				error = EFAULT;
+			else
+				error = sosend(so, NULL, NULL, m, NULL, flags,
+				    td);
+		}
+		if (error == EPIPE && (so->so_options & SO_NOSIGPIPE) == 0) {
+			PROC_LOCK(aiocbe->userproc);
+			kern_psignal(aiocbe->userproc, SIGPIPE);
+			PROC_UNLOCK(aiocbe->userproc);
+		}
+	}
+
+	td->td_ucred = td_savedcred;
+
+	/* XXX: Not sure if this is needed? */
+	if (cnt != 0 && (error == ERESTART || error == EINTR ||
+	    error == EWOULDBLOCK))
+		error = 0;
+	if (error == EWOULDBLOCK) {
+		/*
+		 * A read() or write() on the socket raced with this
+		 * request.  If the socket is now ready, try again.
+		 * If it is not, place this request at the head of the
+		 * queue to try again when the socket is ready.
+		 */
+		SOCKBUF_LOCK(sb);		
+		empty_results++;
+		if (soaio_ready(so, sb)) {
+			empty_retries++;
+			SOCKBUF_UNLOCK(sb);
+			goto retry;
+		}
+
+		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel)) {
+			MPASS(cnt == 0);
+			SOCKBUF_UNLOCK(sb);
+			aio_cancel(aiocbe);
+			SOCKBUF_LOCK(sb);
+		} else {
+			TAILQ_INSERT_HEAD(&sb->sb_aiojobq, aiocbe, list);
+		}
+	} else {
+		aio_complete(aiocbe, cnt, error);
+		SOCKBUF_LOCK(sb);
+	}
+}
+#endif
 
 static void
 soaio_process_sb(struct socket *so, struct sockbuf *sb)
