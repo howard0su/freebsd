@@ -1071,7 +1071,7 @@ aio_switch_vmspace_low(struct vmspace *newvm)
 }
 
 static void
-aio_switch_vmspace(struct aiocbelist *aiocbe)
+aio_switch_vmspace(struct aiocblist *aiocbe)
 {
 
 	/*
@@ -1093,8 +1093,8 @@ aio_daemon(void *_id)
 	struct aiocblist *aiocbe;
 	struct aiothreadlist *aiop;
 	struct kaioinfo *ki;
-	struct proc *mycp;
-	struct vmspace *myvm, *tmpvm;
+	struct proc *mycp, *userp;
+	struct vmspace *myvm;
 	struct thread *td = curthread;
 	int id = (intptr_t)_id;
 
@@ -1104,8 +1104,8 @@ aio_daemon(void *_id)
 	 * vmspace.
 	 */
 	mycp = curproc;
-	myvm = myp->p_vmspace;
-	atomic_add_int(&mycp->p_vmspace->vm_refcnt, 1);
+	myvm = mycp->p_vmspace;
+	atomic_add_int(&myvm->vm_refcnt, 1);
 
 	KASSERT(mycp->p_textvp == NULL, ("kthread has a textvp"));
 
@@ -1129,12 +1129,6 @@ aio_daemon(void *_id)
 	mtx_lock(&aio_job_mtx);
 	for (;;) {
 		/*
-		 * curcp is the current daemon process context.
-		 * userp is the current user process context.
-		 */
-		curcp = mycp;
-
-		/*
 		 * Take daemon off of free queue
 		 */
 		if (aiop->aiothreadflags & AIOP_FREE) {
@@ -1147,6 +1141,7 @@ aio_daemon(void *_id)
 		 */
 		while ((aiocbe = aio_selectjob(aiop)) != NULL) {
 			mtx_unlock(&aio_job_mtx);
+			userp = aiocbe->userproc;
 
 			/*
 			 * Connect to process address space for user program.
@@ -1191,8 +1186,7 @@ aio_daemon(void *_id)
 			mtx_lock(&aio_job_mtx);
 			/*
 			 * We have to restart to avoid race, we only sleep if
-			 * no job can be selected, that should be
-			 * curcp == mycp.
+			 * no job can be selected.
 			 */
 			continue;
 		}
