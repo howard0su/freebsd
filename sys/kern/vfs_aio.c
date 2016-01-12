@@ -253,10 +253,10 @@ struct aiocblist {
  */
 #define AIOP_FREE	0x1			/* proc on free queue */
 
-struct aiothreadlist {
-	int aiothreadflags;			/* (c) AIO proc flags */
-	TAILQ_ENTRY(aiothreadlist) list;	/* (c) list of processes */
-	struct thread *aiothread;		/* (*) the AIO thread */
+struct aioproc {
+	int aioprocflags;			/* (c) AIO proc flags */
+	TAILQ_ENTRY(aioproc) list;		/* (c) list of processes */
+	struct proc *aioproc;			/* (*) the AIO proc */
 };
 
 /*
@@ -322,7 +322,7 @@ struct aiocb_ops {
 	int	(*store_aiocb)(struct aiocb **ujobp, struct aiocb *ujob);
 };
 
-static TAILQ_HEAD(,aiothreadlist) aio_freeproc;		/* (c) Idle daemons */
+static TAILQ_HEAD(,aioproc) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
 static struct mtx aio_job_mtx;
 static struct mtx aio_sock_mtx;
@@ -488,7 +488,7 @@ aio_onceonly(void)
 	aiod_unr = new_unrhdr(1, INT_MAX, NULL);
 	kaio_zone = uma_zcreate("AIO", sizeof(struct kaioinfo), NULL, NULL,
 	    NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
-	aiop_zone = uma_zcreate("AIOP", sizeof(struct aiothreadlist), NULL,
+	aiop_zone = uma_zcreate("AIOP", sizeof(struct aioproc), NULL,
 	    NULL, NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
 	aiocb_zone = uma_zcreate("AIOCB", sizeof(struct aiocblist), NULL, NULL,
 	    NULL, NULL, UMA_ALIGN_PTR, UMA_ZONE_NOFREE);
@@ -803,7 +803,7 @@ restart:
  * Select a job to run (called by an AIO daemon).
  */
 static struct aiocblist *
-aio_selectjob(struct aiothreadlist *aiop)
+aio_selectjob(struct aioproc *aiop)
 {
 	struct aiocblist *aiocbe;
 	struct kaioinfo *ki;
@@ -1063,7 +1063,7 @@ static void
 aio_daemon(void *_id)
 {
 	struct aiocblist *aiocbe;
-	struct aiothreadlist *aiop;
+	struct aioproc *aiop;
 	struct kaioinfo *ki;
 	struct proc *p, *userp;
 	struct vmspace *myvm;
@@ -1085,8 +1085,8 @@ aio_daemon(void *_id)
 	 * per daemon.
 	 */
 	aiop = uma_zalloc(aiop_zone, M_WAITOK);
-	aiop->aiothread = td;
-	aiop->aiothreadflags = 0;
+	aiop->aioproc = p;
+	aiop->aioprocflags = 0;
 
 	/*
 	 * Wakeup parent process.  (Parent sleeps to keep from blasting away
@@ -1099,9 +1099,9 @@ aio_daemon(void *_id)
 		/*
 		 * Take daemon off of free queue
 		 */
-		if (aiop->aiothreadflags & AIOP_FREE) {
+		if (aiop->aioprocflags & AIOP_FREE) {
 			TAILQ_REMOVE(&aio_freeproc, aiop, list);
-			aiop->aiothreadflags &= ~AIOP_FREE;
+			aiop->aioprocflags &= ~AIOP_FREE;
 		}
 
 		/*
@@ -1162,15 +1162,15 @@ aio_daemon(void *_id)
 		mtx_assert(&aio_job_mtx, MA_OWNED);
 
 		TAILQ_INSERT_HEAD(&aio_freeproc, aiop, list);
-		aiop->aiothreadflags |= AIOP_FREE;
+		aiop->aioprocflags |= AIOP_FREE;
 
 		/*
 		 * If daemon is inactive for a long time, allow it to exit,
 		 * thereby freeing resources.
 		 */
-		if (msleep(aiop->aiothread, &aio_job_mtx, PRIBIO, "aiordy",
+		if (msleep(p, &aio_job_mtx, PRIBIO, "aiordy",
 		    aiod_lifetime) == EWOULDBLOCK && TAILQ_EMPTY(&aio_jobs) &&
-		    (aiop->aiothreadflags & AIOP_FREE) &&
+		    (aiop->aioprocflags & AIOP_FREE) &&
 		    num_aio_procs > target_aio_procs)
 			break;
 	}
@@ -1788,13 +1788,13 @@ static void
 aio_kick_nowait(struct proc *userp)
 {
 	struct kaioinfo *ki = userp->p_aioinfo;
-	struct aiothreadlist *aiop;
+	struct aioproc *aiop;
 
 	mtx_assert(&aio_job_mtx, MA_OWNED);
 	if ((aiop = TAILQ_FIRST(&aio_freeproc)) != NULL) {
 		TAILQ_REMOVE(&aio_freeproc, aiop, list);
-		aiop->aiothreadflags &= ~AIOP_FREE;
-		wakeup(aiop->aiothread);
+		aiop->aioprocflags &= ~AIOP_FREE;
+		wakeup(aiop->aioproc);
 	} else if (((num_aio_resv_start + num_aio_procs) < max_aio_procs) &&
 	    ((ki->kaio_active_count + num_aio_resv_start) <
 	    ki->kaio_maxactive_count)) {
@@ -1806,15 +1806,15 @@ static int
 aio_kick(struct proc *userp)
 {
 	struct kaioinfo *ki = userp->p_aioinfo;
-	struct aiothreadlist *aiop;
+	struct aioproc *aiop;
 	int error, ret = 0;
 
 	mtx_assert(&aio_job_mtx, MA_OWNED);
 retryproc:
 	if ((aiop = TAILQ_FIRST(&aio_freeproc)) != NULL) {
 		TAILQ_REMOVE(&aio_freeproc, aiop, list);
-		aiop->aiothreadflags &= ~AIOP_FREE;
-		wakeup(aiop->aiothread);
+		aiop->aioprocflags &= ~AIOP_FREE;
+		wakeup(aiop->aioproc);
 	} else if (((num_aio_resv_start + num_aio_procs) < max_aio_procs) &&
 	    ((ki->kaio_active_count + num_aio_resv_start) <
 	    ki->kaio_maxactive_count)) {
