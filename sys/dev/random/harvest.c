@@ -29,6 +29,7 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <sys/kdb.h>
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -111,6 +112,7 @@ read_random_phony(void *buf, int count)
 
 	if (!warned) {
 		log(LOG_WARNING, "random device not loaded; using insecure entropy\n");
+		kdb_backtrace();
 		warned = 1;
 	}
 
