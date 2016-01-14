@@ -276,6 +276,7 @@ randomdev_modevent(module_t mod __unused, int type, void *unused __unused)
 
 	switch (type) {
 	case MOD_LOAD:
+		printf("XXX: %s(%s)\n", __func__, RANDOM_CSPRNG_NAME);
 		random_adaptor_register(RANDOM_CSPRNG_NAME, &random_context);
 		/*
 		 * For statically built kernels that contain both device

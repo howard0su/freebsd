@@ -64,6 +64,7 @@ void
 randomdev_init_harvester(void (*reaper)(u_int64_t, const void *, u_int,
     u_int, enum esource), int (*reader)(void *, int))
 {
+	printf("XXX: setting read_func\n");
 	reap_func = reaper;
 	read_func = reader;
 }

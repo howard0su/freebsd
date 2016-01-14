@@ -124,6 +124,7 @@ static void
 live_entropy_sources_init(void *unused)
 {
 
+	printf("XXX: %s\n", __func__);
 	SYSCTL_PROC(_kern_random, OID_AUTO, live_entropy_sources,
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
 	    NULL, 0, live_entropy_source_handler, "",
