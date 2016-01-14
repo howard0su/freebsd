@@ -229,5 +229,11 @@ random_modevent(module_t mod __unused, int type, void *data __unused)
 	return (error);
 }
 
-DEV_MODULE(random, random_modevent, NULL);
+static moduledata_t random_mod = {
+    "random",
+    random_modevent,
+    NULL
+};
+
+DECLARE_MODULE(random, random_mod, SI_SUB_RANDOM, SI_ORDER_MIDDLE);
 MODULE_VERSION(random, 1);
