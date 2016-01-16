@@ -714,8 +714,12 @@ pci_read_cap(device_t pcib, pcicfgregs *cfg)
 		/* Find the next entry */
 		ptr = nextptr;
 		nextptr = REG(ptr + PCICAP_NEXTPTR, 1);
+		if (nextptr == ptr) {
+			pci_printf(cfg, "capability loop!\n");
+			break;
+		}
 
-		pci_printf(cfg, "reading cap at [%02x]: ID %02x, next%02x\n",
+		pci_printf(cfg, "reading cap at [%02x]: ID %02x, next %02x\n",
 		    ptr, REG(ptr + PCICAP_ID, 1), nextptr);
 
 		/* Process this entry */
