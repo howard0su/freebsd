@@ -1064,13 +1064,15 @@ bool
 aio_cancel_cleared(struct kaiocb *job)
 {
 	struct kaioinfo *ki;
-	bool cleared;
 
+	/*
+	 * The caller should hold the same queue lock held when
+	 * aio_clear_cancel_function() was called and set this flag
+	 * ensuring this check sees an up-to-date value.  However,
+	 * there is no way to assert that.
+	 */
 	ki = job->userproc->p_aioinfo;
-	AIO_LOCK(ki);
-	cleared = (job->jobflags & KAIOCB_CLEARED) != 0;
-	AIO_UNLOCK(ki);
-	return (cleared);
+	return ((job->jobflags & KAIOCB_CLEARED) != 0);
 }
 
 bool
