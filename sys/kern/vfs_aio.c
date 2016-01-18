@@ -1049,38 +1049,10 @@ notification_done:
 }
 
 static void
-aio_switch_vmspace_low(struct vmspace *newvm)
-{
-	struct vmspace *oldvm;
-
-	oldvm = curproc->p_vmspace;
-	if (oldvm == newvm)
-		return;
-
-	/*
-	 * Point to the new address space and refer to it.
-	 */
-	curproc->p_vmspace = newvm;
-	atomic_add_int(&newvm->vm_refcnt, 1);
-
-	/* Activate the new mapping. */
-	pmap_activate(curthread);
-
-	/* Remove the daemon's reference to the old address space. */
-	vmspace_free(oldvm);
-}
-
-static void
 aio_switch_vmspace(struct aiocblist *aiocbe)
 {
 
-	/*
-	 * User processes will not change their vmspace until any
-	 * active AIO jobs are cancelled, so we do not need to use
-	 * PROC_VMSPACE_LOCK() here or the more expensive
-	 * vmspace_acquire_ref().
-	 */
-	aio_switch_vmspace_low(aiocbe->userproc->p_vmspace);
+	vmspace_switch_aio(aiocbe->userproc->p_vmspace);
 }
 
 /*
@@ -1182,7 +1154,7 @@ aio_daemon(void *_id)
 		 */
 		if (p->p_vmspace != myvm) {
 			mtx_unlock(&aio_job_mtx);
-			aio_switch_vmspace_low(myvm);
+			vmsapce_switch_aio(myvm);
 			mtx_lock(&aio_job_mtx);
 			/*
 			 * We have to restart to avoid race, we only sleep if
