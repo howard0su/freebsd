@@ -431,11 +431,6 @@ soaio_kproc_loop(void *arg)
 	myvm = p->p_vmspace;
 	atomic_add_int(&myvm->vm_refcnt, 1);
 
-#if 0
-	/* The daemon resides in its own pgrp. */
-	sys_setsid(curthread, NULL);
-#endif
-	
 	mtx_lock(&soaio_jobs_lock);
 	MPASS(soaio_starting > 0);
 	soaio_starting--;
