@@ -1076,8 +1076,7 @@ aio_daemon(void *_id)
 	 * vmspace.
 	 */
 	p = td->td_proc;
-	myvm = p->p_vmspace;
-	atomic_add_int(&myvm->vm_refcnt, 1);
+	myvm = vmspace_acquire_ref(p);
 
 	KASSERT(p->p_textvp == NULL, ("kthread has a textvp"));
 
@@ -1154,7 +1153,7 @@ aio_daemon(void *_id)
 		 */
 		if (p->p_vmspace != myvm) {
 			mtx_unlock(&aio_job_mtx);
-			vmsapce_switch_aio(myvm);
+			vmspace_switch_aio(myvm);
 			mtx_lock(&aio_job_mtx);
 			/*
 			 * We have to restart to avoid race, we only sleep if
