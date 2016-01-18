@@ -72,6 +72,7 @@ __FBSDID("$FreeBSD$");
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
+#include <vm/vm_extern.h>
 #include <vm/vm_map.h>
 
 static SYSCTL_NODE(_kern_ipc, OID_AUTO, aio, CTLFLAG_RD, NULL,
@@ -428,8 +429,7 @@ soaio_kproc_loop(void *arg)
 	 * vmspace.
 	 */
 	p = curproc;
-	myvm = p->p_vmspace;
-	atomic_add_int(&myvm->vm_refcnt, 1);
+	myvm = vmspace_acquire_ref(p);
 
 	mtx_lock(&soaio_jobs_lock);
 	MPASS(soaio_starting > 0);
