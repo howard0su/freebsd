@@ -321,12 +321,11 @@ pam_ssh_start_agent(pam_handle_t *pamh)
 static int
 pam_ssh_add_keys_to_agent(pam_handle_t *pamh)
 {
-	AuthenticationConnection *ac;
 	const struct pam_ssh_key *psk;
 	const char **kfn;
 	const void *item;
 	char **envlist, **env;
-	int pam_err;
+	int pam_err, fd;
 
 	/* switch to PAM environment */
 	envlist = environ;
@@ -336,7 +335,7 @@ pam_ssh_add_keys_to_agent(pam_handle_t *pamh)
 	}
 
 	/* get a connection to the agent */
-	if ((ac = ssh_get_authentication_connection()) == NULL) {
+	if (ssh_get_authentication_socket(&fd) != 0) {
 		openpam_log(PAM_LOG_DEBUG, "failed to connect to the agent");
 		pam_err = PAM_SYSTEM_ERR;
 		goto end;
@@ -347,7 +346,7 @@ pam_ssh_add_keys_to_agent(pam_handle_t *pamh)
 		pam_err = pam_get_data(pamh, *kfn, &item);
 		if (pam_err == PAM_SUCCESS && item != NULL) {
 			psk = item;
-			if (ssh_add_identity(ac, psk->key, psk->comment))
+			if (ssh_add_identity(fd, psk->key, psk->comment) == 0)
 				openpam_log(PAM_LOG_DEBUG,
 				    "added %s to ssh agent", psk->comment);
 			else
@@ -360,8 +359,8 @@ pam_ssh_add_keys_to_agent(pam_handle_t *pamh)
 	pam_err = PAM_SUCCESS;
  end:
 	/* disconnect from agent */
-	if (ac != NULL)
-		ssh_close_authentication_connection(ac);
+	if (fd != -1)
+		ssh_close_authentication_connection(fd);
 
 	/* switch back to original environment */
 	for (env = environ; *env != NULL; ++env)
