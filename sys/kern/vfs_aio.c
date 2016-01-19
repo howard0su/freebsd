@@ -1174,7 +1174,7 @@ aio_daemon(void *_id)
 		if (msleep(aiop->aiothread, &aio_job_mtx, PRIBIO, "aiordy",
 		    aiod_lifetime) == EWOULDBLOCK && TAILQ_EMPTY(&aio_jobs) &&
 		    (aiop->aiothreadflags & AIOP_FREE) &&
-		    (num_aio_procs > target_aio_procs))
+		    num_aio_procs > target_aio_procs)
 			break;
 	}
 	TAILQ_REMOVE(&aio_freeproc, aiop, list);
