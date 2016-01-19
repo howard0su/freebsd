@@ -357,11 +357,11 @@ pam_ssh_add_keys_to_agent(pam_handle_t *pamh)
 		}
 	}
 	pam_err = PAM_SUCCESS;
- end:
-	/* disconnect from agent */
-	if (fd != -1)
-		ssh_close_authentication_connection(fd);
 
+	/* disconnect from agent */
+	ssh_close_authentication_socket(fd);
+
+ end:
 	/* switch back to original environment */
 	for (env = environ; *env != NULL; ++env)
 		free(*env);
