@@ -325,7 +325,7 @@ pam_ssh_add_keys_to_agent(pam_handle_t *pamh)
 	const char **kfn;
 	const void *item;
 	char **envlist, **env;
-	int pam_err, fd;
+	int fd, pam_err;
 
 	/* switch to PAM environment */
 	envlist = environ;
