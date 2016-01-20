@@ -118,7 +118,7 @@ cloudabi64_thread_setregs(struct thread *td,
 	stack_t stack;
 
 	/* Perform standard register initialization. */
-	stack.ss_sp = (void *)attr->stack;
+	stack.ss_sp = attr->stack;
 	stack.ss_size = attr->stack_size;
 	cpu_set_upcall_kse(td, (void *)attr->entry_point, NULL, &stack);
 
