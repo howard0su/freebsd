@@ -268,8 +268,10 @@ random_harvestq_deinit(void)
 	/*
 	 * Command the hash/reseed thread to end and wait for it to finish
 	 */
+	mtx_lock_spin(&harvest_mtx);
 	random_kthread_control = -1;
-	tsleep((void *)&random_kthread_control, 0, "term", 0);
+	msleep_spin((void *)&random_kthread_control, &harvest_mtx, "term", 0);
+	mtx_unlock_spin(&harvest_mtx);
 
 	mtx_destroy(&harvest_mtx);
 }
