@@ -29,7 +29,6 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
-#include <sys/kdb.h>
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -64,7 +63,6 @@ void
 randomdev_init_harvester(void (*reaper)(u_int64_t, const void *, u_int,
     u_int, enum esource), int (*reader)(void *, int))
 {
-	printf("XXX: setting read_func\n");
 	reap_func = reaper;
 	read_func = reader;
 }
@@ -113,7 +111,6 @@ read_random_phony(void *buf, int count)
 
 	if (!warned) {
 		log(LOG_WARNING, "random device not loaded; using insecure entropy\n");
-		kdb_backtrace();
 		warned = 1;
 	}
 
