@@ -128,7 +128,7 @@ arm_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 
 static struct procabi arm_freebsd = {
 	"FreeBSD ELF32",
-	sysdecode_freebsd,
+	FREEBSD,
 	arm_fetch_args,
 	arm_fetch_retval
 };

@@ -81,7 +81,7 @@ aarch64_cloudabi64_fetch_retval(struct trussinfo *trussinfo, long *retval,
 
 static struct procabi aarch64_cloudabi64 = {
 	"CloudABI ELF64",
-	sysdecode_cloudabi64,
+	CLOUDABI64,
 	aarch64_cloudabi64_fetch_args,
 	aarch64_cloudabi64_fetch_retval
 };

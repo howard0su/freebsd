@@ -115,7 +115,7 @@ sparc64_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 
 static struct procabi sparc64_freebsd = {
 	"FreeBSD ELF64",
-	sysdecode_freebsd,
+	FREEBSD,
 	sparc64_fetch_args,
 	sparc64_fetch_retval
 };

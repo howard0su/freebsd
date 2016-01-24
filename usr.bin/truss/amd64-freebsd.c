@@ -121,7 +121,7 @@ amd64_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 
 static struct procabi amd64_freebsd = {
 	"FreeBSD ELF64",
-	sysdecode_freebsd,
+	FREEBSD,
 	amd64_fetch_args,
 	amd64_fetch_retval
 };
