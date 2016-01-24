@@ -685,33 +685,34 @@ ioctlname(unsigned long val)
 		printf("%#lx", val);
 }
 
+static enum sysdecode_abi
+syscallabi(u_int sv_flags)
+{
+
+	if (sv_flags == 0)
+		return (FREEBSD);
+	switch (sv_flags & SV_ABI_MASK) {
+	case SV_ABI_FREEBSD:
+		return (FREEBSD);
+#if defined(__amd64__) || defined(__i386__)
+	case SV_ABI_LINUX:
+#ifdef __amd64__
+		if (sv_flags & SV_ILP32)
+			return (LINUX32);
+#endif
+		return (LINUX);
+#endif
+	default:
+		return (UNKNOWN_ABI);
+	}
+}
+
 static void
 syscallname(u_int code, u_int sv_flags)
 {
 	const char *name;
 
-	if (sv_flags == 0)
-		name = sysdecode_freebsd(code);
-	else {
-		switch (sv_flags & SV_ABI_MASK) {
-		case SV_ABI_FREEBSD:
-			name = sysdecode_freebsd(code);
-			break;
-#if defined(__amd64__) || defined(__i386__)
-		case SV_ABI_LINUX:
-#ifdef __amd64__
-			if (sv_flags & SV_ILP32)
-				name = sysdecode_linux32(code);
-			else
-#endif
-				name = sysdecode_linux(code);
-			break;
-#endif
-		default:
-			name = NULL;
-		}
-	}
-
+	name = sysdecode_syscallname(syscallabi(sv_flags), code);
 	if (name == NULL)
 		printf("[%d]", code);
 	else {
