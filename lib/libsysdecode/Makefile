@@ -10,13 +10,9 @@ INCS=	sysdecode.h
 CFLAGS+= -I${.CURDIR}/../../sys
 
 MAN+=	sysdecode.3 \
-	sysdecode_freebsd.3 \
 	sysdecode_ioctlname.3 \
+	sysdecode_syscallnames.3 \
 	sysdecode_utrace.3
-MLINKS+=sysdecode_freebsd.3 sysdecode_cloudabi64.3 \
-	sysdecode_freebsd.3 sysdecode_freebsd32.3 \
-	sysdecode_freebsd.3 sysdecode_linux.3 \
-	sysdecode_freebsd.3 sysdecode_linux32.3
 
 CLEANFILES= ioctl.c
 

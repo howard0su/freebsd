@@ -1,5 +1,5 @@
 .\"
-.\" Copyright (c) 2015 John Baldwin <jhb@FreeBSD.org>
+.\" Copyright (c) 2016 John Baldwin <jhb@FreeBSD.org>
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -25,72 +25,43 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd November 2, 2015
-.Dt sysdecode_freebsd 3
+.Dd January 24, 2016
+.Dt sysdecode_syscallnames 3
 .Os
 .Sh NAME
-.Nm sysdecode_cloudabi64 ,
-.Nm sysdecode_freebsd ,
-.Nm sysdecode_freebsd32 ,
-.Nm sysdecode_linux ,
-.Nm sysdecode_linux32
+.Nm sysdecode_syscallnames
 .Nd lookup name of system calls
 .Sh LIBRARY
 .Lb libsysdecode
 .Sh SYNOPSIS
 .Ft const char *
-.Fn sysdecode_cloudabi64 "unsigned int code"
-.Ft const char *
-.Fn sysdecode_freebsd "unsigned int code"
-.Ft const char *
-.Fn sysdecode_freebsd32 "unsigned int code"
-.Ft const char *
-.Fn sysdecode_linux "unsigned int code"
-.Ft const char *
-.Fn sysdecode_linux32 "unsigned int code"
+.Fn sysdecode_syscallnames "enum sysdecode_abi abi" "unsigned int code"
 .Sh DESCRIPTION
-These functions return a pointer to the name of a system call identified by
+This function returns a pointer to the name of a system call identified by
 .Fa code
-for different process ABIs.
+for the process ABI
+.Fa abi .
 If
 .Fa code
-specifies an unknown system call,
-these functions return
+specifies an unknown system call or
+.Fa abi
+is an unsupported ABI,
+.Nm
+returns
 .Dv NULL .
 .Pp
-The
-.Fn sysdecode_freebsd
-function returns the name of the native FreeBSD system call identified by
-.Fa code .
-.Pp
-The
-.Fn sysdecode_freebsd32
-function returns the name of the 32-bit FreeBSD system call identified by
-.Fa code .
-This function is only supported on amd64 and powerpc64.
-.Pp
-The
-.fn sysdecode_cloudabi64
-function returns the name of the 64-bit CloudABI system call identified by
-.Fa code .
-This function is only supported on aarch64 and amd64.
-.Pp
-The
-.Fn sysdecode_linux
-function returns the name of the native Linux system call identified by
-.Fa code .
-This function is only supported on amd64 and i386.
-.Pp
-The
-.Fn sysdecode_linux32
-function returns the name of the 32-bit Linux system call identified by
-.Fa code .
-This function is only supported on amd64.
+For the list of supported ABIs,
+see
+.Xr sysdecode 3 .
 .Sh RETURN VALUES
-These functions return a pointer to a string on success or
+The
+.Nm
+function returns a pointer to a string on success or
 .Dv NULL
-if
+if either
 .Fa code
-is unknown.
+or
+.Fa ABI
+is invalid .
 .Sh SEE ALSO
 .Xr sysdecode 3

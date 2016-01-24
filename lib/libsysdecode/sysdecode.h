@@ -29,20 +29,16 @@
 #ifndef __SYSDECODE_H__
 #define	__SYSDECODE_H__
 
-#if defined(__amd64__) || defined(__aarch64__)
-const char *sysdecode_cloudabi64(unsigned int _code);
-#endif
-const char *sysdecode_freebsd(unsigned int _code);
-#if defined(__amd64__) || defined(__powerpc64__)
-const char *sysdecode_freebsd32(unsigned int _code);
-#endif
+enum sysdecode_abi {
+	FREEBSD = 0,
+	FREEBSD32,
+	LINUX,
+	LINUX32,
+	CLOUDABI64
+};
+
 const char *sysdecode_ioctlname(unsigned long _val);
-#if defined(__amd64__) || defined(__i386__)
-const char *sysdecode_linux(unsigned int _code);
-#if defined(__amd64__)
-const char *sysdecode_linux32(unsigned int _code);
-#endif
-#endif
+const char *sysdecode_syscallname(enum sysdecode_abi _abi, unsigned int _code);
 int	sysdecode_utrace(FILE *_fp, void *_buf, size_t _len);
 
 #endif /* !__SYSDECODE_H__ */

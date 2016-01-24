@@ -41,41 +41,9 @@ __FBSDID("$FreeBSD$");
 static
 #include <kern/syscalls.c>
 
-const char *
-sysdecode_freebsd(unsigned int code)
-{
-
-	if (code < nitems(syscallnames))
-		return (syscallnames[code]);
-	return (NULL);
-}
-
 #if defined(__amd64__) || defined(__powerpc64__)
 static
 #include <compat/freebsd32/freebsd32_syscalls.c>
-
-const char *
-sysdecode_freebsd32(unsigned int code)
-{
-
-	if (code < nitems(freebsd32_syscallnames))
-		return (freebsd32_syscallnames[code]);
-	return (NULL);
-}
-#endif
-
-#if defined(__amd64__) || defined(__aarch64__)
-static
-#include <compat/cloudabi64/cloudabi64_syscalls.c>
-
-const char *
-sysdecode_cloudabi64(unsigned int code)
-{
-
-	if (code < nitems(cloudabi64_syscallnames))
-		return (cloudabi64_syscallnames[code]);
-	return (NULL);
-}
 #endif
 
 #if defined(__amd64__) || defined(__i386__)
@@ -85,27 +53,51 @@ static
 #else
 #include <i386/linux/linux_syscalls.c>
 #endif
-
-const char *
-sysdecode_linux(unsigned int code)
-{
-
-	if (code < nitems(linux_syscallnames))
-		return (linux_syscallnames[code]);
-	return (NULL);
-}
 #endif
 
 #ifdef __amd64__
 static
 #include <amd64/linux32/linux32_syscalls.c>
+#endif
+
+#if defined(__amd64__) || defined(__aarch64__)
+static
+#include <compat/cloudabi64/cloudabi64_syscalls.c>
+#endif
 
 const char *
-sysdecode_linux32(unsigned int code)
+sysdecode_syscallname(enum sysdecode_abi abi, unsigned int code)
 {
 
-	if (code < nitems(linux32_syscallnames))
-		return (linux32_syscallnames[code]);
+	switch (abi) {
+	case FREEBSD:
+		if (code < nitems(syscallnames))
+			return (syscallnames[code]);
+		break;
+#if defined(__amd64__) || defined(__powerpc64__)
+	case FREEBSD32:
+		if (code < nitems(freebsd32_syscallnames))
+			return (freebsd32_syscallnames[code]);
+		break;
+#endif
+#if defined(__amd64__) || defined(__i386__)
+	case LINUX:
+		if (code < nitems(linux_syscallnames))
+			return (linux_syscallnames[code]);
+		break;
+#endif
+#ifdef __amd64__
+	case LINUX32:
+		if (code < nitems(linux32_syscallnames))
+			return (linux32_syscallnames[code]);
+		break;
+#endif
+#if defined(__amd64__) || defined(__aarch64__)
+	case CLOUDABI64:
+		if (code < nitems(cloudabi64_syscallnames))
+			return (cloudabi64_syscallnames[code]);
+		break;
+#endif
+	}
 	return (NULL);
 }
-#endif
