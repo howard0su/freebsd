@@ -30,7 +30,8 @@
 #define	__SYSDECODE_H__
 
 enum sysdecode_abi {
-	FREEBSD = 0,
+	UNKNOWN_ABI = 0,
+	FREEBSD,
 	FREEBSD32,
 	LINUX,
 	LINUX32,
