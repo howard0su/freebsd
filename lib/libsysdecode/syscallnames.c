@@ -98,6 +98,8 @@ sysdecode_syscallname(enum sysdecode_abi abi, unsigned int code)
 			return (cloudabi64_syscallnames[code]);
 		break;
 #endif
+	default:
+		break;
 	}
 	return (NULL);
 }
