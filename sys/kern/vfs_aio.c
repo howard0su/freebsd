@@ -1840,7 +1840,7 @@ done:
 	return (error);
 }
 
-void
+static void
 aio_kick_nowait(struct proc *userp)
 {
 	struct kaioinfo *ki = userp->p_aioinfo;
