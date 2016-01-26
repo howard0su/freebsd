@@ -3104,7 +3104,7 @@ pru_accept_notsupp(struct socket *so, struct sockaddr **nam)
 }
 
 int
-pru_aio_queue_notsupp(struct socket *so, struct aiocblist *cbe)
+pru_aio_queue_notsupp(struct socket *so, struct kaiocb *cb)
 {
 
 	return EOPNOTSUPP;

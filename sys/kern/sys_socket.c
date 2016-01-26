@@ -96,7 +96,7 @@ static fo_close_t soo_close;
 static fo_fill_kinfo_t soo_fill_kinfo;
 static fo_aio_queue_t soo_aio_queue;
 
-static void	soo_aio_cancel(struct aiocblist *aiocbe);
+static void	soo_aio_cancel(struct kaiocb *aiocbe);
 
 struct fileops	socketops = {
 	.fo_read = soo_read,
@@ -548,7 +548,7 @@ soaio_ready(struct socket *so, struct sockbuf *sb)
 
 static void
 soaio_process_job(struct socket *so, struct sockbuf *sb,
-    struct aiocblist *aiocbe)
+    struct kaiocb *aiocbe)
 {
 	struct ucred *td_savedcred;
 	struct thread *td;
@@ -640,7 +640,7 @@ retry:
 static void
 soaio_process_sb(struct socket *so, struct sockbuf *sb)
 {
-	struct aiocblist *aiocbe;
+	struct kaiocb *aiocbe;
 
 	SOCKBUF_LOCK(sb);
 	while (!TAILQ_EMPTY(&sb->sb_aiojobq) && soaio_ready(so, sb)) {
@@ -703,7 +703,7 @@ sowakeup_aio(struct socket *so, struct sockbuf *sb)
 }
 
 static void
-soo_aio_cancel(struct aiocblist *aiocbe)
+soo_aio_cancel(struct kaiocb *aiocbe)
 {
 	struct socket *so;
 	struct sockbuf *sb;
@@ -729,7 +729,7 @@ soo_aio_cancel(struct aiocblist *aiocbe)
 }
 
 static int
-soo_aio_queue(struct file *fp, struct aiocblist *aiocbe)
+soo_aio_queue(struct file *fp, struct kaiocb *aiocbe)
 {
 	struct socket *so;
 	struct sockbuf *sb;

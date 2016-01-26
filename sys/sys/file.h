@@ -71,9 +71,9 @@ struct socket;
 
 #ifdef _KERNEL
 
-struct aiocblist;
 struct file;
 struct filecaps;
+struct kaiocb;
 struct kinfo_file;
 struct ucred;
 
@@ -120,7 +120,7 @@ typedef int fo_fill_kinfo_t(struct file *fp, struct kinfo_file *kif,
 typedef int fo_mmap_t(struct file *fp, vm_map_t map, vm_offset_t *addr,
 		    vm_size_t size, vm_prot_t prot, vm_prot_t cap_maxprot,
 		    int flags, vm_ooffset_t foff, struct thread *td);
-typedef int fo_aio_queue_t(struct file *fp, struct aiocblist *aiocbe);
+typedef int fo_aio_queue_t(struct file *fp, struct kaiocb *aiocbe);
 typedef	int fo_flags_t;
 
 struct fileops {
@@ -410,7 +410,7 @@ fo_mmap(struct file *fp, vm_map_t map, vm_offset_t *addr, vm_size_t size,
 }
 
 static __inline int
-fo_aio_queue(struct file *fp, struct aiocblist *aiocbe)
+fo_aio_queue(struct file *fp, struct kaiocb *aiocbe)
 {
 
 	return ((*fp->f_ops->fo_aio_queue)(fp, aiocbe));
