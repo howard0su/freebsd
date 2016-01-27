@@ -21,6 +21,11 @@
 
 #include <sys/types.h>
 #include <sys/signal.h>
+#ifdef _KERNEL
+#include <sys/queue.h>
+#include <sys/event.h>
+#include <sys/signalvar.h>
+#endif
 
 /*
  * Returned by aio_cancel:
@@ -51,6 +56,24 @@
  */
 #define	AIO_LISTIO_MAX		16
 
+#ifdef _KERNEL
+
+/* Default values of tunables for the AIO worker pool. */
+
+#ifndef MAX_AIO_PROCS
+#define MAX_AIO_PROCS		32
+#endif
+
+#ifndef TARGET_AIO_PROCS
+#define TARGET_AIO_PROCS	4
+#endif
+
+#ifndef AIOD_LIFETIME_DEFAULT
+#define AIOD_LIFETIME_DEFAULT	(30 * hz)
+#endif
+
+#endif
+
 /*
  * Private members for aiocb -- don't access
  * directly.
@@ -77,7 +100,57 @@ typedef struct aiocb {
 	struct	sigevent aio_sigevent;	/* Signal to deliver */
 } aiocb_t;
 
-#ifndef _KERNEL
+#ifdef _KERNEL
+
+typedef void aio_cancel_fn_t(struct kaiocb *);
+typedef void aio_handle_fn_t(struct kaiocb *);
+
+/*
+ * Kernel version of an I/O control block.
+ *
+ * Locking key:
+ * * - need not protected
+ * a - locked by kaioinfo lock
+ * b - locked by backend lock
+ * c - locked by aio_job_mtx
+ */
+struct kaiocb {
+	TAILQ_ENTRY(kaiocb) list;	/* (b) backend-specific list of jobs */
+	TAILQ_ENTRY(kaiocb) plist;	/* (a) lists of pending / done jobs */
+	TAILQ_ENTRY(kaiocb) allist;	/* (a) list of all jobs in proc */
+	int	jobflags;		/* (a) job flags */
+	int	inputcharge;		/* (*) input blocks */
+	int	outputcharge;		/* (*) output blocks */
+	struct	bio *bp;		/* (*) BIO backend BIO pointer */
+	struct	buf *pbuf;		/* (*) BIO backend buffer pointer */
+	struct	vm_page *pages[btoc(MAXPHYS)+1]; /* BIO backend pages */
+	int	npages;			/* BIO backend number of pages */
+	struct	proc *userproc;		/* (*) user process */
+	struct	ucred *cred;		/* (*) active credential when created */
+	struct	file *fd_file;		/* (*) pointer to file structure */
+	struct	aioliojob *lio;		/* (*) optional lio job */
+	struct	aiocb *ujob;		/* (*) pointer in userspace of aiocb */
+	struct	knlist klist;		/* (a) list of knotes */
+	struct	aiocb uaiocb;		/* (*) copy of user I/O control block */
+	ksiginfo_t ksi;			/* (a) realtime signal info */
+	uint64_t seqno;			/* (*) job number */
+	int	pending;		/* (a) number of pending I/O, aio_fsync only */
+	aio_cancel_fn_t *cancel_fn;	/* (a) backend cancel function */
+	aio_handle_fn_t *handle_fn;	/* (c) backend handle function */
+};
+
+struct socket;
+struct sockbuf;
+
+bool	aio_cancel_cleared(struct kaiocb *job);
+void	aio_cancel(struct kaiocb *job);
+bool	aio_clear_cancel_function(struct kaiocb *job);
+void	aio_complete(struct kaiocb *job, long status, int error);
+void	aio_schedule(struct kaiocb *job, aio_handle_fn_t *func);
+bool	aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn_t *func);
+void	aio_switch_vmspace(struct kaiocb *job);
+
+#else /* !_KERNEL */
 
 struct timespec;
 
@@ -137,65 +210,6 @@ int	aio_waitcomplete(struct aiocb **, struct timespec *);
 int	aio_fsync(int op, struct aiocb *aiocbp);
 __END_DECLS
 
-#else
+#endif /* !_KERNEL */
 
-#ifndef MAX_AIO_PROCS
-#define MAX_AIO_PROCS		32
-#endif
-
-#ifndef TARGET_AIO_PROCS
-#define TARGET_AIO_PROCS	4
-#endif
-
-#ifndef AIOD_LIFETIME_DEFAULT
-#define AIOD_LIFETIME_DEFAULT	(30 * hz)
-#endif
-
-/* Forward declarations for prototypes below. */
-struct socket;
-struct sockbuf;
-
-/* XXX: A bit of a hack to put this here for now. */
-#include <sys/queue.h>
-#include <sys/event.h>  /* XXX: For knlist */
-#include <sys/signalvar.h>
-
-typedef void aio_cancel_fn_t(struct kaiocb *);
-typedef void aio_handle_fn_t(struct kaiocb *);
-
-struct kaiocb {
-	TAILQ_ENTRY(kaiocb) list;	/* (b) internal list of for backend */
-	TAILQ_ENTRY(kaiocb) plist;	/* (a) list of jobs for each backend */
-	TAILQ_ENTRY(kaiocb) allist;	/* (a) list of all jobs in proc */
-	int	jobflags;		/* (a) job flags */
-	int	inputcharge;		/* (*) input blocks */
-	int	outputcharge;		/* (*) output blocks */
-	struct	bio *bp;		/* (*) BIO backend BIO pointer */
-	struct	buf *pbuf;		/* (*) BIO backend buffer pointer */
-	struct	vm_page *pages[btoc(MAXPHYS)+1]; /* BIO backend pages */
-	int	npages;			/* BIO backend number of pages */
-	struct	proc *userproc;		/* (*) user process */
-	struct	ucred *cred;		/* (*) active credential when created */
-	struct	file *fd_file;		/* (*) pointer to file structure */
-	struct	aioliojob *lio;		/* (*) optional lio job */
-	struct	aiocb *ujob;		/* (*) pointer in userspace of aiocb */
-	struct	knlist klist;		/* (a) list of knotes */
-	struct	aiocb uaiocb;		/* (*) kernel I/O control block */
-	ksiginfo_t ksi;			/* (a) realtime signal info */
-	uint64_t seqno;			/* (*) job number */
-	int	pending;		/* (a) number of pending I/O, aio_fsync only */
-	aio_cancel_fn_t *cancel_fn;
-	aio_handle_fn_t *handle_fn;
-};
-
-bool	aio_cancel_cleared(struct kaiocb *job);
-void	aio_cancel(struct kaiocb *job);
-bool	aio_clear_cancel_function(struct kaiocb *job);
-void	aio_complete(struct kaiocb *job, long status, int error);
-void	aio_schedule(struct kaiocb *job, aio_handle_fn_t *func);
-bool	aio_set_cancel_function(struct kaiocb *job, aio_cancel_fn_t *func);
-void	aio_switch_vmspace(struct kaiocb *job);
-
-#endif
-
-#endif
+#endif /* !_SYS_AIO_H_ */
