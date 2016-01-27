@@ -1035,33 +1035,6 @@ aio_schedule_fsync(void *context, int pending)
 	AIO_UNLOCK(ki);
 }
 
-/*
- * Cancel routine theory of operation.
- *
- * When queueing a request somewhere such that it can be cancelled, the
- * caller should:
- *
- *  1) acquire lock that protects the associated queue
- *  2) call aio_set_cancel_function() to install the cancel routine
- *  3) if that fails, the request has a pending cancel and should be
- *     cancelled via aio_cancel().
- *  4) queue the request
- *
- * When dequeueing a request to service it or hand it off to somewhere else,
- * the caller should:
- *
- *  1) acquire the lock that protects the associated queue
- *  2) dequeue the request
- *  3) call aio_clear_cancel_function() to clear the cancel routine
- *  4) if that fails, the cancel routine is about to be called.  The
- *     caller should ignore the request
- *
- * The cancel routine should:
- *
- *  1) acquire the lock that protects the associated queue
- *  2) use aio_cancel_cleared() to determine if the request is already
- *     dequeued due to a race with dequeueing thread
- */
 bool
 aio_cancel_cleared(struct kaiocb *job)
 {

@@ -142,6 +142,40 @@ struct kaiocb {
 struct socket;
 struct sockbuf;
 
+/*
+ * AIO backends should permit cancellation of queued requests waiting to
+ * be serviced by installing a cancel routine while the request is
+ * queued.  The cancellation routine should dequeue the request if
+ * necessary and cancel it.  Care must be used to handle races between
+ * queueing and dequeueing requests and cancellation.
+ *
+ * When queueing a request somewhere such that it can be cancelled, the
+ * caller should:
+ *
+ *  1) Acquire lock that protects the associated queue.
+ *  2) Call aio_set_cancel_function() to install the cancel routine.
+ *  3) If that fails, the request has a pending cancel and should be
+ *     cancelled via aio_cancel().
+ *  4) Queue the request.
+ *
+ * When dequeueing a request to service it or hand it off to somewhere else,
+ * the caller should:
+ *
+ *  1) Acquire the lock that protects the associated queue.
+ *  2) Dequeue the request.
+ *  3) Call aio_clear_cancel_function() to clear the cancel routine.
+ *  4) If that fails, the cancel routine is about to be called.  The
+ *     caller should ignore the request.
+ *
+ * The cancel routine should:
+ *
+ *  1) Acquire the lock that protects the associated queue.
+ *  2) Call aio_cancel_cleared() to determine if the request is already
+ *     dequeued due to a race with dequeueing thread.
+ *  3) If that fails, dequeue the request.
+ *  4) Cancel the request via aio_cancel().
+ */
+
 bool	aio_cancel_cleared(struct kaiocb *job);
 void	aio_cancel(struct kaiocb *job);
 bool	aio_clear_cancel_function(struct kaiocb *job);
