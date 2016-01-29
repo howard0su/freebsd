@@ -333,7 +333,7 @@ static void	aio_process_rw(struct kaiocb *aiocbe);
 static void	aio_process_sync(struct kaiocb *aiocbe);
 static void	aio_process_mlock(struct kaiocb *aiocbe);
 static int	aio_newproc(int *);
-int		aio_aqueue(struct thread *td, struct aiocb *job,
+int		aio_aqueue(struct thread *td, struct aiocb *ujob,
 		    struct aioliojob *lio, int type, struct aiocb_ops *ops);
 static void	aio_physwakeup(struct bio *bp);
 static void	aio_proc_rundown(void *arg, struct proc *p);
@@ -1515,7 +1515,7 @@ static struct aiocb_ops aiocb_ops_osigevent = {
  * technique is done in this code.
  */
 int
-aio_aqueue(struct thread *td, struct aiocb *job, struct aioliojob *lj,
+aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	int type, struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
@@ -1537,22 +1537,22 @@ aio_aqueue(struct thread *td, struct aiocb *job, struct aioliojob *lj,
 
 	ki = p->p_aioinfo;
 
-	ops->store_status(job, -1);
-	ops->store_error(job, 0);
-	ops->store_kernelinfo(job, -1);
+	ops->store_status(ujob, -1);
+	ops->store_error(ujob, 0);
+	ops->store_kernelinfo(ujob, -1);
 
 	if (num_queue_count >= max_queue_count ||
 	    ki->kaio_count >= ki->kaio_qallowed_count) {
-		ops->store_error(job, EAGAIN);
+		ops->store_error(ujob, EAGAIN);
 		return (EAGAIN);
 	}
 
 	aiocbe = uma_zalloc(aiocb_zone, M_WAITOK | M_ZERO);
 	knlist_init_mtx(&aiocbe->klist, AIO_MTX(ki));
 
-	error = ops->copyin(job, &aiocbe->uaiocb);
+	error = ops->copyin(ujob, &aiocbe->uaiocb);
 	if (error) {
-		ops->store_error(job, error);
+		ops->store_error(ujob, error);
 		uma_zfree(aiocb_zone, aiocbe);
 		return (error);
 	}
@@ -1567,7 +1567,7 @@ aio_aqueue(struct thread *td, struct aiocb *job, struct aioliojob *lj,
 	    aiocbe->uaiocb.aio_sigevent.sigev_notify != SIGEV_SIGNAL &&
 	    aiocbe->uaiocb.aio_sigevent.sigev_notify != SIGEV_THREAD_ID &&
 	    aiocbe->uaiocb.aio_sigevent.sigev_notify != SIGEV_NONE) {
-		ops->store_error(job, EINVAL);
+		ops->store_error(ujob, EINVAL);
 		uma_zfree(aiocb_zone, aiocbe);
 		return (EINVAL);
 	}
@@ -1582,7 +1582,7 @@ aio_aqueue(struct thread *td, struct aiocb *job, struct aioliojob *lj,
 	ksiginfo_init(&aiocbe->ksi);
 
 	/* Save userspace address of the job info. */
-	aiocbe->uuaiocb = job;
+	aiocbe->uuaiocb = ujob;
 
 	/* Get the opcode. */
 	if (type != LIO_NOP)
@@ -1621,7 +1621,7 @@ aio_aqueue(struct thread *td, struct aiocb *job, struct aioliojob *lj,
 	}
 	if (error) {
 		uma_zfree(aiocb_zone, aiocbe);
-		ops->store_error(job, error);
+		ops->store_error(ujob, error);
 		return (error);
 	}
 
@@ -1641,7 +1641,7 @@ aio_aqueue(struct thread *td, struct aiocb *job, struct aioliojob *lj,
 	jid = jobrefid++;
 	aiocbe->seqno = jobseqno++;
 	mtx_unlock(&aio_job_mtx);
-	error = ops->store_kernelinfo(job, jid);
+	error = ops->store_kernelinfo(ujob, jid);
 	if (error) {
 		error = EINVAL;
 		goto aqueue_fail;
@@ -1673,12 +1673,12 @@ aqueue_fail:
 		if (fp)
 			fdrop(fp, td);
 		uma_zfree(aiocb_zone, aiocbe);
-		ops->store_error(job, error);
+		ops->store_error(ujob, error);
 		goto done;
 	}
 no_kqueue:
 
-	ops->store_error(job, EINPROGRESS);
+	ops->store_error(ujob, EINPROGRESS);
 	aiocbe->uaiocb._aiocb_private.error = EINPROGRESS;
 	aiocbe->userproc = p;
 	aiocbe->cred = crhold(td->td_ucred);
@@ -1734,7 +1734,7 @@ no_kqueue:
 #if 0
 	if (error > 0) {
 		aiocbe->uaiocb._aiocb_private.error = error;
-		ops->store_error(job, error);
+		ops->store_error(ujob, error);
 		goto done;
 	}
 #endif
