@@ -1373,7 +1373,7 @@ unref:
 static void
 aio_swake_cb(struct socket *so, struct sockbuf *sb)
 {
-	struct kaiocb *cb, *jobn;
+	struct kaiocb *job, *jobn;
 	int opcode;
 
 	SOCKBUF_LOCK_ASSERT(sb);
@@ -1384,18 +1384,18 @@ aio_swake_cb(struct socket *so, struct sockbuf *sb)
 
 	sb->sb_flags &= ~SB_AIO;
 	mtx_lock(&aio_job_mtx);
-	TAILQ_FOREACH_SAFE(cb, &so->so_aiojobq, list, jobn) {
-		if (opcode == cb->uaiocb.aio_lio_opcode) {
-			if (cb->jobstate != JOBST_JOBQSOCK)
+	TAILQ_FOREACH_SAFE(job, &so->so_aiojobq, list, jobn) {
+		if (opcode == job->uaiocb.aio_lio_opcode) {
+			if (job->jobstate != JOBST_JOBQSOCK)
 				panic("invalid queue value");
 			/* XXX
 			 * We don't have actual sockets backend yet,
 			 * so we simply move the requests to the generic
 			 * file I/O backend.
 			 */
-			TAILQ_REMOVE(&so->so_aiojobq, cb, list);
-			TAILQ_INSERT_TAIL(&aio_jobs, cb, list);
-			aio_kick_nowait(cb->userproc);
+			TAILQ_REMOVE(&so->so_aiojobq, job, list);
+			TAILQ_INSERT_TAIL(&aio_jobs, job, list);
+			aio_kick_nowait(job->userproc);
 		}
 	}
 	mtx_unlock(&aio_job_mtx);
@@ -1851,7 +1851,7 @@ static int
 kern_aio_return(struct thread *td, struct aiocb *uaiocb, struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
-	struct kaiocb *cb;
+	struct kaiocb *job;
 	struct kaioinfo *ki;
 	int status, error;
 
@@ -1859,23 +1859,23 @@ kern_aio_return(struct thread *td, struct aiocb *uaiocb, struct aiocb_ops *ops)
 	if (ki == NULL)
 		return (EINVAL);
 	AIO_LOCK(ki);
-	TAILQ_FOREACH(cb, &ki->kaio_done, plist) {
-		if (cb->uuaiocb == uaiocb)
+	TAILQ_FOREACH(job, &ki->kaio_done, plist) {
+		if (job->uuaiocb == uaiocb)
 			break;
 	}
-	if (cb != NULL) {
-		MPASS(cb->jobstate == JOBST_JOBFINISHED);
-		status = cb->uaiocb._aiocb_private.status;
-		error = cb->uaiocb._aiocb_private.error;
+	if (job != NULL) {
+		MPASS(job->jobstate == JOBST_JOBFINISHED);
+		status = job->uaiocb._aiocb_private.status;
+		error = job->uaiocb._aiocb_private.error;
 		td->td_retval[0] = status;
-		if (cb->uaiocb.aio_lio_opcode == LIO_WRITE) {
-			td->td_ru.ru_oublock += cb->outputcharge;
-			cb->outputcharge = 0;
-		} else if (cb->uaiocb.aio_lio_opcode == LIO_READ) {
-			td->td_ru.ru_inblock += cb->inputcharge;
-			cb->inputcharge = 0;
+		if (job->uaiocb.aio_lio_opcode == LIO_WRITE) {
+			td->td_ru.ru_oublock += job->outputcharge;
+			job->outputcharge = 0;
+		} else if (job->uaiocb.aio_lio_opcode == LIO_READ) {
+			td->td_ru.ru_inblock += job->inputcharge;
+			job->inputcharge = 0;
 		}
-		aio_free_entry(cb);
+		aio_free_entry(job);
 		AIO_UNLOCK(ki);
 		ops->store_error(uaiocb, error);
 		ops->store_status(uaiocb, status);
@@ -1903,7 +1903,7 @@ kern_aio_suspend(struct thread *td, int njoblist, struct aiocb **ujoblist,
 	struct proc *p = td->td_proc;
 	struct timeval atv;
 	struct kaioinfo *ki;
-	struct kaiocb *cb, *cbfirst;
+	struct kaiocb *firstjob, *job;
 	int error, i, timo;
 
 	timo = 0;
@@ -1926,20 +1926,20 @@ kern_aio_suspend(struct thread *td, int njoblist, struct aiocb **ujoblist,
 
 	AIO_LOCK(ki);
 	for (;;) {
-		cbfirst = NULL;
+		firstjob = NULL;
 		error = 0;
-		TAILQ_FOREACH(cb, &ki->kaio_all, allist) {
+		TAILQ_FOREACH(job, &ki->kaio_all, allist) {
 			for (i = 0; i < njoblist; i++) {
-				if (cb->uuaiocb == ujoblist[i]) {
-					if (cbfirst == NULL)
-						cbfirst = cb;
-					if (cb->jobstate == JOBST_JOBFINISHED)
+				if (job->uuaiocb == ujoblist[i]) {
+					if (firstjob == NULL)
+						firstjob = job;
+					if (job->jobstate == JOBST_JOBFINISHED)
 						goto RETURN;
 				}
 			}
 		}
 		/* All tasks were finished. */
-		if (cbfirst == NULL)
+		if (firstjob == NULL)
 			break;
 
 		ki->kaio_flags |= KAIO_WAKEUP;
@@ -2089,7 +2089,7 @@ static int
 kern_aio_error(struct thread *td, struct aiocb *aiocbp, struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
-	struct kaiocb *cb;
+	struct kaiocb *job;
 	struct kaioinfo *ki;
 	int status;
 
@@ -2100,11 +2100,11 @@ kern_aio_error(struct thread *td, struct aiocb *aiocbp, struct aiocb_ops *ops)
 	}
 
 	AIO_LOCK(ki);
-	TAILQ_FOREACH(cb, &ki->kaio_all, allist) {
-		if (cb->uuaiocb == aiocbp) {
-			if (cb->jobstate == JOBST_JOBFINISHED)
+	TAILQ_FOREACH(job, &ki->kaio_all, allist) {
+		if (job->uuaiocb == aiocbp) {
+			if (job->jobstate == JOBST_JOBFINISHED)
 				td->td_retval[0] =
-					cb->uaiocb._aiocb_private.error;
+					job->uaiocb._aiocb_private.error;
 			else
 				td->td_retval[0] = EINPROGRESS;
 			AIO_UNLOCK(ki);
@@ -2423,7 +2423,7 @@ kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
 	struct proc *p = td->td_proc;
 	struct timeval atv;
 	struct kaioinfo *ki;
-	struct kaiocb *cb;
+	struct kaiocb *job;
 	struct aiocb *uuaiocb;
 	int error, status, timo;
 
@@ -2448,9 +2448,9 @@ kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
 	ki = p->p_aioinfo;
 
 	error = 0;
-	cb = NULL;
+	job = NULL;
 	AIO_LOCK(ki);
-	while ((cb = TAILQ_FIRST(&ki->kaio_done)) == NULL) {
+	while ((job = TAILQ_FIRST(&ki->kaio_done)) == NULL) {
 		if (timo == -1) {
 			error = EWOULDBLOCK;
 			break;
@@ -2464,20 +2464,20 @@ kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
 			break;
 	}
 
-	if (cb != NULL) {
-		MPASS(cb->jobstate == JOBST_JOBFINISHED);
-		uuaiocb = cb->uuaiocb;
-		status = cb->uaiocb._aiocb_private.status;
-		error = cb->uaiocb._aiocb_private.error;
+	if (job != NULL) {
+		MPASS(job->jobstate == JOBST_JOBFINISHED);
+		uuaiocb = job->uuaiocb;
+		status = job->uaiocb._aiocb_private.status;
+		error = job->uaiocb._aiocb_private.error;
 		td->td_retval[0] = status;
-		if (cb->uaiocb.aio_lio_opcode == LIO_WRITE) {
-			td->td_ru.ru_oublock += cb->outputcharge;
-			cb->outputcharge = 0;
-		} else if (cb->uaiocb.aio_lio_opcode == LIO_READ) {
-			td->td_ru.ru_inblock += cb->inputcharge;
-			cb->inputcharge = 0;
+		if (job->uaiocb.aio_lio_opcode == LIO_WRITE) {
+			td->td_ru.ru_oublock += job->outputcharge;
+			job->outputcharge = 0;
+		} else if (job->uaiocb.aio_lio_opcode == LIO_READ) {
+			td->td_ru.ru_inblock += job->inputcharge;
+			job->inputcharge = 0;
 		}
-		aio_free_entry(cb);
+		aio_free_entry(job);
 		AIO_UNLOCK(ki);
 		ops->store_aiocb(aiocbp, uuaiocb);
 		ops->store_error(uuaiocb, error);
