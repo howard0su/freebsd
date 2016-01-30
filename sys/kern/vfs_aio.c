@@ -235,7 +235,7 @@ struct kaiocb {
 	struct	ucred *cred;		/* (*) active credential when created */
 	struct	file *fd_file;		/* (*) pointer to file structure */
 	struct	aioliojob *lio;		/* (*) optional lio job */
-	struct	aiocb *uuaiocb;		/* (*) pointer in userspace of aiocb */
+	struct	aiocb *ujob;		/* (*) pointer in userspace of aiocb */
 	struct	knlist klist;		/* (a) list of knotes */
 	struct	aiocb uaiocb;		/* (*) kernel I/O control block */
 	ksiginfo_t ksi;			/* (a) realtime signal info */
@@ -1582,7 +1582,7 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	ksiginfo_init(&job->ksi);
 
 	/* Save userspace address of the job info. */
-	job->uuaiocb = ujob;
+	job->ujob = ujob;
 
 	/* Get the opcode. */
 	if (type != LIO_NOP)
@@ -1662,7 +1662,7 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 		goto aqueue_fail;
 	}
 	kqfd = job->uaiocb.aio_sigevent.sigev_notify_kqueue;
-	kev.ident = (uintptr_t)job->uuaiocb;
+	kev.ident = (uintptr_t)job->ujob;
 	kev.filter = EVFILT_AIO;
 	kev.flags = EV_ADD | EV_ENABLE | EV_FLAG1 | evflags;
 	kev.data = (intptr_t)job;
@@ -1848,7 +1848,7 @@ aio_kick_helper(void *context, int pending)
  * released.
  */
 static int
-kern_aio_return(struct thread *td, struct aiocb *uaiocb, struct aiocb_ops *ops)
+kern_aio_return(struct thread *td, struct aiocb *ujob, struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
 	struct kaiocb *job;
@@ -1860,7 +1860,7 @@ kern_aio_return(struct thread *td, struct aiocb *uaiocb, struct aiocb_ops *ops)
 		return (EINVAL);
 	AIO_LOCK(ki);
 	TAILQ_FOREACH(job, &ki->kaio_done, plist) {
-		if (job->uuaiocb == uaiocb)
+		if (job->ujob == ujob)
 			break;
 	}
 	if (job != NULL) {
@@ -1877,8 +1877,8 @@ kern_aio_return(struct thread *td, struct aiocb *uaiocb, struct aiocb_ops *ops)
 		}
 		aio_free_entry(job);
 		AIO_UNLOCK(ki);
-		ops->store_error(uaiocb, error);
-		ops->store_status(uaiocb, status);
+		ops->store_error(ujob, error);
+		ops->store_status(ujob, status);
 	} else {
 		error = EINVAL;
 		AIO_UNLOCK(ki);
@@ -1930,7 +1930,7 @@ kern_aio_suspend(struct thread *td, int njoblist, struct aiocb **ujoblist,
 		error = 0;
 		TAILQ_FOREACH(job, &ki->kaio_all, allist) {
 			for (i = 0; i < njoblist; i++) {
-				if (job->uuaiocb == ujoblist[i]) {
+				if (job->ujob == ujoblist[i]) {
 					if (firstjob == NULL)
 						firstjob = job;
 					if (job->jobstate == JOBST_JOBFINISHED)
@@ -2022,7 +2022,7 @@ sys_aio_cancel(struct thread *td, struct aio_cancel_args *uap)
 	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, jobn) {
 		if ((uap->fd == job->uaiocb.aio_fildes) &&
 		    ((uap->aiocbp == NULL) ||
-		     (uap->aiocbp == job->uuaiocb))) {
+		     (uap->aiocbp == job->ujob))) {
 			remove = 0;
 
 			mtx_lock(&aio_job_mtx);
@@ -2086,7 +2086,7 @@ done:
  * a userland subroutine.
  */
 static int
-kern_aio_error(struct thread *td, struct aiocb *aiocbp, struct aiocb_ops *ops)
+kern_aio_error(struct thread *td, struct aiocb *ujob, struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
 	struct kaiocb *job;
@@ -2101,7 +2101,7 @@ kern_aio_error(struct thread *td, struct aiocb *aiocbp, struct aiocb_ops *ops)
 
 	AIO_LOCK(ki);
 	TAILQ_FOREACH(job, &ki->kaio_all, allist) {
-		if (job->uuaiocb == aiocbp) {
+		if (job->ujob == ujob) {
 			if (job->jobstate == JOBST_JOBFINISHED)
 				td->td_retval[0] =
 					job->uaiocb._aiocb_private.error;
@@ -2116,9 +2116,9 @@ kern_aio_error(struct thread *td, struct aiocb *aiocbp, struct aiocb_ops *ops)
 	/*
 	 * Hack for failure of aio_aqueue.
 	 */
-	status = ops->fetch_status(aiocbp);
+	status = ops->fetch_status(ujob);
 	if (status == -1) {
-		td->td_retval[0] = ops->fetch_error(aiocbp);
+		td->td_retval[0] = ops->fetch_error(ujob);
 		return (0);
 	}
 
@@ -2417,17 +2417,17 @@ aio_physwakeup(struct bio *bp)
 
 /* syscall - wait for the next completion of an aio request */
 static int
-kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
+kern_aio_waitcomplete(struct thread *td, struct aiocb **ujobp,
     struct timespec *ts, struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
 	struct timeval atv;
 	struct kaioinfo *ki;
 	struct kaiocb *job;
-	struct aiocb *uuaiocb;
+	struct aiocb *ujob;
 	int error, status, timo;
 
-	ops->store_aiocb(aiocbp, NULL);
+	ops->store_aiocb(ujobp, NULL);
 
 	if (ts == NULL) {
 		timo = 0;
@@ -2466,7 +2466,7 @@ kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
 
 	if (job != NULL) {
 		MPASS(job->jobstate == JOBST_JOBFINISHED);
-		uuaiocb = job->uuaiocb;
+		ujob = job->ujob;
 		status = job->uaiocb._aiocb_private.status;
 		error = job->uaiocb._aiocb_private.error;
 		td->td_retval[0] = status;
@@ -2479,9 +2479,9 @@ kern_aio_waitcomplete(struct thread *td, struct aiocb **aiocbp,
 		}
 		aio_free_entry(job);
 		AIO_UNLOCK(ki);
-		ops->store_aiocb(aiocbp, uuaiocb);
-		ops->store_error(uuaiocb, error);
-		ops->store_status(uuaiocb, status);
+		ops->store_aiocb(ujobp, ujob);
+		ops->store_error(ujob, error);
+		ops->store_status(ujob, status);
 	} else
 		AIO_UNLOCK(ki);
 
@@ -2507,7 +2507,7 @@ sys_aio_waitcomplete(struct thread *td, struct aio_waitcomplete_args *uap)
 }
 
 static int
-kern_aio_fsync(struct thread *td, int op, struct aiocb *aiocbp,
+kern_aio_fsync(struct thread *td, int op, struct aiocb *ujob,
     struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
@@ -2518,7 +2518,7 @@ kern_aio_fsync(struct thread *td, int op, struct aiocb *aiocbp,
 	ki = p->p_aioinfo;
 	if (ki == NULL)
 		aio_init_aioinfo(p);
-	return (aio_aqueue(td, aiocbp, NULL, LIO_SYNC, ops));
+	return (aio_aqueue(td, ujob, NULL, LIO_SYNC, ops));
 }
 
 int
