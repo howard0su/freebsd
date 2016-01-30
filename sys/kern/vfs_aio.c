@@ -980,7 +980,7 @@ aio_bio_done_notify(struct proc *userp, struct kaiocb *job, int type)
 {
 	struct aioliojob *lj;
 	struct kaioinfo *ki;
-	struct kaiocb *scb, *scbn;
+	struct kaiocb *sjob, *sjobn;
 	int lj_done;
 
 	ki = userp->p_aioinfo;
@@ -1025,15 +1025,15 @@ aio_bio_done_notify(struct proc *userp, struct kaiocb *job, int type)
 
 notification_done:
 	if (job->jobflags & KAIOCB_CHECKSYNC) {
-		TAILQ_FOREACH_SAFE(scb, &ki->kaio_syncqueue, list, scbn) {
-			if (job->fd_file == scb->fd_file &&
-			    job->seqno < scb->seqno) {
-				if (--scb->pending == 0) {
+		TAILQ_FOREACH_SAFE(sjob, &ki->kaio_syncqueue, list, sjobn) {
+			if (job->fd_file == sjob->fd_file &&
+			    job->seqno < sjob->seqno) {
+				if (--sjob->pending == 0) {
 					mtx_lock(&aio_job_mtx);
-					scb->jobstate = JOBST_JOBQGLOBAL;
-					TAILQ_REMOVE(&ki->kaio_syncqueue, scb,
+					sjob->jobstate = JOBST_JOBQGLOBAL;
+					TAILQ_REMOVE(&ki->kaio_syncqueue, sjob,
 					    list);
-					TAILQ_INSERT_TAIL(&aio_jobs, scb, list);
+					TAILQ_INSERT_TAIL(&aio_jobs, sjob, list);
 					aio_kick_nowait(userp);
 					mtx_unlock(&aio_job_mtx);
 				}
