@@ -717,7 +717,7 @@ aio_proc_rundown(void *arg, struct proc *p)
 {
 	struct kaioinfo *ki;
 	struct aioliojob *lj;
-	struct kaiocb *job, *cbn;
+	struct kaiocb *job, *jobn;
 	struct file *fp;
 	struct socket *so;
 	int remove;
@@ -737,7 +737,7 @@ restart:
 	 * Try to cancel all pending requests. This code simulates
 	 * aio_cancel on all pending I/O requests.
 	 */
-	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, cbn) {
+	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, jobn) {
 		remove = 0;
 		mtx_lock(&aio_job_mtx);
 		if (job->jobstate == JOBST_JOBQGLOBAL) {
@@ -1373,7 +1373,7 @@ unref:
 static void
 aio_swake_cb(struct socket *so, struct sockbuf *sb)
 {
-	struct kaiocb *cb, *cbn;
+	struct kaiocb *cb, *jobn;
 	int opcode;
 
 	SOCKBUF_LOCK_ASSERT(sb);
@@ -1384,7 +1384,7 @@ aio_swake_cb(struct socket *so, struct sockbuf *sb)
 
 	sb->sb_flags &= ~SB_AIO;
 	mtx_lock(&aio_job_mtx);
-	TAILQ_FOREACH_SAFE(cb, &so->so_aiojobq, list, cbn) {
+	TAILQ_FOREACH_SAFE(cb, &so->so_aiojobq, list, jobn) {
 		if (opcode == cb->uaiocb.aio_lio_opcode) {
 			if (cb->jobstate != JOBST_JOBQSOCK)
 				panic("invalid queue value");
@@ -1990,7 +1990,7 @@ sys_aio_cancel(struct thread *td, struct aio_cancel_args *uap)
 {
 	struct proc *p = td->td_proc;
 	struct kaioinfo *ki;
-	struct kaiocb *job, *cbn;
+	struct kaiocb *job, *jobn;
 	struct file *fp;
 	struct socket *so;
 	cap_rights_t rights;
@@ -2019,7 +2019,7 @@ sys_aio_cancel(struct thread *td, struct aio_cancel_args *uap)
 	}
 
 	AIO_LOCK(ki);
-	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, cbn) {
+	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, jobn) {
 		if ((uap->fd == job->uaiocb.aio_fildes) &&
 		    ((uap->aiocbp == NULL) ||
 		     (uap->aiocbp == job->uuaiocb))) {
