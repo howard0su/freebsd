@@ -339,7 +339,7 @@ static void	aio_physwakeup(struct bio *bp);
 static void	aio_proc_rundown(void *arg, struct proc *p);
 static void	aio_proc_rundown_exec(void *arg, struct proc *p,
 		    struct image_params *imgp);
-static int	aio_qphysio(struct proc *p, struct kaiocb *iocb);
+static int	aio_qphysio(struct proc *p, struct kaiocb *job);
 static void	aio_daemon(void *param);
 static void	aio_swake_cb(struct socket *, struct sockbuf *);
 static int	aio_unload(void);
@@ -2178,7 +2178,7 @@ kern_lio_listio(struct thread *td, int mode, struct aiocb * const *uacb_list,
     struct aiocb_ops *ops)
 {
 	struct proc *p = td->td_proc;
-	struct aiocb *iocb;
+	struct aiocb *job;
 	struct kaioinfo *ki;
 	struct aioliojob *lj;
 	struct kevent kev;
@@ -2254,9 +2254,9 @@ kern_lio_listio(struct thread *td, int mode, struct aiocb * const *uacb_list,
 	 */
 	nerror = 0;
 	for (i = 0; i < nent; i++) {
-		iocb = acb_list[i];
-		if (iocb != NULL) {
-			error = aio_aqueue(td, iocb, lj, LIO_NOP, ops);
+		job = acb_list[i];
+		if (job != NULL) {
+			error = aio_aqueue(td, job, lj, LIO_NOP, ops);
 			if (error != 0)
 				nerror++;
 		}
