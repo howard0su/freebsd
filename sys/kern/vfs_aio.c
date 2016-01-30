@@ -717,7 +717,7 @@ aio_proc_rundown(void *arg, struct proc *p)
 {
 	struct kaioinfo *ki;
 	struct aioliojob *lj;
-	struct kaiocb *cbe, *cbn;
+	struct kaiocb *job, *cbn;
 	struct file *fp;
 	struct socket *so;
 	int remove;
@@ -737,30 +737,30 @@ restart:
 	 * Try to cancel all pending requests. This code simulates
 	 * aio_cancel on all pending I/O requests.
 	 */
-	TAILQ_FOREACH_SAFE(cbe, &ki->kaio_jobqueue, plist, cbn) {
+	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, cbn) {
 		remove = 0;
 		mtx_lock(&aio_job_mtx);
-		if (cbe->jobstate == JOBST_JOBQGLOBAL) {
-			TAILQ_REMOVE(&aio_jobs, cbe, list);
+		if (job->jobstate == JOBST_JOBQGLOBAL) {
+			TAILQ_REMOVE(&aio_jobs, job, list);
 			remove = 1;
-		} else if (cbe->jobstate == JOBST_JOBQSOCK) {
-			fp = cbe->fd_file;
+		} else if (job->jobstate == JOBST_JOBQSOCK) {
+			fp = job->fd_file;
 			MPASS(fp->f_type == DTYPE_SOCKET);
 			so = fp->f_data;
-			TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
+			TAILQ_REMOVE(&so->so_aiojobq, job, list);
 			remove = 1;
-		} else if (cbe->jobstate == JOBST_JOBQSYNC) {
-			TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
+		} else if (job->jobstate == JOBST_JOBQSYNC) {
+			TAILQ_REMOVE(&ki->kaio_syncqueue, job, list);
 			remove = 1;
 		}
 		mtx_unlock(&aio_job_mtx);
 
 		if (remove) {
-			cbe->jobstate = JOBST_JOBFINISHED;
-			cbe->uaiocb._aiocb_private.status = -1;
-			cbe->uaiocb._aiocb_private.error = ECANCELED;
-			TAILQ_REMOVE(&ki->kaio_jobqueue, cbe, plist);
-			aio_bio_done_notify(p, cbe, DONE_QUEUE);
+			job->jobstate = JOBST_JOBFINISHED;
+			job->uaiocb._aiocb_private.status = -1;
+			job->uaiocb._aiocb_private.error = ECANCELED;
+			TAILQ_REMOVE(&ki->kaio_jobqueue, job, plist);
+			aio_bio_done_notify(p, job, DONE_QUEUE);
 		}
 	}
 
@@ -773,8 +773,8 @@ restart:
 	}
 
 	/* Free all completed I/O requests. */
-	while ((cbe = TAILQ_FIRST(&ki->kaio_done)) != NULL)
-		aio_free_entry(cbe);
+	while ((job = TAILQ_FIRST(&ki->kaio_done)) != NULL)
+		aio_free_entry(job);
 
 	while ((lj = TAILQ_FIRST(&ki->kaio_liojoblist)) != NULL) {
 		if (lj->lioj_count == 0) {
@@ -1990,7 +1990,7 @@ sys_aio_cancel(struct thread *td, struct aio_cancel_args *uap)
 {
 	struct proc *p = td->td_proc;
 	struct kaioinfo *ki;
-	struct kaiocb *cbe, *cbn;
+	struct kaiocb *job, *cbn;
 	struct file *fp;
 	struct socket *so;
 	cap_rights_t rights;
@@ -2019,32 +2019,32 @@ sys_aio_cancel(struct thread *td, struct aio_cancel_args *uap)
 	}
 
 	AIO_LOCK(ki);
-	TAILQ_FOREACH_SAFE(cbe, &ki->kaio_jobqueue, plist, cbn) {
-		if ((uap->fd == cbe->uaiocb.aio_fildes) &&
+	TAILQ_FOREACH_SAFE(job, &ki->kaio_jobqueue, plist, cbn) {
+		if ((uap->fd == job->uaiocb.aio_fildes) &&
 		    ((uap->aiocbp == NULL) ||
-		     (uap->aiocbp == cbe->uuaiocb))) {
+		     (uap->aiocbp == job->uuaiocb))) {
 			remove = 0;
 
 			mtx_lock(&aio_job_mtx);
-			if (cbe->jobstate == JOBST_JOBQGLOBAL) {
-				TAILQ_REMOVE(&aio_jobs, cbe, list);
+			if (job->jobstate == JOBST_JOBQGLOBAL) {
+				TAILQ_REMOVE(&aio_jobs, job, list);
 				remove = 1;
-			} else if (cbe->jobstate == JOBST_JOBQSOCK) {
+			} else if (job->jobstate == JOBST_JOBQSOCK) {
 				MPASS(fp->f_type == DTYPE_SOCKET);
 				so = fp->f_data;
-				TAILQ_REMOVE(&so->so_aiojobq, cbe, list);
+				TAILQ_REMOVE(&so->so_aiojobq, job, list);
 				remove = 1;
-			} else if (cbe->jobstate == JOBST_JOBQSYNC) {
-				TAILQ_REMOVE(&ki->kaio_syncqueue, cbe, list);
+			} else if (job->jobstate == JOBST_JOBQSYNC) {
+				TAILQ_REMOVE(&ki->kaio_syncqueue, job, list);
 				remove = 1;
 			}
 			mtx_unlock(&aio_job_mtx);
 
 			if (remove) {
-				TAILQ_REMOVE(&ki->kaio_jobqueue, cbe, plist);
-				cbe->uaiocb._aiocb_private.status = -1;
-				cbe->uaiocb._aiocb_private.error = ECANCELED;
-				aio_bio_done_notify(p, cbe, DONE_QUEUE);
+				TAILQ_REMOVE(&ki->kaio_jobqueue, job, plist);
+				job->uaiocb._aiocb_private.status = -1;
+				job->uaiocb._aiocb_private.error = ECANCELED;
+				aio_bio_done_notify(p, job, DONE_QUEUE);
 				cancelled++;
 			} else {
 				notcancelled++;
