@@ -1522,7 +1522,7 @@ aio_aqueue(struct thread *td, struct aiocb *ujob, struct aioliojob *lj,
 	cap_rights_t rights;
 	struct file *fp;
 	struct socket *so;
-	struct kaiocb *job, *cb;
+	struct kaiocb *job, *job2;
 	struct kaioinfo *ki;
 	struct kevent kev;
 	struct sockbuf *sb;
@@ -1748,19 +1748,19 @@ queueit:
 	TAILQ_INSERT_TAIL(&ki->kaio_jobqueue, job, plist);
 	TAILQ_INSERT_TAIL(&ki->kaio_all, job, allist);
 	if (opcode == LIO_SYNC) {
-		TAILQ_FOREACH(cb, &ki->kaio_jobqueue, plist) {
-			if (cb->fd_file == job->fd_file &&
-			    cb->uaiocb.aio_lio_opcode != LIO_SYNC &&
-			    cb->seqno < job->seqno) {
-				cb->jobflags |= KAIOCB_CHECKSYNC;
+		TAILQ_FOREACH(job2, &ki->kaio_jobqueue, plist) {
+			if (job2->fd_file == job->fd_file &&
+			    job2->uaiocb.aio_lio_opcode != LIO_SYNC &&
+			    job2->seqno < job->seqno) {
+				job2->jobflags |= KAIOCB_CHECKSYNC;
 				job->pending++;
 			}
 		}
-		TAILQ_FOREACH(cb, &ki->kaio_bufqueue, plist) {
-			if (cb->fd_file == job->fd_file &&
-			    cb->uaiocb.aio_lio_opcode != LIO_SYNC &&
-			    cb->seqno < job->seqno) {
-				cb->jobflags |= KAIOCB_CHECKSYNC;
+		TAILQ_FOREACH(job2, &ki->kaio_bufqueue, plist) {
+			if (job2->fd_file == job->fd_file &&
+			    job2->uaiocb.aio_lio_opcode != LIO_SYNC &&
+			    job2->seqno < job->seqno) {
+				job2->jobflags |= KAIOCB_CHECKSYNC;
 				job->pending++;
 			}
 		}
