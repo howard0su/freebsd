@@ -130,8 +130,7 @@ static struct procabi arm_freebsd = {
 	"FreeBSD ELF32",
 	SYSDECODE_ABI_FREEBSD,
 	arm_fetch_args,
-	arm_fetch_retval,
-	strerror
+	arm_fetch_retval
 };
 
 PROCABI(arm_freebsd);

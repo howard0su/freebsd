@@ -105,22 +105,11 @@ amd64_linux32_fetch_retval(struct trussinfo *trussinfo, long *retval,
 	return (0);
 }
 
-static const char *
-amd64_linux32_strerror(int error)
-{
-
-	error = sysdecode_linux_to_freebsd_errno(error);
-	if (error == INT_MAX)
-		return ("Unknown error");
-	return (strerror(error));
-}
-
 static struct procabi amd64_linux32 = {
 	"Linux ELF32",
 	SYSDECODE_ABI_LINUX32,
 	amd64_linux32_fetch_args,
-	amd64_linux32_fetch_retval,
-	amd64_linux32_strerror
+	amd64_linux32_fetch_retval
 };
 
 PROCABI(amd64_linux32);

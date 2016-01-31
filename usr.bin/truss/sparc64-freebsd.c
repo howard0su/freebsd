@@ -117,8 +117,7 @@ static struct procabi sparc64_freebsd = {
 	"FreeBSD ELF64",
 	SYSDECODE_ABI_FREEBSD,
 	sparc64_fetch_args,
-	sparc64_fetch_retval,
-	strerror
+	sparc64_fetch_retval
 };
 
 PROCABI(sparc64_freebsd);

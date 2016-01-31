@@ -2059,6 +2059,7 @@ print_syscall_ret(struct trussinfo *trussinfo, int errorp, long *retval)
 	struct timespec timediff;
 	struct threadinfo *t;
 	struct syscall *sc;
+	int error;
 
 	t = trussinfo->curthread;
 	sc = t->cs.sc;
@@ -2074,9 +2075,12 @@ print_syscall_ret(struct trussinfo *trussinfo, int errorp, long *retval)
 
 	print_syscall(trussinfo);
 	fflush(trussinfo->outfile);
-	if (errorp)
+	if (errorp) {
+		error = sysdecode_abi_to_freebsd_errno(t->proc->abi->abi,
+		    retval[0]);
 		fprintf(trussinfo->outfile, " ERR#%ld '%s'\n", retval[0],
-		    t->proc->abi->strerror(retval[0]));
+		    error == INT_MAX ? "Unknown error" : strerror(error));
+	}
 #ifndef __LP64__
 	else if (sc->ret_type == 2) {
 		off_t off;

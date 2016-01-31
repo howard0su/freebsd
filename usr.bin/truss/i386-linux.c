@@ -102,22 +102,11 @@ i386_linux_fetch_retval(struct trussinfo *trussinfo, long *retval, int *errorp)
 	return (0);
 }
 
-static const char *
-i386_linux_strerror(int error)
-{
-
-	error = sysdecode_linux_to_freebsd_errno(error);
-	if (error == INT_MAX)
-		return ("Unknown error");
-	return (strerror(error));
-}
-
 static struct procabi i386_linux = {
 	"Linux ELF",
 	SYSDECODE_ABI_LINUX,
 	i386_linux_fetch_args,
-	i386_linux_fetch_retval,
-	i386_linux_strerror
+	i386_linux_fetch_retval
 };
 
 PROCABI(i386_linux);

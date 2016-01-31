@@ -119,8 +119,7 @@ static struct procabi amd64_freebsd32 = {
 	"FreeBSD ELF32",
 	SYSDECODE_ABI_FREEBSD32,
 	amd64_freebsd32_fetch_args,
-	amd64_freebsd32_fetch_retval,
-	strerror
+	amd64_freebsd32_fetch_retval
 };
 
 PROCABI(amd64_freebsd32);
@@ -129,8 +128,7 @@ static struct procabi amd64_freebsd32_aout = {
 	"FreeBSD a.out",
 	SYSDECODE_ABI_FREEBSD32,
 	amd64_freebsd32_fetch_args,
-	amd64_freebsd32_fetch_retval,
-	strerror
+	amd64_freebsd32_fetch_retval
 };
 
 PROCABI(amd64_freebsd32_aout);

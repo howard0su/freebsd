@@ -133,8 +133,7 @@ static struct procabi mips_freebsd = {
 #endif
 	SYSDECODE_ABI_FREEBSD,
 	mips_fetch_args,
-	mips_fetch_retval,
-	strerror
+	mips_fetch_retval
 };
 
 PROCABI(mips_freebsd);
