@@ -32,7 +32,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/armreg.h>
 
 #include <stdio.h>
-#include <string.h>
 #include <sysdecode.h>
 
 #include "truss.h"

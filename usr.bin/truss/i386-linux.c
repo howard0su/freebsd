@@ -40,7 +40,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/psl.h>
 
 #include <stdio.h>
-#include <string.h>
 #include <sysdecode.h>
 
 #include "truss.h"
