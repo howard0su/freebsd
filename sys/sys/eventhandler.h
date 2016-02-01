@@ -59,6 +59,11 @@ struct eventhandler_list {
 	TAILQ_HEAD(,eventhandler_entry)	el_entries;
 };
 
+struct eventhandler_list_init {
+	char				*eli_name;
+	struct eventhandler_list	*eli_list;
+};
+
 typedef struct eventhandler_entry	*eventhandler_tag;
 
 #define	EHL_LOCK(p)		mtx_lock(&(p)->el_lock)
@@ -98,12 +103,31 @@ typedef struct eventhandler_entry	*eventhandler_tag;
 } while (0)
 
 /*
- * Slow handlers are entirely dynamic; lists are created
- * when entries are added to them, and thus have no concept of "owner",
+ * Event handlers provide named lists of hooks to be invoked when a
+ * specific event occurs.  Hooks are added and removed to lists that
+ * are identified by name.  Lists are allocated when the first hook
+ * is registered for an event.
  *
- * Slow handlers need to be declared, but do not need to be defined. The
- * declaration must be in scope wherever the handler is to be invoked.
+ * Invoking an event handler calls all of the hooks associated with
+ * the event.  There are two ways to invoke an event handler:
+ *
+ * 1) The default invocation operation accepts a list name and uses an
+ *    O(n^2) lookup to locate the list to operate on.  This is
+ *    backwards compatible with the old API, but does trigger the
+ *    overhead of the lookup even if no hooks are registered.
+ *
+ * 2) "Fast" invocations store a local reference to the named list
+ *    when the containing module is loaded.  This avoids the need for
+ *    the O(n^2) lookup on each invocation.  This does require
+ *    EVENTHANDLER_FAST_DEFINE() to be invoked in the same code module
+ *    at global scope to perform the lookup during module load.
+ *
+ * Note that both invocation methods may be used on the same list.
+ *
+ * Registering a hook for an event or invoking an event requires the
+ * event handler to be declared via EVENTHANDLER_DECLARE().
  */
+
 #define EVENTHANDLER_DECLARE(name, type)				\
 struct eventhandler_entry_ ## name 					\
 {									\
@@ -112,17 +136,6 @@ struct eventhandler_entry_ ## name 					\
 };									\
 struct __hack
 
-#define EVENTHANDLER_DEFINE(name, func, arg, priority)			\
-	static eventhandler_tag name ## _tag;				\
-	static void name ## _evh_init(void *ctx)			\
-	{								\
-		name ## _tag = EVENTHANDLER_REGISTER(name, func, ctx,	\
-		    priority);						\
-	}								\
-	SYSINIT(name ## _evh_init, SI_SUB_CONFIGURE, SI_ORDER_ANY,	\
-	    name ## _evh_init, arg);					\
-	struct __hack
-
 #define EVENTHANDLER_INVOKE(name, ...)					\
 do {									\
 	struct eventhandler_list *_el;					\
@@ -130,6 +143,40 @@ do {									\
 	if ((_el = eventhandler_find_list(#name)) != NULL) 		\
 		_EVENTHANDLER_INVOKE(name, _el , ## __VA_ARGS__);	\
 } while (0)
+
+#define EVENTHANDLER_FAST_DEFINE(name)					\
+struct eventhandler_list_init Xeventhandler_list_ ## name =		\
+    { #name, NULL };							\
+SYSINIT(eventhandler_list_ ##name, SI_SUB_EVENTHANDLER, SI_ORDER_SECOND, \
+    eventhandler_fast_list_init, &Xeventhandler_list_ ## name)
+
+#define EVENTHANDLER_FAST_INVOKE(name, ...) do {			\
+	struct eventhandler_list *_el = Xeventhandler_list_ ## name.eli_list; \
+									\
+	KASSERT(_el->el_flags & EHL_INITTED,				\
+ 	   ("eventhandler_fast_invoke: too early"));			\
+	if (!TAILQ_EMPTY(&_el->el_entries)) {				\
+		EHL_LOCK(_el);						\
+		_EVENTHANDLER_INVOKE(name, _el , ## __VA_ARGS__);	\
+	}								\
+} while (0)
+
+#define EVENTHANDLER_DEFINE(name, func, arg, priority)			\
+static eventhandler_tag name ## _tag;					\
+									\
+static void name ## _evh_init(void *ctx)				\
+{									\
+	name ## _tag = EVENTHANDLER_REGISTER(name, func, ctx, priority); \
+}									\
+SYSINIT(name ## _evh_init, SI_SUB_CONFIGURE, SI_ORDER_ANY,		\
+    name ## _evh_init, arg);						\
+									\
+static void name ## _evh_fini(void *ctx __unused)			\
+{									\
+	EVENTHANDLER_DEREGISTER(name, name ## _tag);			\
+}									\
+SYSUNINIT(name ## _evh_fini, SI_SUB_CONFIGURE, SI_ORDER_ANY,		\
+    name ## _evh_fini, NULL)
 
 #define EVENTHANDLER_REGISTER(name, func, arg, priority)		\
 	eventhandler_register(NULL, #name, func, arg, priority)
@@ -141,12 +188,12 @@ do {									\
 	if ((_el = eventhandler_find_list(#name)) != NULL)		\
 		eventhandler_deregister(_el, tag);			\
 } while(0)
-	
 
-eventhandler_tag eventhandler_register(struct eventhandler_list *list, 
+eventhandler_tag eventhandler_register(struct eventhandler_list *list,
 	    const char *name, void *func, void *arg, int priority);
 void	eventhandler_deregister(struct eventhandler_list *list,
 	    eventhandler_tag tag);
+void	eventhandler_fast_list_init(void *arg);
 struct eventhandler_list *eventhandler_find_list(const char *name);
 void	eventhandler_prune_list(struct eventhandler_list *list);
 

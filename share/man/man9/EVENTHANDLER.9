@@ -33,9 +33,13 @@
 .In sys/eventhandler.h
 .Fn EVENTHANDLER_DECLARE name type
 .Fn EVENTHANDLER_INVOKE name ...
+.Fn EVENTHANDLER_FAST_DECLARE name type
+.Fn EVENTHANDLER_FAST_DEFINE name type
+.Fn EVENTHANDLER_FAST_INVOKE name ...
 .Ft eventhandler_tag
 .Fn EVENTHANDLER_REGISTER name func arg priority
 .Fn EVENTHANDLER_DEREGISTER name tag
+.Fn EVENTHANDLER_DEFINE name func arg priority
 .Ft eventhandler_tag
 .Fo eventhandler_register
 .Fa "struct eventhandler_list *list"
@@ -60,15 +64,63 @@ mechanism provides a way for kernel subsystems to register interest in
 kernel events and have their callback functions invoked when these
 events occur.
 .Pp
-The normal way to use this subsystem is via the macro interface.
+Each event is associated with a named event handler list which contains
+the associated callback functions.
+There are two types of event handler lists:
+normal lists and fast lists.
+.Pp
+Normal lists are more flexible at the expense of additional overhead.
+These lists are allocated dynamically when the first callback
+function is registered.
+Invoking a normal event list always requires a linear lookup of the
+list by name,
+even if there are no callback functions registered for the event.
+.Pp
+Fast lists use static allocation rather than dynamic allocation.
+This allows fast list invocations to avoid the lookup operation
+and to minimize overhead if no callback functions are registered for
+an event.
+However,
+the storage for fast lists must always be valid,
+so they cannot be used in a kernel module that supports unloading.
+In addition,
+fast lists must be defined in exactly one place.
+.Pp
+This subsystem should be used via the macro interface.
 The macros that can be used for working with event handlers and callback
 function lists are:
 .Bl -tag -width indent
 .It Fn EVENTHANDLER_DECLARE
-This macro declares an event handler named by argument
+This macro declares a normal event handler named by argument
 .Fa name
 with callback functions of type
 .Fa type .
+.It Fn EVENTHANDLER_INVOKE
+This macro is used to invoke all the callbacks associated with the
+event handler
+.Fa name .
+This macro is a variadic one.
+Additional arguments to the macro after the
+.Fa name
+parameter are passed as the second and subsequent arguments to each
+registered callback function.
+.It Fn EVENTHANDLER_FAST_DECLARE
+This macro declares a fast event handler named by argument
+.Fa name
+with callback functions of type
+.Fa type .
+.It Fn EVENTHANDLER_FAST_DEFINE
+This macro defines the storage for a fast event handler list and
+registers the list with
+.Fa name .
+.It Fn EVENTHANDLER_FAST_INVOKE
+This macro is used to invoke all the callbacks associated with the
+fast event handler
+.Fa name .
+As with
+.Fn EVENTHANDLER_INVOKE ,
+this macro is a variadic macro that passes additional arguments to
+each registered callback function.
 .It Fn EVENTHANDLER_REGISTER
 This macro registers a callback function
 .Fa func
@@ -78,10 +130,12 @@ When invoked, function
 .Fa func
 will be invoked with argument
 .Fa arg
-as its first parameter along with any additional parameters passed in
-via macro
+as its first parameter along with any additional parameters passed to
+the
 .Fn EVENTHANDLER_INVOKE
-(see below).
+or
+.Fn EVENTHANDLER_FAST_INVOKE
+macro.
 Callback functions are invoked in order of priority.
 The relative priority of each callback among other callbacks
 associated with an event is given by argument
@@ -104,15 +158,17 @@ This macro removes a previously registered callback associated with tag
 .Fa tag
 from the event handler named by argument
 .Fa name .
-.It Fn EVENTHANDLER_INVOKE
-This macro is used to invoke all the callbacks associated with event
-handler
-.Fa name .
-This macro is a variadic one.
-Additional arguments to the macro after the
-.Fa name
-parameter are passed as the second and subsequent arguments to each
-registered callback function.
+.It Fn EVENTHANDLER_DEFINE
+This macro is used to manage a static callback.
+It registers a callback function via the
+.Fn EVENTHANDLER_REGISTER
+macro at system boot or module load.
+Its arguments have the same meaning as for the
+.Fn EVENTHANDLER_REGISTER
+macro.
+Additionally,
+the callback function will be removed from the named event handler
+list on module unload.
 .El
 .Pp
 The macros are implemented using the following functions:

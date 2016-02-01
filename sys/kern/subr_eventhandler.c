@@ -50,6 +50,8 @@ struct eventhandler_entry_generic
 };
 
 static struct eventhandler_list *_eventhandler_find_list(const char *name);
+static struct eventhandler_list *eventhandler_list_alloc(const char *name);
+static void eventhandler_list_free(struct eventhandler_list *el);
 
 /*
  * Initialize the eventhandler mutex and list.
@@ -64,6 +66,56 @@ eventhandler_init(void *dummy __unused)
 SYSINIT(eventhandlers, SI_SUB_EVENTHANDLER, SI_ORDER_FIRST, eventhandler_init,
     NULL);
 
+/*
+ * Locate an existing eventhandler list with the given name.  If an
+ * existing list is not found, create a new list.
+ */
+static struct eventhandler_list *
+eventhandler_list_alloc(const char *name)
+{
+    struct eventhandler_list		*list, *new_list;
+
+    mtx_lock(&eventhandler_mutex);
+    list = _eventhandler_find_list(name);
+    if (list == NULL) {
+	mtx_unlock(&eventhandler_mutex);
+
+	new_list = malloc(sizeof(struct eventhandler_list) + strlen(name) + 1,
+	    M_EVENTHANDLER, M_WAITOK | M_ZERO);
+
+	mtx_lock(&eventhandler_mutex);
+	list = _eventhandler_find_list(name);
+	if (list != NULL) {
+		free(new_list, M_EVENTHANDLER);
+	} else {
+	    CTR2(KTR_EVH, "%s: creating list \"%s\"", __func__, name);
+	    list = new_list;
+	    list->el_name = (char *)list + sizeof(struct eventhandler_list);
+	    strcpy(list->el_name, name);
+	    TAILQ_INIT(&list->el_entries);
+	    mtx_init(&list->el_lock, name, "eventhandler list", MTX_DEF);
+	    TAILQ_INSERT_HEAD(&eventhandler_lists, list, el_link);
+	    atomic_store_rel_int(&list->el_flags, EHL_INITTED);
+	}
+    }
+    mtx_unlock(&eventhandler_mutex);
+    return (list);
+}
+
+/*
+ * Initialize a reference to a eventhandler list used for "fast"
+ * invocations.
+ */
+void
+eventhandler_fast_list_init(void *arg)
+{
+    struct eventhandler_list_init *eli;
+
+    eli = arg;
+    CTR2(KTR_EVH, "%s: looking up list \"%s\"", __func__, eli->eli_name);
+    eli->eli_list = eventhandler_list_alloc(eli->eli_name);
+}
+
 /* 
  * Insertion is O(n) due to the priority scan, but optimises to O(1)
  * if all priorities are identical.
@@ -72,50 +124,13 @@ static eventhandler_tag
 eventhandler_register_internal(struct eventhandler_list *list,
     const char *name, eventhandler_tag epn)
 {
-    struct eventhandler_list		*new_list;
     struct eventhandler_entry		*ep;
     
     KASSERT(eventhandler_lists_initted, ("eventhandler registered too early"));
     KASSERT(epn != NULL, ("%s: cannot register NULL event", __func__));
 
-    /* lock the eventhandler lists */
-    mtx_lock(&eventhandler_mutex);
-
-    /* Do we need to find/create the (slow) list? */
-    if (list == NULL) {
-	/* look for a matching, existing list */
-	list = _eventhandler_find_list(name);
-
-	/* Do we need to create the list? */
-	if (list == NULL) {
-	    mtx_unlock(&eventhandler_mutex);
-
-	    new_list = malloc(sizeof(struct eventhandler_list) +
-		strlen(name) + 1, M_EVENTHANDLER, M_WAITOK);
-
-	    /* If someone else created it already, then use that one. */
-	    mtx_lock(&eventhandler_mutex);
-	    list = _eventhandler_find_list(name);
-	    if (list != NULL) {
-		free(new_list, M_EVENTHANDLER);
-	    } else {
-		CTR2(KTR_EVH, "%s: creating list \"%s\"", __func__, name);
-		list = new_list;
-		list->el_flags = 0;
-		list->el_runcount = 0;
-		bzero(&list->el_lock, sizeof(list->el_lock));
-		list->el_name = (char *)list + sizeof(struct eventhandler_list);
-		strcpy(list->el_name, name);
-		TAILQ_INSERT_HEAD(&eventhandler_lists, list, el_link);
-	    }
-	}
-    }
-    if (!(list->el_flags & EHL_INITTED)) {
-	TAILQ_INIT(&list->el_entries);
-	mtx_init(&list->el_lock, name, "eventhandler list", MTX_DEF);
-	atomic_store_rel_int(&list->el_flags, EHL_INITTED);
-    }
-    mtx_unlock(&eventhandler_mutex);
+    if (list == NULL)
+	list = eventhandler_list_alloc(name);
 
     KASSERT(epn->ee_priority != EHE_DEAD_PRIORITY,
 	("%s: handler for %s registered with dead priority", __func__, name));
@@ -244,8 +259,8 @@ eventhandler_find_list(const char *name)
 {
     struct eventhandler_list	*list;
 
-    if (!eventhandler_lists_initted)
-	return(NULL);
+    KASSERT(eventhandler_lists_initted,
+	("eventhandler_find_list called too early"));
     
     /* scan looking for the requested list */
     mtx_lock(&eventhandler_mutex);
