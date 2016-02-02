@@ -244,10 +244,10 @@ struct kaiocb {
 };
 
 /* jobflags */
-#define KAIOCB_DONE		0x01
-#define KAIOCB_BUFDONE		0x02
-#define KAIOCB_RUNDOWN		0x04
-#define KAIOCB_CHECKSYNC	0x08
+#define	KAIOCB_DONE		0x01
+#define	KAIOCB_BUFDONE		0x02
+#define	KAIOCB_RUNDOWN		0x04
+#define	KAIOCB_CHECKSYNC	0x08
 
 /*
  * AIO process info
