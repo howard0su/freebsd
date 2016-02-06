@@ -284,7 +284,6 @@ static TAILQ_HEAD(,aioproc) aio_freeproc;		/* (c) Idle daemons */
 static struct sema aio_newproc_sem;
 static struct mtx aio_job_mtx;
 static TAILQ_HEAD(,kaiocb) aio_jobs;			/* (c) Async job list */
-.
 static struct unrhdr *aiod_unr;
 
 void		aio_init_aioinfo(struct proc *p);
