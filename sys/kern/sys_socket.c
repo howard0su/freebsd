@@ -96,7 +96,7 @@ static fo_close_t soo_close;
 static fo_fill_kinfo_t soo_fill_kinfo;
 static fo_aio_queue_t soo_aio_queue;
 
-static void	soo_aio_cancel(struct kaiocb *aiocbe);
+static void	soo_aio_cancel(struct kaiocb *job);
 
 struct fileops	socketops = {
 	.fo_read = soo_read,
@@ -547,8 +547,7 @@ soaio_ready(struct socket *so, struct sockbuf *sb)
 }
 
 static void
-soaio_process_job(struct socket *so, struct sockbuf *sb,
-    struct kaiocb *aiocbe)
+soaio_process_job(struct socket *so, struct sockbuf *sb, struct kaiocb *job)
 {
 	struct ucred *td_savedcred;
 	struct thread *td;
@@ -559,15 +558,15 @@ soaio_process_job(struct socket *so, struct sockbuf *sb,
 	int error, flags;
 
 	SOCKBUF_UNLOCK(sb);
-	aio_switch_vmspace(aiocbe);
+	aio_switch_vmspace(job);
 	td = curthread;
-	fp = aiocbe->fd_file;
+	fp = job->fd_file;
 retry:
 	td_savedcred = td->td_ucred;
-	td->td_ucred = aiocbe->cred;
+	td->td_ucred = job->cred;
 
-	cnt = aiocbe->uaiocb.aio_nbytes;
-	iov.iov_base = (void *)(uintptr_t)aiocbe->uaiocb.aio_buf;
+	cnt = job->uaiocb.aio_nbytes;
+	iov.iov_base = (void *)(uintptr_t)job->uaiocb.aio_buf;
 	iov.iov_len = cnt;
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;
@@ -577,7 +576,7 @@ retry:
 	uio.uio_td = td;
 	flags = MSG_NBIO;
 
-	/* TODO: Charge ru_msg* to aiocbe. */
+	/* TODO: Charge ru_msg* to job. */
 
 	if (sb == &so->so_rcv) {
 		uio.uio_rw = UIO_READ;
@@ -595,9 +594,9 @@ retry:
 #endif
 			error = sosend(so, NULL, &uio, NULL, NULL, flags, td);
 		if (error == EPIPE && (so->so_options & SO_NOSIGPIPE) == 0) {
-			PROC_LOCK(aiocbe->userproc);
-			kern_psignal(aiocbe->userproc, SIGPIPE);
-			PROC_UNLOCK(aiocbe->userproc);
+			PROC_LOCK(job->userproc);
+			kern_psignal(job->userproc, SIGPIPE);
+			PROC_UNLOCK(job->userproc);
 		}
 	}
 
@@ -623,16 +622,16 @@ retry:
 			goto retry;
 		}
 
-		if (!aio_set_cancel_function(aiocbe, soo_aio_cancel)) {
+		if (!aio_set_cancel_function(job, soo_aio_cancel)) {
 			MPASS(cnt == 0);
 			SOCKBUF_UNLOCK(sb);
-			aio_cancel(aiocbe);
+			aio_cancel(job);
 			SOCKBUF_LOCK(sb);
 		} else {
-			TAILQ_INSERT_HEAD(&sb->sb_aiojobq, aiocbe, list);
+			TAILQ_INSERT_HEAD(&sb->sb_aiojobq, job, list);
 		}
 	} else {
-		aio_complete(aiocbe, cnt, error);
+		aio_complete(job, cnt, error);
 		SOCKBUF_LOCK(sb);
 	}
 }
@@ -640,16 +639,16 @@ retry:
 static void
 soaio_process_sb(struct socket *so, struct sockbuf *sb)
 {
-	struct kaiocb *aiocbe;
+	struct kaiocb *job;
 
 	SOCKBUF_LOCK(sb);
 	while (!TAILQ_EMPTY(&sb->sb_aiojobq) && soaio_ready(so, sb)) {
-		aiocbe = TAILQ_FIRST(&sb->sb_aiojobq);
-		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
-		if (!aio_clear_cancel_function(aiocbe))
+		job = TAILQ_FIRST(&sb->sb_aiojobq);
+		TAILQ_REMOVE(&sb->sb_aiojobq, job, list);
+		if (!aio_clear_cancel_function(job))
 			continue;
 
-		soaio_process_job(so, sb, aiocbe);
+		soaio_process_job(so, sb, job);
 	}
 
 	/*
@@ -703,14 +702,14 @@ sowakeup_aio(struct socket *so, struct sockbuf *sb)
 }
 
 static void
-soo_aio_cancel(struct kaiocb *aiocbe)
+soo_aio_cancel(struct kaiocb *job)
 {
 	struct socket *so;
 	struct sockbuf *sb;
 	int opcode;
 
-	so = aiocbe->fd_file->f_data;
-	opcode = aiocbe->uaiocb.aio_lio_opcode;
+	so = job->fd_file->f_data;
+	opcode = job->uaiocb.aio_lio_opcode;
 	if (opcode == LIO_READ)
 		sb = &so->so_rcv;
 	else {
@@ -719,28 +718,28 @@ soo_aio_cancel(struct kaiocb *aiocbe)
 	}
 
 	SOCKBUF_LOCK(sb);
-	if (!aio_cancel_cleared(aiocbe))
-		TAILQ_REMOVE(&sb->sb_aiojobq, aiocbe, list);
+	if (!aio_cancel_cleared(job))
+		TAILQ_REMOVE(&sb->sb_aiojobq, job, list);
 	if (TAILQ_EMPTY(&sb->sb_aiojobq))
 		sb->sb_flags &= ~SB_AIO;
 	SOCKBUF_UNLOCK(sb);
 
-	aio_cancel(aiocbe);
+	aio_cancel(job);
 }
 
 static int
-soo_aio_queue(struct file *fp, struct kaiocb *aiocbe)
+soo_aio_queue(struct file *fp, struct kaiocb *job)
 {
 	struct socket *so;
 	struct sockbuf *sb;
 	int error, opcode;
 
 	so = fp->f_data;
-	error = (*so->so_proto->pr_usrreqs->pru_aio_queue)(so, aiocbe);
+	error = (*so->so_proto->pr_usrreqs->pru_aio_queue)(so, job);
 	if (error == 0)
 		return (0);
 
-	opcode = aiocbe->uaiocb.aio_lio_opcode;
+	opcode = job->uaiocb.aio_lio_opcode;
 	switch (opcode) {
 	case LIO_READ:
 		sb = &so->so_rcv;
@@ -753,9 +752,9 @@ soo_aio_queue(struct file *fp, struct kaiocb *aiocbe)
 	}
 
 	SOCKBUF_LOCK(sb);
-	if (!aio_set_cancel_function(aiocbe, soo_aio_cancel))
+	if (!aio_set_cancel_function(job, soo_aio_cancel))
 		panic("new job was cancelled");
-	TAILQ_INSERT_TAIL(&sb->sb_aiojobq, aiocbe, list);
+	TAILQ_INSERT_TAIL(&sb->sb_aiojobq, job, list);
 	if (!(sb->sb_flags & SB_AIO_RUNNING)) {
 		if (soaio_ready(so, sb))
 			sowakeup_aio(so, sb);
