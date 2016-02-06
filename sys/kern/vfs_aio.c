@@ -710,6 +710,7 @@ aio_cancel_job(struct proc *p, struct kaioinfo *ki, struct kaiocb *job)
 		 * only counted as cancelled if the request is
 		 * cancelled when the callback returns.
 		 */
+		cancelled = 0;
 	}
 	return (cancelled);
 }
