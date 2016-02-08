@@ -33,8 +33,6 @@ __FBSDID("$FreeBSD$");
 #include <stdio.h>
 #include <sysdecode.h>
 
-#include "local.h"
-
 #if defined(__i386__) || defined(__amd64__)
 /*
  * Linux syscalls return negative errno's, we do positive and map them
@@ -201,6 +199,7 @@ sysdecode_freebsd_to_abi_errno(enum sysdecode_abi abi, int error)
 				return (i);
 		}
 		break;
+	}
 #endif
 	default:
 		break;
