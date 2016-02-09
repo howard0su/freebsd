@@ -194,6 +194,7 @@ enum {
 	ADAP_SYSCTL_CTX	= (1 << 4),
 	/* TOM_INIT_DONE= (1 << 5),	No longer used */
 	BUF_PACKING_OK	= (1 << 6),
+	IS_VF		= (1 << 7),
 
 	CXGBE_BUSY	= (1 << 9),
 
@@ -912,6 +913,16 @@ struct adapter {
 
 /* One for errors, one for firmware events */
 #define T4_EXTRA_INTR 2
+
+#define FW_PARAM_DEV(param) \
+	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) | \
+	 V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_##param))
+#define FW_PARAM_PFVF(param) \
+	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_PFVF) | \
+	 V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_PFVF_##param))
+#define	FW_PARAM_REG(param) \
+	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_REG) | \
+	 V_FW_PARAMS_PARAM_XYZ(param))
 
 static inline uint32_t
 t4_read_reg(struct adapter *sc, uint32_t reg)

@@ -2770,13 +2770,6 @@ done:
 	return (rc);
 }
 
-#define FW_PARAM_DEV(param) \
-	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) | \
-	 V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_##param))
-#define FW_PARAM_PFVF(param) \
-	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_PFVF) | \
-	 V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_PFVF_##param))
-
 /*
  * Partition chip resources for use between various PFs, VFs, etc.
  */
