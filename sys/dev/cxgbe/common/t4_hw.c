@@ -282,6 +282,11 @@ int t4_wr_mbox_meat(struct adapter *adap, int mbox, const void *cmd, int size,
 	if ((size & 15) || size > MBOX_LEN)
 		return -EINVAL;
 
+	if (adap->flags & IS_VF) {
+		data_reg = T4VF_MBDATA_BASE_ADDR;
+		ctl_reg = VF_CIM_REG(A_CIM_VF_EXT_MAILBOX_CTRL);
+	}
+
 	v = G_MBOWNER(t4_read_reg(adap, ctl_reg));
 	for (i = 0; v == X_MBOWNER_NONE && i < 3; i++)
 		v = G_MBOWNER(t4_read_reg(adap, ctl_reg));
@@ -292,6 +297,22 @@ int t4_wr_mbox_meat(struct adapter *adap, int mbox, const void *cmd, int size,
 	for (i = 0; i < size; i += 8, p++)
 		t4_write_reg64(adap, data_reg + i, be64_to_cpu(*p));
 
+	if (adap->flags & IS_VF) {
+		/*
+		 * For the VFs, the Mailbox Data "registers" are
+		 * actually backed by T4's "MA" interface rather than
+		 * PL Registers (as is the case for the PFs).  Because
+		 * these are in different coherency domains, the write
+		 * to the VF's PL-register-backed Mailbox Control can
+		 * race in front of the writes to the MA-backed VF
+		 * Mailbox Data "registers".  So we need to do a
+		 * read-back on at least one byte of the VF Mailbox
+		 * Data registers before doing the write to the VF
+		 * Mailbox Control register.
+		 */
+		t4_read_reg(adap, data_reg);
+	}
+	
 	CH_DUMP_MBOX(adap, mbox, data_reg);
 
 	t4_write_reg(adap, ctl_reg, F_MBMSGVALID | V_MBOWNER(X_MBOWNER_FW));
