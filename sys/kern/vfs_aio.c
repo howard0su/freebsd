@@ -106,6 +106,10 @@ static MALLOC_DEFINE(M_LIO, "lio", "listio aio control block list");
 static SYSCTL_NODE(_vfs, OID_AUTO, aio, CTLFLAG_RW, 0,
     "Async IO management");
 
+static int enable_aio_unsafe = 0;
+SYSCTL_INT(_vfs_aio, OID_AUTO, enable_unsafe, CTLFLAG_RW, &enable_aio_unsafe, 0,
+    "Permit asynchronous IO on all file types, not just known-safe types");
+
 static int max_aio_procs = MAX_AIO_PROCS;
 SYSCTL_INT(_vfs_aio, OID_AUTO, max_aio_procs, CTLFLAG_RW, &max_aio_procs, 0,
     "Maximum number of kernel processes to use for handling async IO ");
@@ -1673,7 +1677,6 @@ no_kqueue:
 	if (opcode == LIO_MLOCK) {
 		aio_schedule(job, aio_process_mlock);
 		error = 0;
-	/* XXX: fo_aio_queue check is temporary */
 	} else if (fp->f_ops->fo_aio_queue == NULL)
 		error = aio_queue_file(fp, job);
 	else
@@ -1765,13 +1768,18 @@ aio_queue_file(struct file *fp, struct kaiocb *job)
 	if ((error = aio_qphysio(job->userproc, job)) == 0)
 		goto done;
 #if 0
-	if (error > 0) {
-		job->uaiocb._aiocb_private.error = error;
-		ops->store_error(ujob, error);
+	/*
+	 * XXX: This means qphysio() failed with EFAULT.  The current
+	 * behavior is to retry the operation via fo_read/fo_write.
+	 * Wouldn't it be better to just complete the request with an
+	 * error here?
+	 */
+	if (error > 0)
 		goto done;
-	}
 #endif
 queueit:
+	if (!enable_aio_unsafe)
+		return (EINVAL);
 
 	if (opcode == LIO_SYNC) {
 		AIO_LOCK(ki);
