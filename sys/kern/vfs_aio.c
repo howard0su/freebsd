@@ -1704,6 +1704,7 @@ no_kqueue:
 	return (0);
 
 aqueue_fail:
+	knlist_delete(&job->klist, curthread, 0);
 	if (fp)
 		fdrop(fp, td);
 	uma_zfree(aiocb_zone, job);
