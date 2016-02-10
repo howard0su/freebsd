@@ -1369,7 +1369,6 @@ aio_qphysio(struct proc *p, struct kaiocb *job)
 		bp->bio_flags |= BIO_UNMAPPED;
 	}
 
-	atomic_add_int(&num_queue_count, 1);
 	if (!unmap)
 		atomic_add_int(&num_buf_aio, 1);
 
