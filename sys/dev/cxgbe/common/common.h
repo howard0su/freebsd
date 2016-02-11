@@ -266,11 +266,59 @@ struct chip_params {
 	u16 mps_tcam_size;
 };
 
+/* VF-only parameters. */
+
+/*
+ * Scatter Gather Engine parameters.  These are almost all determined by the
+ * Physical Function Driver.  We just need to grab them to see within which
+ * environment we're playing.
+ */
+struct sge_params {
+	u32 sge_control;		/* padding, boundaries, lengths, etc. */
+	u32 sge_control2;		/* T5: more of the same */
+	u32 sge_host_page_size;		/* PF0-7 page sizes */
+	u32 sge_egress_queues_per_page;	/* PF0-7 egress queues/page */
+	u32 sge_ingress_queues_per_page;/* PF0-7 ingress queues/page */
+	u32 sge_vf_hps;			/* host page size for our vf */
+	u32 sge_vf_eq_qpp;		/* egress queues/page for our VF */
+	u32 sge_vf_iq_qpp;		/* ingress queues/page for our VF */
+	u32 sge_fl_buffer_size[16];	/* free list buffer sizes */
+	u32 sge_ingress_rx_threshold;	/* RX counter interrupt threshold[4] */
+	u32 sge_congestion_control;	/* congestion thresholds, etc. */
+	u32 sge_timer_value_0_and_1;	/* interrupt coalescing timer values */
+	u32 sge_timer_value_2_and_3;
+	u32 sge_timer_value_4_and_5;
+};
+
+/*
+ * Global Receive Side Scaling (RSS) parameters in host-native format.
+ */
+struct rss_params {
+	unsigned int mode;		/* RSS mode */
+	union {
+	    struct {
+		u_int synmapen:1;	/* SYN Map Enable */
+		u_int syn4tupenipv6:1;	/* enable hashing 4-tuple IPv6 SYNs */
+		u_int syn2tupenipv6:1;	/* enable hashing 2-tuple IPv6 SYNs */
+		u_int syn4tupenipv4:1;	/* enable hashing 4-tuple IPv4 SYNs */
+		u_int syn2tupenipv4:1;	/* enable hashing 2-tuple IPv4 SYNs */
+		u_int ofdmapen:1;	/* Offload Map Enable */
+		u_int tnlmapen:1;	/* Tunnel Map Enable */
+		u_int tnlalllookup:1;	/* Tunnel All Lookup */
+		u_int hashtoeplitz:1;	/* use Toeplitz hash */
+	    } basicvirtual;
+	} u;
+};
+
 struct adapter_params {
+	/* PF-only */
 	struct tp_params  tp;
 	struct vpd_params vpd;
 	struct pci_params pci;
 	struct devlog_params devlog;
+	/* VF-only */
+	struct sge_params sge;
+	struct rss_params rss;
 
 	unsigned int sf_size;             /* serial flash size in bytes */
 	unsigned int sf_nsec;             /* # of flash sectors */
@@ -630,4 +678,25 @@ int t4_sched_params(struct adapter *adapter, int type, int level, int mode,
 		    int rateunit, int ratemode, int channel, int cl,
 		    int minrate, int maxrate, int weight, int pktsize,
 		    int sleep_ok);
+
+static inline int t4vf_query_params(struct adapter *adapter,
+				    unsigned int nparams, const u32 *params,
+				    u32 *vals)
+{
+	return (t4_query_params(adapter, adapter->mbox, 0, 0, nparams, params,
+	    vals));
+}
+
+static inline int t4vf_wr_mbox(struct adapter *adap, const void *cmd,
+			       int size, void *rpl)
+{
+	return t4_wr_mbox(adap, adap->mbox, cmd, size, rpl);
+}
+
+int t4vf_wait_dev_ready(struct adapter *adapter);
+int t4vf_fw_reset(struct adapter *adapter);
+int t4vf_get_sge_params(struct adapter *adapter);
+int t4vf_get_rss_glb_config(struct adapter *adapter);
+int t4vf_prep_adapter(struct adapter *adapter);
+
 #endif /* __CHELSIO_COMMON_H */
