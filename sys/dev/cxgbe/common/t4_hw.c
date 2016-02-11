@@ -283,7 +283,7 @@ int t4_wr_mbox_meat(struct adapter *adap, int mbox, const void *cmd, int size,
 		return -EINVAL;
 
 	if (adap->flags & IS_VF) {
-		data_reg = T4VF_MBDATA_BASE_ADDR;
+		data_reg = VF_MBDATA_BASE;
 		ctl_reg = VF_CIM_REG(A_CIM_VF_EXT_MAILBOX_CTRL);
 	}
 
