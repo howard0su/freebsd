@@ -32,12 +32,6 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#ifndef lint
-#ifndef __GNUC__
-#error "GCC is needed to compile this file"
-#endif
-#endif /* lint */
-
 #include <stdlib.h>
 
 #include "libc_private.h"
@@ -51,6 +45,8 @@ extern int eprol;
 extern int etext;
 #endif
 
+extern long * _end;
+
 void __start(int, char **, char **, void (*)(void));
 
 /* The entry function. */
@@ -59,8 +55,8 @@ __asm("	.text			\n"
 "	.globl	_start		\n"
 "	_start:			\n"
 "	mov	x3, x2		\n" /* cleanup */
-"	ldr	x0, [sp]	\n" /* Load argc */
-"	add	x1, sp, #8	\n" /* load argv */
+"	add	x1, x0, #8	\n" /* load argv */
+"	ldr	x0, [x0]	\n" /* load argc */
 "	add	x2, x1, x0, lsl #3 \n" /* env is after argv */
 "	add	x2, x2, #8	\n" /* argv is null terminated */
 "	b	 __start  ");
@@ -75,8 +71,17 @@ __start(int argc, char *argv[], char *env[], void (*cleanup)(void))
 
 	if (&_DYNAMIC != NULL)
 		atexit(cleanup);
-	else
+	else {
+		/*
+		 * Hack to resolve _end so we read the correct symbol.
+		 * Without this it will resolve to the copy in the library
+		 * that firsts requests it. We should fix the toolchain,
+		 * however this is is needed until this can take place.
+		 */
+		*(volatile long *)&_end;
+
 		_init_tls();
+	}
 
 #ifdef GCRT
 	atexit(_mcleanup);

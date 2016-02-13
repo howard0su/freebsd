@@ -1135,7 +1135,7 @@ generate_pkt (
 	if (pkt_key != NULL) {
 		x_pkt->exten[0] = htonl(key_id);
 		mac_size = 20; /* max room for MAC */
-		mac_size = make_mac((char *)x_pkt, pkt_len, mac_size,
+		mac_size = make_mac(x_pkt, pkt_len, mac_size,
 				    pkt_key, (char *)&x_pkt->exten[1]);
 		if (mac_size > 0)
 			pkt_len += mac_size + 4;
@@ -1161,6 +1161,7 @@ handle_pkt(
 	int		stratum;
 	char *		ref;
 	char *		ts_str;
+	const char *	leaptxt;
 	double		offset;
 	double		precision;
 	double		synch_distance;
@@ -1256,9 +1257,28 @@ handle_pkt(
 			disptxt[0] = '\0';
 		}
 
-		msyslog(LOG_INFO, "%s %+.*f%s %s s%d%s", ts_str,
+		switch (PKT_LEAP(rpkt->li_vn_mode)) {
+		    case LEAP_NOWARNING:
+		    	leaptxt = "no-leap";
+			break;
+		    case LEAP_ADDSECOND:
+		    	leaptxt = "add-leap";
+			break;
+		    case LEAP_DELSECOND:
+		    	leaptxt = "del-leap";
+			break;
+		    case LEAP_NOTINSYNC:
+		    	leaptxt = "unsync";
+			break;
+		    default:
+		    	leaptxt = "LEAP-ERROR";
+			break;
+		}
+
+		msyslog(LOG_INFO, "%s %+.*f%s %s s%d %s%s", ts_str,
 			digits, offset, disptxt,
 			hostnameaddr(hostname, host), stratum,
+			leaptxt,
 			(time_adjusted)
 			    ? " [excess]"
 			    : "");

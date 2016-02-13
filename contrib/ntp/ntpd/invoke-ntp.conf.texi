@@ -6,7 +6,7 @@
 #
 # EDIT THIS FILE WITH CAUTION  (invoke-ntp.conf.texi)
 #
-# It has been AutoGen-ed  February  4, 2015 at 02:41:59 AM by AutoGen 5.18.5pre4
+# It has been AutoGen-ed  January 20, 2016 at 04:17:59 AM by AutoGen 5.18.5
 # From the definitions    ntp.conf.def
 # and the template file   agtexi-file.tpl
 @end ignore
@@ -1837,7 +1837,7 @@ re-associate accordingly.
 Some administrators prefer to avoid running
 @code{ntpd(1ntpdmdoc)}
 continuously and run either
-@code{ntpdate(8)}
+@code{sntp(1sntpmdoc)}
 or
 @code{ntpd(1ntpdmdoc)}
 @code{-q}
@@ -1921,7 +1921,7 @@ peers remaining.
 This value defaults to 1, but can be changed
 to any number from 1 to 15.
 @item @code{minclock} @kbd{minclock}
-The clustering algorithm repeatedly casts out outlyer
+The clustering algorithm repeatedly casts out outlier
 associations until no more than
 @code{minclock}
 associations remain.
@@ -2291,8 +2291,11 @@ This implies that
 must have write permission for the directory the
 drift file is located in, and that file system links, symbolic or
 otherwise, should be avoided.
-@item @code{enable} @code{[@code{auth} | @code{bclient} | @code{calibrate} | @code{kernel} | @code{mode7} | @code{monitor} | @code{ntp} | @code{stats}]}
-@item @code{disable} @code{[@code{auth} | @code{bclient} | @code{calibrate} | @code{kernel} | @code{mode7} | @code{monitor} | @code{ntp} | @code{stats}]}
+@item @code{dscp} @kbd{value}
+This option specifies the Differentiated Services Control Point (DSCP) value,
+a 6-bit code.  The default value is 46, signifying Expedited Forwarding.
+@item @code{enable} @code{[@code{auth} | @code{bclient} | @code{calibrate} | @code{kernel} | @code{mode7} | @code{monitor} | @code{ntp} | @code{stats} | @code{unpeer_crypto_early} | @code{unpeer_crypto_nak_early} | @code{unpeer_digest_early}]}
+@item @code{disable} @code{[@code{auth} | @code{bclient} | @code{calibrate} | @code{kernel} | @code{mode7} | @code{monitor} | @code{ntp} | @code{stats} | @code{unpeer_crypto_early} | @code{unpeer_crypto_nak_early} | @code{unpeer_digest_early}]}
 Provides a way to enable or disable various server options.
 Flags not mentioned are unaffected.
 Note that all of these flags
@@ -2364,6 +2367,67 @@ See the
 section for further information.
 The default for this flag is
 @code{disable}.
+@item @code{unpeer_crypto_early}
+By default, if
+@code{ntpd(1ntpdmdoc)}
+receives an autokey packet that fails TEST9,
+a crypto failure,
+the association is immediately cleared.
+This is almost certainly a feature,
+but if, in spite of the current recommendation of not using autokey,
+you are
+.B still
+using autokey
+.B and
+you are seeing this sort of DoS attack
+disabling this flag will delay
+tearing down the association until the reachability counter
+becomes zero.
+You can check your
+@code{peerstats}
+file for evidence of any of these attacks.
+The
+default for this flag is
+@code{enable}.
+@item @code{unpeer_crypto_nak_early}
+By default, if
+@code{ntpd(1ntpdmdoc)}
+receives a crypto-NAK packet that
+passes the duplicate packet and origin timestamp checks
+the association is immediately cleared.
+While this is generally a feature
+as it allows for quick recovery if a server key has changed,
+a properly forged and appropriately delivered crypto-NAK packet
+can be used in a DoS attack.
+If you have active noticable problems with this type of DoS attack
+then you should consider
+disabling this option.
+You can check your
+@code{peerstats}
+file for evidence of any of these attacks.
+The
+default for this flag is
+@code{enable}.
+@item @code{unpeer_digest_early}
+By default, if
+@code{ntpd(1ntpdmdoc)}
+receives what should be an authenticated packet
+that passes other packet sanity checks but
+contains an invalid digest
+the association is immediately cleared.
+While this is generally a feature
+as it allows for quick recovery,
+if this type of packet is carefully forged and sent
+during an appropriate window it can be used for a DoS attack.
+If you have active noticable problems with this type of DoS attack
+then you should consider
+disabling this option.
+You can check your
+@code{peerstats}
+file for evidence of any of these attacks.
+The
+default for this flag is
+@code{enable}.
 @end table
 @item @code{includefile} @kbd{includefile}
 This command allows additional configuration commands
@@ -2376,6 +2440,19 @@ This option is useful for sites that run
 @code{ntpd(1ntpdmdoc)}
 on multiple hosts, with (mostly) common options (e.g., a
 restriction list).
+@item @code{leapsmearinterval} @kbd{seconds}
+This EXPERIMENTAL option is only available if
+@code{ntpd(1ntpdmdoc)}
+was built with the
+@code{--enable-leap-smear}
+option to the
+@code{configure}
+script.
+It specifies the interval over which a leap second correction will be applied.
+Recommended values for this option are between
+7200 (2 hours) and 86400 (24 hours).
+.Sy DO NOT USE THIS OPTION ON PUBLIC-ACCESS SERVERS!
+See http://bugs.ntp.org/2855 for more information.
 @item @code{logconfig} @kbd{configkeyword}
 This command controls the amount and type of output written to
 the system
@@ -2482,7 +2559,7 @@ holds
 the names of all peer variables and the
 @code{clock_var_list}
 holds the names of the reference clock variables.
-@item @code{tinker} @code{[@code{allan} @kbd{allan} | @code{dispersion} @kbd{dispersion} | @code{freq} @kbd{freq} | @code{huffpuff} @kbd{huffpuff} | @code{panic} @kbd{panic} | @code{step} @kbd{srep} | @code{stepout} @kbd{stepout}]}
+@item @code{tinker} @code{[@code{allan} @kbd{allan} | @code{dispersion} @kbd{dispersion} | @code{freq} @kbd{freq} | @code{huffpuff} @kbd{huffpuff} | @code{panic} @kbd{panic} | @code{step} @kbd{step} | @code{stepback} @kbd{stepback} | @code{stepfwd} @kbd{stepfwd} | @code{stepout} @kbd{stepout}]}
 This command can be used to alter several system variables in
 very exceptional circumstances.
 It should occur in the
@@ -2539,6 +2616,19 @@ adjustments will never occur.
 Note: The kernel time discipline is
 disabled if the step threshold is set to zero or greater than the
 default.
+@item @code{stepback} @kbd{stepback}
+The argument is the step threshold for the backward direction,
+which by default is 0.128 s.
+It can
+be set to any positive number in seconds.
+If both the forward and backward step thresholds are set to zero, step
+adjustments will never occur.
+Note: The kernel time discipline is
+disabled if
+each direction of step threshold are either
+set to zero or greater than .5 second.
+@item @code{stepfwd} @kbd{stepfwd}
+As for stepback, but for the forward direction.
 @item @code{stepout} @kbd{stepout}
 The argument is the stepout timeout, which by default is 900 s.
 It can
@@ -2549,19 +2639,22 @@ pulses will not be suppressed.
 @item @code{rlimit} @code{[@code{memlock} @kbd{Nmegabytes} | @code{stacksize} @kbd{N4kPages} @code{filenum} @kbd{Nfiledescriptors}]}
 @table @asis
 @item @code{memlock} @kbd{Nmegabytes}
-Specify the number of megabytes of memory that can be allocated.
-Probably only available under Linux, this option is useful
+Specify the number of megabytes of memory that should be
+allocated and locked.
+Probably only available under Linux, this option may be useful
 when dropping root (the
 @code{-i}
 option).
-The default is 32 megabytes. Setting this to zero will prevent any attemp to lock memory.
+The default is 32 megabytes on non-Linux machines, and -1 under Linux.
+-1 means "do not lock the process into memory".
+0 means "lock whatever memory the process wants into memory".
 @item @code{stacksize} @kbd{N4kPages}
 Specifies the maximum size of the process stack on systems with the
-@item @code{filenum} @kbd{Nfiledescriptors}
-Specifies the maximum number of file descriptors ntpd may have open at once. Defaults to the system default.
 @code{mlockall()}
 function.
 Defaults to 50 4k pages (200 4k pages in OpenBSD).
+@item @code{filenum} @kbd{Nfiledescriptors}
+Specifies the maximum number of file descriptors ntpd may have open at once. Defaults to the system default.
 @end table
 @item @code{trap} @kbd{host_address} @code{[@code{port} @kbd{port_number}]} @code{[@code{interface} @kbd{interface_address}]}
 This command configures a trap receiver at the given host

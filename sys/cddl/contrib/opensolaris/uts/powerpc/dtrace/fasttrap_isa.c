@@ -43,44 +43,30 @@
 #define OP_RA(x) (((x) & 0x001F0000) >> 16)
 #define OP_RB(x) (((x) & 0x0000F100) >> 11)
 
-
-static int
-proc_ops(int op, proc_t *p, void *kaddr, off_t uaddr, size_t len)
-{
-	struct iovec iov;
-	struct uio uio;
-
-	iov.iov_base = kaddr;
-	iov.iov_len = len;
-	uio.uio_offset = uaddr;
-	uio.uio_iov = &iov;
-	uio.uio_resid = len;
-	uio.uio_iovcnt = 1;
-	uio.uio_segflg = UIO_SYSSPACE;
-	uio.uio_td = curthread;
-	uio.uio_rw = op;
-	PHOLD(p);
-	if (proc_rwmem(p, &uio) != 0) {
-		PRELE(p);
-		return (-1);
-	}
-	PRELE(p);
-
-	return (0);
-}
-
 static int
 uread(proc_t *p, void *kaddr, size_t len, uintptr_t uaddr)
 {
+	ssize_t n;
 
-	return (proc_ops(UIO_READ, p, kaddr, uaddr, len));
+	PHOLD(p);
+	n = proc_readmem(curthread, p, uaddr, kaddr, len);
+	PRELE(p);
+	if (n <= 0 || n < len)
+		return (ENOMEM);
+	return (0);
 }
 
 static int
 uwrite(proc_t *p, void *kaddr, size_t len, uintptr_t uaddr)
 {
+	ssize_t n;
 
-	return (proc_ops(UIO_WRITE, p, kaddr, uaddr, len));
+	PHOLD(p);
+	n = proc_writemem(curthread, p, uaddr, kaddr, len);
+	PRELE(p);
+	if (n <= 0 || n < len)
+		return (ENOMEM);
+	return (0);
 }
 
 int
@@ -244,8 +230,8 @@ fasttrap_anarg(struct reg *rp, int argno)
 		DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT | CPU_DTRACE_BADADDR);
 	} else {
 		DTRACE_CPUFLAG_SET(CPU_DTRACE_NOFAULT);
-		value = dtrace_fuword64((void *)(rp->fixreg[1] + 16 +
-		    ((argno - 8) * sizeof(uint32_t))));
+		value = dtrace_fuword64((void *)(rp->fixreg[1] + 48 +
+		    ((argno - 8) * sizeof(uint64_t))));
 		DTRACE_CPUFLAG_CLEAR(CPU_DTRACE_NOFAULT | CPU_DTRACE_BADADDR);
 	}
 	return value;
@@ -289,7 +275,7 @@ fasttrap_usdt_args(fasttrap_probe_t *probe, struct reg *rp, int argc,
 				argv[i] = fuword32((void *)(rp->fixreg[1] + 8 +
 				    (x * sizeof(uint32_t))));
 			else
-				argv[i] = fuword32((void *)(rp->fixreg[1] + 16 +
+				argv[i] = fuword64((void *)(rp->fixreg[1] + 48 +
 				    (x * sizeof(uint64_t))));
 	}
 

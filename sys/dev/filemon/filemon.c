@@ -1,6 +1,7 @@
 /*-
  * Copyright (c) 2011, David E. O'Brien.
  * Copyright (c) 2009-2011, Juniper Networks, Inc.
+ * Copyright (c) 2015, EMC Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,12 +40,13 @@ __FBSDID("$FreeBSD$");
 #include <sys/fcntl.h>
 #include <sys/ioccom.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
-#include <sys/mutex.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
+#include <sys/sx.h>
 #include <sys/syscall.h>
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
@@ -85,13 +87,9 @@ MALLOC_DEFINE(M_FILEMON, "filemon", "File access monitor");
 
 struct filemon {
 	TAILQ_ENTRY(filemon) link;	/* Link into the in-use list. */
-	struct mtx	mtx;		/* Lock mutex for this filemon. */
-	struct cv	cv;		/* Lock condition variable for this
-					   filemon. */
+	struct sx	lock;		/* Lock mutex for this filemon. */
 	struct file	*fp;		/* Output file pointer. */
-	struct thread	*locker;	/* Ptr to the thread locking this
-					   filemon. */
-	pid_t		pid;		/* The process ID being monitored. */
+	struct proc     *p;		/* The process being monitored. */
 	char		fname1[MAXPATHLEN]; /* Temporary filename buffer. */
 	char		fname2[MAXPATHLEN]; /* Temporary filename buffer. */
 	char		msgbufr[1024];	/* Output message buffer. */
@@ -99,11 +97,7 @@ struct filemon {
 
 static TAILQ_HEAD(, filemon) filemons_inuse = TAILQ_HEAD_INITIALIZER(filemons_inuse);
 static TAILQ_HEAD(, filemon) filemons_free = TAILQ_HEAD_INITIALIZER(filemons_free);
-static int n_readers = 0;
-static struct mtx access_mtx;
-static struct cv access_cv;
-static struct thread *access_owner = NULL;
-static struct thread *access_requester = NULL;
+static struct sx access_lock;
 
 static struct cdev *filemon_dev;
 
@@ -111,26 +105,45 @@ static struct cdev *filemon_dev;
 #include "filemon_wrapper.c"
 
 static void
+filemon_comment(struct filemon *filemon)
+{
+	int len;
+	struct timeval now;
+
+	getmicrotime(&now);
+
+	len = snprintf(filemon->msgbufr, sizeof(filemon->msgbufr),
+	    "# filemon version %d\n# Target pid %d\n# Start %ju.%06ju\nV %d\n",
+	    FILEMON_VERSION, curproc->p_pid, (uintmax_t)now.tv_sec,
+	    (uintmax_t)now.tv_usec, FILEMON_VERSION);
+
+	filemon_output(filemon, filemon->msgbufr, len);
+}
+
+static void
 filemon_dtr(void *data)
 {
 	struct filemon *filemon = data;
 
 	if (filemon != NULL) {
-		struct file *fp = filemon->fp;
+		struct file *fp;
 
-		/* Get exclusive write access. */
+		/* Follow same locking order as filemon_pid_check. */
 		filemon_lock_write();
+		filemon_filemon_lock(filemon);
 
 		/* Remove from the in-use list. */
 		TAILQ_REMOVE(&filemons_inuse, filemon, link);
 
+		fp = filemon->fp;
 		filemon->fp = NULL;
-		filemon->pid = -1;
+		filemon->p = NULL;
 
 		/* Add to the free list. */
 		TAILQ_INSERT_TAIL(&filemons_free, filemon, link);
 
 		/* Give up write access. */
+		filemon_filemon_unlock(filemon);
 		filemon_unlock_write();
 
 		if (fp != NULL)
@@ -149,11 +162,17 @@ filemon_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag __unused,
 	cap_rights_t rights;
 #endif
 
-	devfs_get_cdevpriv((void **) &filemon);
+	if ((error = devfs_get_cdevpriv((void **) &filemon)) != 0)
+		return (error);
+
+	filemon_filemon_lock(filemon);
 
 	switch (cmd) {
 	/* Set the output file descriptor. */
 	case FILEMON_SET_FD:
+		if (filemon->fp != NULL)
+			fdrop(filemon->fp, td);
+
 		error = fget_write(td, *(int *)data,
 #if __FreeBSD_version >= 900041
 		    cap_rights_init(&rights, CAP_PWRITE),
@@ -169,7 +188,7 @@ filemon_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag __unused,
 		error = pget(*((pid_t *)data), PGET_CANDEBUG | PGET_NOTWEXIT,
 		    &p);
 		if (error == 0) {
-			filemon->pid = p->p_pid;
+			filemon->p = p;
 			PROC_UNLOCK(p);
 		}
 		break;
@@ -179,6 +198,7 @@ filemon_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int flag __unused,
 		break;
 	}
 
+	filemon_filemon_unlock(filemon);
 	return (error);
 }
 
@@ -200,14 +220,8 @@ filemon_open(struct cdev *dev, int oflags __unused, int devtype __unused,
 	if (filemon == NULL) {
 		filemon = malloc(sizeof(struct filemon), M_FILEMON,
 		    M_WAITOK | M_ZERO);
-
-		filemon->fp = NULL;
-
-		mtx_init(&filemon->mtx, "filemon", "filemon", MTX_DEF);
-		cv_init(&filemon->cv, "filemon");
+		sx_init(&filemon->lock, "filemon");
 	}
-
-	filemon->pid = curproc->p_pid;
 
 	devfs_set_cdevpriv(filemon, filemon_dtr);
 
@@ -234,8 +248,7 @@ filemon_close(struct cdev *dev __unused, int flag __unused, int fmt __unused,
 static void
 filemon_load(void *dummy __unused)
 {
-	mtx_init(&access_mtx, "filemon", "filemon", MTX_DEF);
-	cv_init(&access_cv, "filemon");
+	sx_init(&access_lock, "filemons_inuse");
 
 	/* Install the syscall wrappers. */
 	filemon_wrapper_install();
@@ -270,14 +283,12 @@ filemon_unload(void)
 		filemon_lock_write();
 		while ((filemon = TAILQ_FIRST(&filemons_free)) != NULL) {
 			TAILQ_REMOVE(&filemons_free, filemon, link);
-			mtx_destroy(&filemon->mtx);
-			cv_destroy(&filemon->cv);
+			sx_destroy(&filemon->lock);
 			free(filemon, M_FILEMON);
 		}
 		filemon_unlock_write();
 
-		mtx_destroy(&access_mtx);
-		cv_destroy(&access_cv);
+		sx_destroy(&access_lock);
 	}
 
 	return (error);

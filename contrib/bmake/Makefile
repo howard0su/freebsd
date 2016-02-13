@@ -1,7 +1,7 @@
-#	$Id: Makefile,v 1.36 2015/04/18 19:58:53 sjg Exp $
+#	$Id: Makefile,v 1.49 2015/12/20 22:54:40 sjg Exp $
 
 # Base version on src date
-MAKE_VERSION= 20150418
+MAKE_VERSION= 20151220
 
 PROG=	bmake
 
@@ -18,6 +18,7 @@ SRCS= \
 	make.c \
 	make_malloc.c \
 	meta.c \
+	metachar.c \
 	parse.c \
 	str.c \
 	strlist.c \
@@ -94,7 +95,7 @@ SUBDIR+= unit-tests
 # we skip a lot of this when building as part of FreeBSD etc.
 
 # list of OS's which are derrived from BSD4.4
-BSD44_LIST= NetBSD FreeBSD OpenBSD DragonFly
+BSD44_LIST= NetBSD FreeBSD OpenBSD DragonFly MirBSD Bitrig
 # we are...
 OS!= uname -s
 # are we 4.4BSD ?

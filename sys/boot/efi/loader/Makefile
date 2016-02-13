@@ -4,15 +4,12 @@ MAN=
 
 .include <src.opts.mk>
 
-# In-tree GCC does not support __attribute__((ms_abi)).
-.if ${COMPILER_TYPE} != "gcc"
-
 MK_SSP=		no
 
 PROG=		loader.sym
 INTERNALPROG=
+WARNS?=		3
 
-.PATH: ${.CURDIR}/../../efi/loader
 # architecture-specific loader code
 SRCS=	autoload.c \
 	bootinfo.c \
@@ -20,9 +17,19 @@ SRCS=	autoload.c \
 	copy.c \
 	devicename.c \
 	main.c \
-	reloc.c \
+	self_reloc.c \
 	smbios.c \
 	vers.c
+
+.if ${MK_ZFS} != "no"
+SRCS+=		zfs.c
+.PATH:		${.CURDIR}/../../zfs
+
+# Disable warnings that are currently incompatible with the zfs boot code
+CWARNFLAGS.zfs.c+=	-Wno-sign-compare
+CWARNFLAGS.zfs.c+=	-Wno-array-bounds
+CWARNFLAGS.zfs.c+=	-Wno-missing-prototypes
+.endif
 
 .PATH: ${.CURDIR}/arch/${MACHINE}
 # For smbios.c
@@ -36,7 +43,18 @@ CFLAGS+=	-I${.CURDIR}/../include/${MACHINE}
 CFLAGS+=	-I${.CURDIR}/../../../contrib/dev/acpica/include
 CFLAGS+=	-I${.CURDIR}/../../..
 CFLAGS+=	-I${.CURDIR}/../../i386/libi386
+.if ${MK_ZFS} != "no"
+CFLAGS+=	-I${.CURDIR}/../../zfs
+CFLAGS+=	-I${.CURDIR}/../../../cddl/boot/zfs
+CFLAGS+=	-DEFI_ZFS_BOOT
+.endif
 CFLAGS+=	-DNO_PCI -DEFI
+
+# make buildenv doesn't set DESTDIR, this means LIBSTAND
+# will be wrong when crossbuilding.
+.if exists(${.OBJDIR}/../../../../lib/libstand/libstand.a)
+LIBSTAND=	${.OBJDIR}/../../../../lib/libstand/libstand.a
+.endif
 
 .if ${MK_FORTH} != "no"
 BOOT_FORTH=	yes
@@ -62,18 +80,18 @@ HAVE_BCACHE=    yes
 CFLAGS+=	-DEFI_STAGING_SIZE=${EFI_STAGING_SIZE}
 .endif
 
-# Always add MI sources 
+# Always add MI sources
 .PATH:		${.CURDIR}/../../common
 .include	"${.CURDIR}/../../common/Makefile.inc"
 CFLAGS+=	-I${.CURDIR}/../../common
 
-FILES=	loader.efi
+FILES+=	loader.efi
 FILESMODE_loader.efi=	${BINMODE}
 
 LDSCRIPT=	${.CURDIR}/arch/${MACHINE}/ldscript.${MACHINE}
 LDFLAGS+=	-Wl,-T${LDSCRIPT} -Wl,-Bsymbolic -shared
 
-CLEANFILES=	vers.c loader.efi
+CLEANFILES+=	vers.c loader.efi
 
 NEWVERSWHAT=	"EFI loader" ${MACHINE}
 
@@ -91,7 +109,7 @@ EFI_TARGET=	efi-app-ia32
 EFI_TARGET=	binary
 .endif
 
-loader.efi: loader.sym
+loader.efi: ${PROG}
 	if [ `${OBJDUMP} -t ${.ALLSRC} | fgrep '*UND*' | wc -l` != 0 ]; then \
 		${OBJDUMP} -t ${.ALLSRC} | fgrep '*UND*'; \
 		exit 1; \
@@ -106,8 +124,6 @@ LIBEFI=		${.OBJDIR}/../libefi/libefi.a
 DPADD=		${LIBFICL} ${LIBEFI} ${LIBFDT} ${LIBEFI_FDT} ${LIBSTAND} \
 		${LDSCRIPT}
 LDADD=		${LIBFICL} ${LIBEFI} ${LIBFDT} ${LIBEFI_FDT} ${LIBSTAND}
-
-.endif # ${COMPILER_TYPE} != "gcc"
 
 .include <bsd.prog.mk>
 

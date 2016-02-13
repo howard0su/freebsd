@@ -28,6 +28,7 @@
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
+#include <sys/param.h>
 
 #include <stand.h>
 
@@ -43,6 +44,9 @@ __FBSDID("$FreeBSD$");
 struct uboot_devdesc currdev;
 struct arch_switch archsw;		/* MI/MD interface boundary */
 int devs_no;
+
+uintptr_t uboot_heap_start;
+uintptr_t uboot_heap_end;
 
 struct device_type { 
 	const char *name;
@@ -311,7 +315,7 @@ print_disk_probe_info()
 	else
 		strcpy(slice, "<auto>");
 
-	if (currdev.d_disk.partition > 0)
+	if (currdev.d_disk.partition >= 0)
 		sprintf(partition, "%d", currdev.d_disk.partition);
 	else
 		strcpy(partition, "<auto>");
@@ -378,7 +382,7 @@ probe_disks(int devidx, int load_type, int load_unit, int load_slice,
 		printf("\n");
 	}
 
-	printf("  Requested disk type/unit not found\n");
+	printf("  Requested disk type/unit/slice/partition not found\n");
 	return (-1);
 }
 
@@ -388,7 +392,7 @@ main(void)
 	struct api_signature *sig = NULL;
 	int load_type, load_unit, load_slice, load_partition;
 	int i;
-	const char * loaderdev;
+	const char *ldev;
 
 	/*
 	 * If we can't find the magic signature and related info, exit with a
@@ -414,7 +418,9 @@ main(void)
 	 * Initialise the heap as early as possible.  Once this is done,
 	 * alloc() is usable. The stack is buried inside us, so this is safe.
 	 */
-	setheap((void *)end, (void *)(end + 512 * 1024));
+	uboot_heap_start = round_page((uintptr_t)end);
+	uboot_heap_end   = uboot_heap_start + 512 * 1024;
+	setheap((void *)uboot_heap_start, (void *)uboot_heap_end);
 
 	/*
 	 * Set up console.
@@ -479,14 +485,15 @@ main(void)
 		return (0xbadef1ce);
 	}
 
-	env_setenv("currdev", EV_VOLATILE, uboot_fmtdev(&currdev),
-	    uboot_setcurrdev, env_nounset);
-	env_setenv("loaddev", EV_VOLATILE, uboot_fmtdev(&currdev),
-	    env_noset, env_nounset);
+	ldev = uboot_fmtdev(&currdev);
+	env_setenv("currdev", EV_VOLATILE, ldev, uboot_setcurrdev, env_nounset);
+	env_setenv("loaddev", EV_VOLATILE, ldev, env_noset, env_nounset);
+	printf("Booting from %s\n", ldev);
 
 	setenv("LINES", "24", 1);		/* optional */
 	setenv("prompt", "loader>", 1);
 
+	archsw.arch_loadaddr = uboot_loadaddr;
 	archsw.arch_getdev = uboot_getdev;
 	archsw.arch_copyin = uboot_copyin;
 	archsw.arch_copyout = uboot_copyout;
@@ -566,17 +573,47 @@ enum ubenv_action {
 static void
 handle_uboot_env_var(enum ubenv_action action, const char * var)
 {
-	const char * val;
-	char ubv[128];
+	char ldvar[128];
+	const char *val;
+	char *wrk;
+	int len;
+
+	/*
+	 * On an import with the variable name formatted as ldname=ubname,
+	 * import the uboot variable ubname into the loader variable ldname,
+	 * otherwise the historical behavior is to import to uboot.ubname.
+	 */
+	if (action == UBENV_IMPORT) { 
+		len = strcspn(var, "=");
+		if (len == 0) {
+			printf("name cannot start with '=': '%s'\n", var);
+			return;
+		}
+		if (var[len] == 0) {
+			strcpy(ldvar, "uboot.");
+			strncat(ldvar, var, sizeof(ldvar) - 7);
+		} else {
+			len = MIN(len, sizeof(ldvar) - 1);
+			strncpy(ldvar, var, len);
+			ldvar[len] = 0;
+			var = &var[len + 1];
+		}
+	}
 
 	/*
 	 * If the user prepended "uboot." (which is how they usually see these
 	 * names) strip it off as a convenience.
 	 */
 	if (strncmp(var, "uboot.", 6) == 0) {
-		snprintf(ubv, sizeof(ubv), "%s", &var[6]);
-		var = ubv;
+		var = &var[6];
 	}
+
+	/* If there is no variable name left, punt. */
+	if (var[0] == 0) {
+		printf("empty variable name\n");
+		return;
+	}
+
 	val = ub_env_get(var);
 	if (action == UBENV_SHOW) {
 		if (val == NULL)
@@ -585,8 +622,7 @@ handle_uboot_env_var(enum ubenv_action action, const char * var)
 			printf("uboot.%s=%s\n", var, val);
 	} else if (action == UBENV_IMPORT) {
 		if (val != NULL) {
-			snprintf(ubv, sizeof(ubv), "uboot.%s", var);
-			setenv(ubv, val, 1);
+			setenv(ldvar, val, 1);
 		}
 	}
 }

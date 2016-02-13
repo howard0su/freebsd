@@ -45,11 +45,15 @@ struct pcb {
 	/* Fault handler, the error value is passed in x0 */
 	vm_offset_t	pcb_onfault;
 
+	u_int		pcb_flags;
+#define	PCB_SINGLE_STEP_SHIFT	0
+#define	PCB_SINGLE_STEP		(1 << PCB_SINGLE_STEP_SHIFT)
+
 	/* Place last to simplify the asm to access the rest if the struct */
 	__uint128_t	pcb_vfp[32];
 	uint32_t	pcb_fpcr;
 	uint32_t	pcb_fpsr;
-	u_int		pcb_fpflags;
+	int		pcb_fpflags;
 #define	PCB_FP_STARTED	0x01
 	u_int		pcb_vfpcpu;	/* Last cpu this thread ran VFP code */
 };

@@ -32,7 +32,7 @@
 .\"	from: @(#)sh.1	8.6 (Berkeley) 5/4/95
 .\" $FreeBSD$
 .\"
-.Dd April 18, 2015
+.Dd January 30, 2016
 .Dt SH 1
 .Os
 .Sh NAME
@@ -343,6 +343,11 @@ Write each command
 variable subjected to parameter expansion and arithmetic expansion)
 to standard error before it is executed.
 Useful for debugging.
+.It nolog
+Another do-nothing option for
+.Tn POSIX
+compliance.
+It only has a long name.
 .El
 .Pp
 The
@@ -1173,7 +1178,9 @@ The only special parameter that can be made local is
 .Ql - .
 Making
 .Ql -
-local causes any shell options that are
+local causes any shell options
+(including those that only have long names)
+that are
 changed via the
 .Ic set
 command inside the function to be
@@ -1945,13 +1952,20 @@ Execute the specified built-in command,
 This is useful when the user wishes to override a shell function
 with the same name as a built-in command.
 .It Ic cd Oo Fl L | P Oc Oo Fl e Oc Op Ar directory
+.It Ic cd Fl
 Switch to the specified
 .Ar directory ,
-or to the directory specified in the
+to the directory specified in the
 .Va HOME
 environment variable if no
 .Ar directory
-is specified.
+is specified or
+to the directory specified in the
+.Va OLDPWD
+environment variable if
+.Ar directory
+is
+.Fl .
 If
 .Ar directory
 does not begin with
@@ -1975,10 +1989,12 @@ the
 .Ic cd
 command will print out the name of the directory
 that it actually switched to
-if this is different from the name that the user gave.
-These may be different either because the
+if the
 .Va CDPATH
-mechanism was used or because a symbolic link was crossed.
+mechanism was used or if
+.Ar directory
+was
+.Fl .
 .Pp
 If the
 .Fl P
@@ -2767,6 +2783,10 @@ Initialization file for interactive shells.
 Locale settings.
 These are inherited by children of the shell,
 and is used in a limited manner by the shell itself.
+.It Ev OLDPWD
+The previous current directory.
+This is used and updated by
+.Ic cd .
 .It Ev PWD
 An absolute pathname for the current directory,
 possibly containing symbolic links.
@@ -2846,6 +2866,4 @@ The
 utility does not recognize multibyte characters other than UTF-8.
 Splitting using
 .Va IFS
-and the line editing library
-.Xr editline 3
-do not recognize multibyte characters.
+does not recognize multibyte characters.

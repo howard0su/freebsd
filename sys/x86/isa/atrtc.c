@@ -241,7 +241,7 @@ static int
 atrtc_attach(device_t dev)
 {
 	struct atrtc_softc *sc;
-	u_long s;
+	rman_res_t s;
 	int i;
 
 	sc = device_get_softc(dev);
@@ -354,7 +354,7 @@ atrtc_gettime(device_t dev, struct timespec *ts)
 #ifdef USE_RTC_CENTURY
 	ct.year += readrtc(RTC_CENTURY) * 100;
 #else
-	ct.year += 2000;
+	ct.year += (ct.year < 80 ? 2000 : 1900);
 #endif
 	critical_exit();
 	/* Set dow = -1 because some clocks don't set it correctly. */

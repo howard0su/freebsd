@@ -2,6 +2,7 @@
  * Copyright (c) 2006,2007
  *	Damien Bergamini <damien.bergamini@free.fr>
  *	Benjamin Close <Benjamin.Close@clearchain.com>
+ * Copyright (c) 2015 Andriy Voskoboinyk <avos@FreeBSD.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -43,6 +44,7 @@ enum {
 	WPI_DEBUG_KEY		= 0x00020000,	/* node key management */
 	WPI_DEBUG_EDCA		= 0x00040000,	/* WME info */
 	WPI_DEBUG_REGISTER	= 0x00080000,	/* print chipset register */
+	WPI_DEBUG_BMISS		= 0x00100000,	/* print number of missed beacons */
 	WPI_DEBUG_ANY		= 0xffffffff
 };
 
@@ -85,12 +87,12 @@ static const char *wpi_cmd_str(int cmd)
 		WPI_DESC(WPI_CMD_SET_LED);
 		WPI_DESC(WPI_CMD_SET_POWER_MODE);
 		WPI_DESC(WPI_CMD_SCAN);
+		WPI_DESC(WPI_CMD_SCAN_ABORT);
 		WPI_DESC(WPI_CMD_SET_BEACON);
 		WPI_DESC(WPI_CMD_TXPOWER);
 		WPI_DESC(WPI_CMD_BT_COEX);
 
 	default:
-		KASSERT(1, ("Unknown Command: %d\n", cmd));
 		return "UNKNOWN CMD";
 	}
 }
@@ -98,7 +100,7 @@ static const char *wpi_cmd_str(int cmd)
 /*
  * Translate CSR code to string
  */
-static const char *wpi_get_csr_string(int csr)
+static const char *wpi_get_csr_string(size_t csr)
 {
 	switch (csr) {
 		WPI_DESC(WPI_HW_IF_CONFIG);
@@ -117,12 +119,12 @@ static const char *wpi_get_csr_string(int csr)
 		WPI_DESC(WPI_ANA_PLL);
 		WPI_DESC(WPI_DBG_HPET_MEM);
 	default:
-		KASSERT(1, ("Unknown CSR: %d\n", csr));
+		KASSERT(0, ("Unknown CSR: %d\n", csr));
 		return "UNKNOWN CSR";
 	}
 }
 
-static const char *wpi_get_prph_string(int prph)
+static const char *wpi_get_prph_string(size_t prph)
 {
 	switch (prph) {
 		WPI_DESC(WPI_APMG_CLK_CTRL);
@@ -130,7 +132,7 @@ static const char *wpi_get_prph_string(int prph)
 		WPI_DESC(WPI_APMG_PCI_STT);
 		WPI_DESC(WPI_APMG_RFKILL);
 	default:
-		KASSERT(1, ("Unknown register: %d\n", prph));
+		KASSERT(0, ("Unknown register: %d\n", prph));
 		return "UNKNOWN PRPH";
 	}
 }

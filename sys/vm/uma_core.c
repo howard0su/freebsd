@@ -78,6 +78,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/sbuf.h>
 #include <sys/sched.h>
 #include <sys/smp.h>
+#include <sys/taskqueue.h>
 #include <sys/vmmeter.h>
 
 #include <vm/vm.h>
@@ -275,6 +276,11 @@ void uma_print_stats(void);
 static int sysctl_vm_zone_count(SYSCTL_HANDLER_ARGS);
 static int sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS);
 
+#ifdef INVARIANTS
+static void uma_dbg_free(uma_zone_t zone, uma_slab_t slab, void *item);
+static void uma_dbg_alloc(uma_zone_t zone, uma_slab_t slab, void *item);
+#endif
+
 SYSINIT(uma_startup3, SI_SUB_VM_CONF, SI_ORDER_SECOND, uma_startup3, NULL);
 
 SYSCTL_PROC(_vm, OID_AUTO, zone_count, CTLFLAG_RD|CTLTYPE_INT,
@@ -429,6 +435,14 @@ zone_log_warning(uma_zone_t zone)
 
 	if (ratecheck(&zone->uz_ratecheck, &warninterval))
 		printf("[zone: %s] %s\n", zone->uz_name, zone->uz_warning);
+}
+
+static inline void
+zone_maxaction(uma_zone_t zone)
+{
+
+	if (zone->uz_maxaction.ta_func != NULL)
+		taskqueue_enqueue(taskqueue_thread, &zone->uz_maxaction);
 }
 
 static void
@@ -1153,7 +1167,7 @@ noobj_alloc(uma_zone_t zone, vm_size_t bytes, uint8_t *flags, int wait)
 		 * exit.
 		 */
 		TAILQ_FOREACH_SAFE(p, &alloctail, listq, p_next) {
-			vm_page_unwire(p, PQ_INACTIVE);
+			vm_page_unwire(p, PQ_NONE);
 			vm_page_free(p); 
 		}
 		return (NULL);
@@ -1891,7 +1905,7 @@ uma_startup3(void)
 #ifdef UMA_DEBUG
 	printf("Starting callout.\n");
 #endif
-	callout_init(&uma_callout, CALLOUT_MPSAFE);
+	callout_init(&uma_callout, 1);
 	callout_reset(&uma_callout, UMA_TIMEOUT * hz, uma_timeout, NULL);
 #ifdef UMA_DEBUG
 	printf("UMA startup3 complete.\n");
@@ -1940,6 +1954,20 @@ uma_zcreate(const char *name, size_t size, uma_ctor ctor, uma_dtor dtor,
 	args.dtor = dtor;
 	args.uminit = uminit;
 	args.fini = fini;
+#ifdef  INVARIANTS
+	/*
+	 * If a zone is being created with an empty constructor and
+	 * destructor, pass UMA constructor/destructor which checks for
+	 * memory use after free.
+	 */
+	if ((!(flags & (UMA_ZONE_ZINIT | UMA_ZONE_NOFREE))) &&
+	    ctor == NULL && dtor == NULL && uminit == NULL && fini == NULL) {
+		args.ctor = trash_ctor;
+		args.dtor = trash_dtor;
+		args.uminit = trash_init;
+		args.fini = trash_fini;
+	}
+#endif
 	args.align = align;
 	args.flags = flags;
 	args.keg = NULL;
@@ -2121,11 +2149,8 @@ uma_zalloc_arg(uma_zone_t zone, void *udata, int flags)
 	int lockfail;
 	int cpu;
 
-#if 0
-	/* XXX: FIX!! Do not enable this in CURRENT!! MarkM */
-	/* The entropy here is desirable, but the harvesting is expensive */
-	random_harvest(&(zone->uz_name), sizeof(void *), 1, RANDOM_UMA_ALLOC);
-#endif
+	/* Enable entropy collection for RANDOM_ENABLE_UMA kernel option */
+	random_harvest_fast_uma(&zone, sizeof(zone), 1, RANDOM_UMA);
 
 	/* This is the fast path allocation */
 #ifdef UMA_DEBUG_ALLOC_1
@@ -2138,6 +2163,9 @@ uma_zalloc_arg(uma_zone_t zone, void *udata, int flags)
 		WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
 		    "uma_zalloc_arg: zone \"%s\"", zone->uz_name);
 	}
+	KASSERT(curthread->td_critnest == 0 || SCHEDULER_STOPPED(),
+	    ("uma_zalloc_arg: called with spinlock or critical section held"));
+
 #ifdef DEBUG_MEMGUARD
 	if (memguard_cmp_zone(zone)) {
 		item = memguard_alloc(zone->uz_size, flags);
@@ -2157,11 +2185,6 @@ uma_zalloc_arg(uma_zone_t zone, void *udata, int flags)
 			    	zone->uz_fini(item, zone->uz_size);
 				return (NULL);
 			}
-#if 0
-			/* XXX: FIX!! Do not enable this in CURRENT!! MarkM */
-			/* The entropy here is desirable, but the harvesting is expensive */
-			random_harvest(&item, sizeof(void *), 1, RANDOM_UMA_ALLOC);
-#endif
 			return (item);
 		}
 		/* This is unfortunate but should not be fatal. */
@@ -2204,11 +2227,6 @@ zalloc_start:
 #endif
 		if (flags & M_ZERO)
 			uma_zero_item(item, zone);
-#if 0
-		/* XXX: FIX!! Do not enable this in CURRENT!! MarkM */
-		/* The entropy here is desirable, but the harvesting is expensive */
-		random_harvest(&item, sizeof(void *), 1, RANDOM_UMA_ALLOC);
-#endif
 		return (item);
 	}
 
@@ -2329,11 +2347,6 @@ zalloc_start:
 zalloc_item:
 	item = zone_alloc_item(zone, udata, flags);
 
-#if 0
-	/* XXX: FIX!! Do not enable this in CURRENT!! MarkM */
-	/* The entropy here is desirable, but the harvesting is expensive */
-	random_harvest(&item, sizeof(void *), 1, RANDOM_UMA_ALLOC);
-#endif
 	return (item);
 }
 
@@ -2383,6 +2396,7 @@ keg_fetch_slab(uma_keg_t keg, uma_zone_t zone, int flags)
 			if ((zone->uz_flags & UMA_ZFLAG_MULTI) == 0) {
 				zone->uz_flags |= UMA_ZFLAG_FULL;
 				zone_log_warning(zone);
+				zone_maxaction(zone);
 			}
 			if (flags & M_NOWAIT)
 				break;
@@ -2502,6 +2516,7 @@ zone_fetch_slab_multi(uma_zone_t zone, uma_keg_t last, int rflags)
 			zone->uz_flags |= UMA_ZFLAG_FULL;
 			zone->uz_sleeps++;
 			zone_log_warning(zone);
+			zone_maxaction(zone);
 			msleep(zone, zone->uz_lockptr, PVM,
 			    "zonelimit", hz/100);
 			zone->uz_flags &= ~UMA_ZFLAG_FULL;
@@ -2681,24 +2696,17 @@ uma_zfree_arg(uma_zone_t zone, void *item, void *udata)
 	int lockfail;
 	int cpu;
 
-#if 0
-	/* XXX: FIX!! Do not enable this in CURRENT!! MarkM */
-	/* The entropy here is desirable, but the harvesting is expensive */
-	struct entropy {
-		const void *uz_name;
-		const void *item;
-	} entropy;
-
-	entropy.uz_name = zone->uz_name;
-	entropy.item = item;
-	random_harvest(&entropy, sizeof(struct entropy), 2, RANDOM_UMA_ALLOC);
-#endif
+	/* Enable entropy collection for RANDOM_ENABLE_UMA kernel option */
+	random_harvest_fast_uma(&zone, sizeof(zone), 1, RANDOM_UMA);
 
 #ifdef UMA_DEBUG_ALLOC_1
 	printf("Freeing item %p to %s(%p)\n", item, zone->uz_name, zone);
 #endif
 	CTR2(KTR_UMA, "uma_zfree_arg thread %x zone %s", curthread,
 	    zone->uz_name);
+
+	KASSERT(curthread->td_critnest == 0 || SCHEDULER_STOPPED(),
+	    ("uma_zfree_arg: called with spinlock or critical section held"));
 
         /* uma_zfree(..., NULL) does nothing, to match free(9). */
         if (item == NULL)
@@ -3015,6 +3023,16 @@ uma_zone_set_warning(uma_zone_t zone, const char *warning)
 }
 
 /* See uma.h */
+void
+uma_zone_set_maxaction(uma_zone_t zone, uma_maxaction_t maxaction)
+{
+
+	ZONE_LOCK(zone);
+	TASK_INIT(&zone->uz_maxaction, 0, (task_fn_t *)maxaction, zone);
+	ZONE_UNLOCK(zone);
+}
+
+/* See uma.h */
 int
 uma_zone_get_cur(uma_zone_t zone)
 {
@@ -3140,7 +3158,7 @@ uma_zone_reserve_kva(uma_zone_t zone, int count)
 {
 	uma_keg_t keg;
 	vm_offset_t kva;
-	int pages;
+	u_int pages;
 
 	keg = zone_first_keg(zone);
 	if (keg == NULL)
@@ -3155,7 +3173,7 @@ uma_zone_reserve_kva(uma_zone_t zone, int count)
 #else
 	if (1) {
 #endif
-		kva = kva_alloc(pages * UMA_SLAB_SIZE);
+		kva = kva_alloc((vm_size_t)pages * UMA_SLAB_SIZE);
 		if (kva == 0)
 			return (0);
 	} else
@@ -3222,16 +3240,17 @@ uma_find_refcnt(uma_zone_t zone, void *item)
 }
 
 /* See uma.h */
-void
-uma_reclaim(void)
+static void
+uma_reclaim_locked(bool kmem_danger)
 {
+
 #ifdef UMA_DEBUG
 	printf("UMA: vm asked us to release pages!\n");
 #endif
-	sx_xlock(&uma_drain_lock);
+	sx_assert(&uma_drain_lock, SA_XLOCKED);
 	bucket_enable();
 	zone_foreach(zone_drain);
-	if (vm_page_count_min()) {
+	if (vm_page_count_min() || kmem_danger) {
 		cache_drain_safe(NULL);
 		zone_foreach(zone_drain);
 	}
@@ -3243,7 +3262,40 @@ uma_reclaim(void)
 	zone_drain(slabzone);
 	zone_drain(slabrefzone);
 	bucket_zone_drain();
+}
+
+void
+uma_reclaim(void)
+{
+
+	sx_xlock(&uma_drain_lock);
+	uma_reclaim_locked(false);
 	sx_xunlock(&uma_drain_lock);
+}
+
+static int uma_reclaim_needed;
+
+void
+uma_reclaim_wakeup(void)
+{
+
+	uma_reclaim_needed = 1;
+	wakeup(&uma_reclaim_needed);
+}
+
+void
+uma_reclaim_worker(void *arg __unused)
+{
+
+	sx_xlock(&uma_drain_lock);
+	for (;;) {
+		sx_sleep(&uma_reclaim_needed, &uma_drain_lock, PVM,
+		    "umarcl", 0);
+		if (uma_reclaim_needed) {
+			uma_reclaim_needed = 0;
+			uma_reclaim_locked(true);
+		}
+	}
 }
 
 /* See uma.h */
@@ -3561,6 +3613,102 @@ sysctl_handle_uma_zone_cur(SYSCTL_HANDLER_ARGS)
 	return (sysctl_handle_int(oidp, &cur, 0, req));
 }
 
+#ifdef INVARIANTS
+static uma_slab_t
+uma_dbg_getslab(uma_zone_t zone, void *item)
+{
+	uma_slab_t slab;
+	uma_keg_t keg;
+	uint8_t *mem;
+
+	mem = (uint8_t *)((uintptr_t)item & (~UMA_SLAB_MASK));
+	if (zone->uz_flags & UMA_ZONE_VTOSLAB) {
+		slab = vtoslab((vm_offset_t)mem);
+	} else {
+		/*
+		 * It is safe to return the slab here even though the
+		 * zone is unlocked because the item's allocation state
+		 * essentially holds a reference.
+		 */
+		ZONE_LOCK(zone);
+		keg = LIST_FIRST(&zone->uz_kegs)->kl_keg;
+		if (keg->uk_flags & UMA_ZONE_HASH)
+			slab = hash_sfind(&keg->uk_hash, mem);
+		else
+			slab = (uma_slab_t)(mem + keg->uk_pgoff);
+		ZONE_UNLOCK(zone);
+	}
+
+	return (slab);
+}
+
+/*
+ * Set up the slab's freei data such that uma_dbg_free can function.
+ *
+ */
+static void
+uma_dbg_alloc(uma_zone_t zone, uma_slab_t slab, void *item)
+{
+	uma_keg_t keg;
+	int freei;
+
+	if (zone_first_keg(zone) == NULL)
+		return;
+	if (slab == NULL) {
+		slab = uma_dbg_getslab(zone, item);
+		if (slab == NULL) 
+			panic("uma: item %p did not belong to zone %s\n",
+			    item, zone->uz_name);
+	}
+	keg = slab->us_keg;
+	freei = ((uintptr_t)item - (uintptr_t)slab->us_data) / keg->uk_rsize;
+
+	if (BIT_ISSET(SLAB_SETSIZE, freei, &slab->us_debugfree))
+		panic("Duplicate alloc of %p from zone %p(%s) slab %p(%d)\n",
+		    item, zone, zone->uz_name, slab, freei);
+	BIT_SET_ATOMIC(SLAB_SETSIZE, freei, &slab->us_debugfree);
+
+	return;
+}
+
+/*
+ * Verifies freed addresses.  Checks for alignment, valid slab membership
+ * and duplicate frees.
+ *
+ */
+static void
+uma_dbg_free(uma_zone_t zone, uma_slab_t slab, void *item)
+{
+	uma_keg_t keg;
+	int freei;
+
+	if (zone_first_keg(zone) == NULL)
+		return;
+	if (slab == NULL) {
+		slab = uma_dbg_getslab(zone, item);
+		if (slab == NULL) 
+			panic("uma: Freed item %p did not belong to zone %s\n",
+			    item, zone->uz_name);
+	}
+	keg = slab->us_keg;
+	freei = ((uintptr_t)item - (uintptr_t)slab->us_data) / keg->uk_rsize;
+
+	if (freei >= keg->uk_ipers)
+		panic("Invalid free of %p from zone %p(%s) slab %p(%d)\n",
+		    item, zone, zone->uz_name, slab, freei);
+
+	if (((freei * keg->uk_rsize) + slab->us_data) != item) 
+		panic("Unaligned free of %p from zone %p(%s) slab %p(%d)\n",
+		    item, zone, zone->uz_name, slab, freei);
+
+	if (!BIT_ISSET(SLAB_SETSIZE, freei, &slab->us_debugfree))
+		panic("Duplicate free of %p from zone %p(%s) slab %p(%d)\n",
+		    item, zone, zone->uz_name, slab, freei);
+
+	BIT_CLR_ATOMIC(SLAB_SETSIZE, freei, &slab->us_debugfree);
+}
+#endif /* INVARIANTS */
+
 #ifdef DDB
 DB_SHOW_COMMAND(uma, db_show_uma)
 {
@@ -3618,4 +3766,4 @@ DB_SHOW_COMMAND(umacache, db_show_umacache)
 			return;
 	}
 }
-#endif
+#endif	/* DDB */

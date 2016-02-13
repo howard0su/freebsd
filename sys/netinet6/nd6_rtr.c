@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD$");
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/route.h>
+#include <net/route_var.h>
 #include <net/radix.h>
 #include <net/vnet.h>
 
@@ -88,7 +89,7 @@ static void in6_init_address_ltimes(struct nd_prefix *,
 static int nd6_prefix_onlink(struct nd_prefix *);
 static int nd6_prefix_offlink(struct nd_prefix *);
 
-static int rt6_deleteroute(struct radix_node *, void *);
+static int rt6_deleteroute(const struct rtentry *, void *);
 
 VNET_DECLARE(int, nd6_recalc_reachtm_interval);
 #define	V_nd6_recalc_reachtm_interval	VNET(nd6_recalc_reachtm_interval)
@@ -1525,7 +1526,7 @@ static int
 nd6_prefix_onlink_rtrequest(struct nd_prefix *pr, struct ifaddr *ifa)
 {
 	static struct sockaddr_dl null_sdl = {sizeof(null_sdl), AF_LINK};
-	struct radix_node_head *rnh;
+	struct rib_head *rnh;
 	struct rtentry *rt;
 	struct sockaddr_in6 mask6;
 	u_long rtflags;
@@ -1554,7 +1555,7 @@ nd6_prefix_onlink_rtrequest(struct nd_prefix *pr, struct ifaddr *ifa)
 
 			rnh = rt_tables_get_rnh(rt->rt_fibnum, AF_INET6);
 			/* XXX what if rhn == NULL? */
-			RADIX_NODE_HEAD_LOCK(rnh);
+			RIB_WLOCK(rnh);
 			RT_LOCK(rt);
 			if (rt_setgate(rt, rt_key(rt),
 			    (struct sockaddr *)&null_sdl) == 0) {
@@ -1564,7 +1565,7 @@ nd6_prefix_onlink_rtrequest(struct nd_prefix *pr, struct ifaddr *ifa)
 				dl->sdl_type = rt->rt_ifp->if_type;
 				dl->sdl_index = rt->rt_ifp->if_index;
 			}
-			RADIX_NODE_HEAD_UNLOCK(rnh);
+			RIB_WUNLOCK(rnh);
 			nd6_rtmsg(RTM_ADD, rt);
 			RT_UNLOCK(rt);
 			pr->ndpr_stateflags |= NDPRF_ONLINK;
@@ -2067,30 +2068,19 @@ in6_init_address_ltimes(struct nd_prefix *new, struct in6_addrlifetime *lt6)
 void
 rt6_flush(struct in6_addr *gateway, struct ifnet *ifp)
 {
-	struct radix_node_head *rnh;
-	u_int fibnum;
 
 	/* We'll care only link-local addresses */
 	if (!IN6_IS_ADDR_LINKLOCAL(gateway))
 		return;
 
 	/* XXX Do we really need to walk any but the default FIB? */
-	for (fibnum = 0; fibnum < rt_numfibs; fibnum++) {
-		rnh = rt_tables_get_rnh(fibnum, AF_INET6);
-		if (rnh == NULL)
-			continue;
-
-		RADIX_NODE_HEAD_LOCK(rnh);
-		rnh->rnh_walktree(rnh, rt6_deleteroute, (void *)gateway);
-		RADIX_NODE_HEAD_UNLOCK(rnh);
-	}
+	rt_foreach_fib_walk_del(AF_INET6, rt6_deleteroute, (void *)gateway);
 }
 
 static int
-rt6_deleteroute(struct radix_node *rn, void *arg)
+rt6_deleteroute(const struct rtentry *rt, void *arg)
 {
 #define SIN6(s)	((struct sockaddr_in6 *)s)
-	struct rtentry *rt = (struct rtentry *)rn;
 	struct in6_addr *gate = (struct in6_addr *)arg;
 
 	if (rt->rt_gateway == NULL || rt->rt_gateway->sa_family != AF_INET6)
@@ -2115,8 +2105,7 @@ rt6_deleteroute(struct radix_node *rn, void *arg)
 	if ((rt->rt_flags & RTF_HOST) == 0)
 		return (0);
 
-	return (in6_rtrequest(RTM_DELETE, rt_key(rt), rt->rt_gateway,
-	    rt_mask(rt), rt->rt_flags, NULL, rt->rt_fibnum));
+	return (1);
 #undef SIN6
 }
 

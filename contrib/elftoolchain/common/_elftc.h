@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: _elftc.h 3175 2015-03-27 17:21:24Z emaste $
+ * $Id: _elftc.h 3244 2015-08-31 19:53:08Z emaste $
  */
 
 /**
@@ -342,12 +342,13 @@ struct name {							\
 
 
 #if defined(__GLIBC__) || defined(__linux__)
-
+#ifndef _GNU_SOURCE
 /*
  * GLIBC based systems have a global 'char *' pointer referencing
  * the executable's name.
  */
 extern const char *program_invocation_short_name;
+#endif	/* !_GNU_SOURCE */
 
 #define	ELFTC_GETPROGNAME()	program_invocation_short_name
 
@@ -371,7 +372,8 @@ extern const char *__progname;
 
 #if defined(__APPLE__)
 
-#include <machine/endian.h>
+#include <libkern/OSByteOrder.h>
+#define	htobe32(x)	OSSwapHostToBigInt32(x)
 #define	roundup2	roundup
 
 #define	ELFTC_BYTE_ORDER			_BYTE_ORDER
@@ -381,6 +383,7 @@ extern const char *__progname;
 #define	ELFTC_HAVE_MMAP				1
 #define	ELFTC_HAVE_STRMODE			1
 
+#define ELFTC_NEED_BYTEORDER_EXTENSIONS		1
 #endif /* __APPLE__ */
 
 

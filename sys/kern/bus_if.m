@@ -44,8 +44,8 @@ INTERFACE bus;
 CODE {
 	static struct resource *
 	null_alloc_resource(device_t dev, device_t child,
-	    int type, int *rid, u_long start, u_long end,
-	    u_long count, u_int flags)
+	    int type, int *rid, rman_res_t start, rman_res_t end,
+	    rman_res_t count, u_int flags)
 	{
 	    return (0);
 	}
@@ -209,7 +209,9 @@ METHOD void driver_added {
  * For busses which use use drivers supporting DEVICE_IDENTIFY() to
  * enumerate their devices, this method is used to create new
  * device instances. The new device will be added after the last
- * existing child with the same order.
+ * existing child with the same order. Implementations of bus_add_child
+ * call device_add_child_ordered to add the child and often add
+ * a suitable ivar to the device specific to that bus.
  * 
  * @param _dev		the bus device which will be the parent of the
  *			new child device
@@ -262,9 +264,9 @@ METHOD struct resource * alloc_resource {
 	device_t	_child;
 	int		_type;
 	int	       *_rid;
-	u_long		_start;
-	u_long		_end;
-	u_long		_count;
+	rman_res_t	_start;
+	rman_res_t	_end;
+	rman_res_t	_count;
 	u_int		_flags;
 } DEFAULT null_alloc_resource;
 
@@ -330,8 +332,8 @@ METHOD int adjust_resource {
 	device_t	_child;
 	int		_type;
 	struct resource *_res;
-	u_long		_start;
-	u_long		_end;
+	rman_res_t	_start;
+	rman_res_t	_end;
 };
 
 /**
@@ -431,8 +433,8 @@ METHOD int set_resource {
 	device_t	_child;
 	int		_type;
 	int		_rid;
-	u_long		_start;
-	u_long		_count;
+	rman_res_t	_start;
+	rman_res_t	_count;
 };
 
 /**
@@ -455,8 +457,8 @@ METHOD int get_resource {
 	device_t	_child;
 	int		_type;
 	int		_rid;
-	u_long		*_startp;
-	u_long		*_countp;
+	rman_res_t	*_startp;
+	rman_res_t	*_countp;
 };
 
 /**

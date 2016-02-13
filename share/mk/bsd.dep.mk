@@ -48,12 +48,18 @@ CTAGSFLAGS?=
 GTAGSFLAGS?=	-o
 HTAGSFLAGS?=
 
-.if ${CC} != "cc"
-MKDEPCMD?=	CC='${CC} ${DEPFLAGS}' mkdep
-.else
-MKDEPCMD?=	mkdep
+_MKDEPCC:=	${CC:N${CCACHE_BIN}}
+# XXX: DEPFLAGS can come out once Makefile.inc1 properly passes down
+# CXXFLAGS.
+.if !empty(DEPFLAGS)
+_MKDEPCC+=	${DEPFLAGS}
 .endif
+MKDEPCMD?=	CC='${_MKDEPCC}' mkdep
 DEPENDFILE?=	.depend
+.if ${MK_DIRDEPS_BUILD} == "no"
+.MAKE.DEPENDFILE= ${DEPENDFILE}
+.endif
+DEPENDFILES=	${DEPENDFILE}
 
 # Keep `tags' here, before SRCS are mangled below for `depend'.
 .if !target(tags) && defined(SRCS) && !defined(NO_TAGS)
@@ -72,7 +78,7 @@ tags: ${SRCS}
 .if defined(SRCS)
 CLEANFILES?=
 
-.if !exists(${.OBJDIR}/${DEPENDFILE})
+.if ${MK_FAST_DEPEND} == "yes" || !exists(${.OBJDIR}/${DEPENDFILE})
 .for _S in ${SRCS:N*.[dhly]}
 ${_S:R}.o: ${_S}
 .endfor
@@ -83,7 +89,7 @@ ${_S:R}.o: ${_S}
 .for _LC in ${_LSRC:R}.c
 ${_LC}: ${_LSRC}
 	${LEX} ${LFLAGS} -o${.TARGET} ${.ALLSRC}
-.if !exists(${.OBJDIR}/${DEPENDFILE})
+.if ${MK_FAST_DEPEND} == "yes" || !exists(${.OBJDIR}/${DEPENDFILE})
 ${_LC:R}.o: ${_LC}
 .endif
 SRCS:=	${SRCS:S/${_LSRC}/${_LC}/}
@@ -104,8 +110,8 @@ ${_YC} y.tab.h: ${_YSRC}
 CLEANFILES+= y.tab.c y.tab.h
 .elif !empty(YFLAGS:M-d)
 .for _YH in ${_YC:R}.h
-${_YH}: ${_YC}
-${_YC}: ${_YSRC}
+.ORDER: ${_YC} ${_YH}
+${_YC} ${_YH}: ${_YSRC}
 	${YACC} ${YFLAGS} -o ${_YC} ${.ALLSRC}
 SRCS+=	${_YH}
 CLEANFILES+= ${_YH}
@@ -114,7 +120,7 @@ CLEANFILES+= ${_YH}
 ${_YC}: ${_YSRC}
 	${YACC} ${YFLAGS} -o ${_YC} ${.ALLSRC}
 .endif
-.if !exists(${.OBJDIR}/${DEPENDFILE})
+.if ${MK_FAST_DEPEND} == "yes" || !exists(${.OBJDIR}/${DEPENDFILE})
 ${_YC:R}.o: ${_YC}
 .endif
 .endfor
@@ -126,25 +132,65 @@ CFLAGS+=	-I${.OBJDIR}
 .endif
 .for _DSRC in ${SRCS:M*.d:N*/*}
 .for _D in ${_DSRC:R}
-DHDRS+=	${_D}.h
+SRCS+=	${_D}.h
 ${_D}.h: ${_DSRC}
 	${DTRACE} ${DTRACEFLAGS} -h -s ${.ALLSRC}
 SRCS:=	${SRCS:S/^${_DSRC}$//}
 OBJS+=	${_D}.o
 CLEANFILES+= ${_D}.h ${_D}.o
 ${_D}.o: ${_DSRC} ${OBJS:S/^${_D}.o$//}
-	${DTRACE} ${DTRACEFLAGS} -G -o ${.TARGET} -s ${.ALLSRC}
+	@rm -f ${.TARGET}
+	${DTRACE} ${DTRACEFLAGS} -G -o ${.TARGET} -s ${.ALLSRC:N*.h}
 .if defined(LIB)
 CLEANFILES+= ${_D}.So ${_D}.po
 ${_D}.So: ${_DSRC} ${SOBJS:S/^${_D}.So$//}
-	${DTRACE} ${DTRACEFLAGS} -G -o ${.TARGET} -s ${.ALLSRC}
+	@rm -f ${.TARGET}
+	${DTRACE} ${DTRACEFLAGS} -G -o ${.TARGET} -s ${.ALLSRC:N*.h}
 ${_D}.po: ${_DSRC} ${POBJS:S/^${_D}.po$//}
-	${DTRACE} ${DTRACEFLAGS} -G -o ${.TARGET} -s ${.ALLSRC}
+	@rm -f ${.TARGET}
+	${DTRACE} ${DTRACEFLAGS} -G -o ${.TARGET} -s ${.ALLSRC:N*.h}
 .endif
 .endfor
 .endfor
-beforedepend: ${DHDRS}
-beforebuild: ${DHDRS}
+
+
+.if ${MK_FAST_DEPEND} == "yes" && \
+    (${.MAKE.MODE:Mmeta} == "" || ${.MAKE.MODE:Mnofilemon} != "")
+DEPENDFILES+=	${DEPENDFILE}.*
+DEPEND_MP?=	-MP
+# Handle OBJS=../somefile.o hacks.  Just replace '/' rather than use :T to
+# avoid collisions.
+DEPEND_FILTER=	C,/,_,g
+DEPEND_CFLAGS+=	-MD ${DEPEND_MP} -MF${DEPENDFILE}.${.TARGET:${DEPEND_FILTER}}
+DEPEND_CFLAGS+=	-MT${.TARGET}
+.if defined(.PARSEDIR)
+# Only add in DEPEND_CFLAGS for CFLAGS on files we expect from DEPENDOBJS
+# as those are the only ones we will include.
+DEPEND_CFLAGS_CONDITION= !empty(DEPENDOBJS:M${.TARGET:${DEPEND_FILTER}})
+CFLAGS+=	${${DEPEND_CFLAGS_CONDITION}:?${DEPEND_CFLAGS}:}
+.else
+CFLAGS+=	${DEPEND_CFLAGS}
+.endif
+DEPENDSRCS=	${SRCS:M*.[cSC]} ${SRCS:M*.cxx} ${SRCS:M*.cpp} ${SRCS:M*.cc}
+.if !empty(DEPENDSRCS)
+DEPENDOBJS+=	${DEPENDSRCS:R:S,$,.o,}
+.endif
+DEPENDFILES_OBJS=	${DEPENDOBJS:O:u:${DEPEND_FILTER}:C/^/${DEPENDFILE}./}
+.if ${.MAKEFLAGS:M-V} == ""
+.for __depend_obj in ${DEPENDFILES_OBJS}
+.sinclude "${__depend_obj}"
+.endfor
+.endif
+.endif	# ${MK_FAST_DEPEND} == "yes"
+.endif	# defined(SRCS)
+
+.if ${MK_DIRDEPS_BUILD} == "yes"
+.include <meta.autodep.mk>
+# this depend: bypasses that below
+# the dependency helps when bootstrapping
+depend: beforedepend ${DPSRCS} ${SRCS} afterdepend
+beforedepend:
+afterdepend: beforedepend
 .endif
 
 .if !target(depend)
@@ -152,17 +198,34 @@ beforebuild: ${DHDRS}
 depend: beforedepend ${DEPENDFILE} afterdepend
 
 # Tell bmake not to look for generated files via .PATH
-.NOPATH: ${DEPENDFILE}
+.NOPATH: ${DEPENDFILE} ${DEPENDFILES_OBJS}
+
+.if ${MK_FAST_DEPEND} == "no"
+# Capture -include from CFLAGS.
+# This could be simpler with bmake :tW but needs to support fmake for MFC.
+_CFLAGS_INCLUDES= ${CFLAGS:Q:S/\\ /,/g:C/-include,/-include%/g:C/,/ /g:M-include*:C/%/ /g}
+_CXXFLAGS_INCLUDES= ${CXXFLAGS:Q:S/\\ /,/g:C/-include,/-include%/g:C/,/ /g:M-include*:C/%/ /g}
+# XXX: Temporary hack to workaround .depend files not tracking -include
+_hdrincludes=${_CFLAGS_INCLUDES:M*.h} ${_CXXFLAGS_INCLUDES:M*.h}
+.for _hdr in ${_hdrincludes:O:u}
+.if exists(${_hdr})
+${OBJS} ${POBJS} ${SOBJS}: ${_hdr}
+.endif
+.endfor
+.undef _hdrincludes
 
 # Different types of sources are compiled with slightly different flags.
 # Split up the sources, and filter out headers and non-applicable flags.
 MKDEP_CFLAGS=	${CFLAGS:M-nostdinc*} ${CFLAGS:M-[BIDU]*} ${CFLAGS:M-std=*} \
-		${CFLAGS:M-ansi}
+		${CFLAGS:M-ansi} ${_CFLAGS_INCLUDES}
 MKDEP_CXXFLAGS=	${CXXFLAGS:M-nostdinc*} ${CXXFLAGS:M-[BIDU]*} \
-		${CXXFLAGS:M-std=*} ${CXXFLAGS:M-ansi} ${CXXFLAGS:M-stdlib=*}
+		${CXXFLAGS:M-std=*} ${CXXFLAGS:M-ansi} ${CXXFLAGS:M-stdlib=*} \
+		${_CXXFLAGS_INCLUDES}
+.endif	# ${MK_FAST_DEPEND} == "no"
 
 DPSRCS+= ${SRCS}
 ${DEPENDFILE}: ${DPSRCS}
+.if ${MK_FAST_DEPEND} == "no"
 	rm -f ${DEPENDFILE}
 .if !empty(DPSRCS:M*.[cS])
 	${MKDEPCMD} -f ${DEPENDFILE} -a ${MKDEP} \
@@ -173,7 +236,11 @@ ${DEPENDFILE}: ${DPSRCS}
 	${MKDEPCMD} -f ${DEPENDFILE} -a ${MKDEP} \
 	    ${MKDEP_CXXFLAGS} \
 	    ${.ALLSRC:M*.cc} ${.ALLSRC:M*.C} ${.ALLSRC:M*.cpp} ${.ALLSRC:M*.cxx}
+.else
 .endif
+.else
+	: > ${.TARGET}
+.endif	# ${MK_FAST_DEPEND} == "no"
 .if target(_EXTRADEPEND)
 _EXTRADEPEND: .USE
 ${DEPENDFILE}: _EXTRADEPEND
@@ -198,12 +265,12 @@ afterdepend:
 cleandepend:
 .if defined(SRCS)
 .if ${CTAGS:T} == "gtags"
-	rm -f ${DEPENDFILE} GPATH GRTAGS GSYMS GTAGS
+	rm -f ${DEPENDFILES} GPATH GRTAGS GSYMS GTAGS
 .if defined(HTML)
 	rm -rf HTML
 .endif
 .else
-	rm -f ${DEPENDFILE} tags
+	rm -f ${DEPENDFILES} tags
 .endif
 .endif
 .endif

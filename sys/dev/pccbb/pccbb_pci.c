@@ -502,10 +502,26 @@ cbb_chipinit(struct cbb_softc *sc)
 		 * properly initialized.
 		 *
 		 * The TI125X parts have a different register.
+		 *
+		 * Note: Only the lower two nibbles matter. When set
+		 * to 0, the MFUNC{0,1} pins are GPIO, which isn't
+		 * going to work out too well because we specifically
+		 * program these parts to parallel interrupt signalling
+		 * elsewhere. We preserve the upper bits of this
+		 * register since changing them have subtle side effects
+		 * for different variants of the card and are
+		 * extremely difficult to exaustively test.
+		 *
+		 * Also, the TI 1510/1520 changed the default for the MFUNC
+		 * register from 0x0 to 0x1000 to enable IRQSER by default.
+		 * We want to be careful to avoid overriding that, and the
+		 * below test will do that. Should this check prove to be
+		 * too permissive, we should just check against 0 and 0x1000
+		 * and not touch it otherwise.
 		 */
 		mux = pci_read_config(sc->dev, CBBR_MFUNC, 4);
 		sysctrl = pci_read_config(sc->dev, CBBR_SYSCTRL, 4);
-		if (mux == 0) {
+		if ((mux & (CBBM_MFUNC_PIN0 | CBBM_MFUNC_PIN1)) == 0) {
 			mux = (mux & ~CBBM_MFUNC_PIN0) |
 			    CBBM_MFUNC_PIN0_INTA;
 			if ((sysctrl & CBBM_SYSCTRL_INTRTIE) == 0)
@@ -518,7 +534,8 @@ cbb_chipinit(struct cbb_softc *sc)
 		/*
 		 * Disable zoom video.  Some machines initialize this
 		 * improperly and exerpience has shown that this helps
-		 * prevent strange behavior.
+		 * prevent strange behavior. We don't support zoom
+		 * video anyway, so no harm can come from this.
 		 */
 		pci_write_config(sc->dev, CBBR_MMCTRL, 0, 4);
 		break;
@@ -766,7 +783,7 @@ cbb_pci_filt(void *arg)
 #if defined(NEW_PCIB) && defined(PCI_RES_BUS)
 static struct resource *
 cbb_pci_alloc_resource(device_t bus, device_t child, int type, int *rid,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct cbb_softc *sc;
 
@@ -780,7 +797,7 @@ cbb_pci_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 static int
 cbb_pci_adjust_resource(device_t bus, device_t child, int type,
-    struct resource *r, u_long start, u_long end)
+    struct resource *r, rman_res_t start, rman_res_t end)
 {
 	struct cbb_softc *sc;
 

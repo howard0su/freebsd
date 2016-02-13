@@ -62,6 +62,8 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_pageout.h>
 #include <vm/vm_map.h>
 
+#include <machine/bus.h>
+
 SYSCTL_INT(_kern, KERN_IOV_MAX, iov_max, CTLFLAG_RD, SYSCTL_NULL_INT_PTR, UIO_MAXIOV,
 	"Maximum number of elements in an I/O vector; sysconf(_SC_IOV_MAX)");
 
@@ -134,6 +136,58 @@ physcopyout(vm_paddr_t src, void *dst, size_t len)
 }
 
 #undef PHYS_PAGE_COUNT
+
+int
+physcopyin_vlist(bus_dma_segment_t *src, off_t offset, vm_paddr_t dst,
+    size_t len)
+{
+	size_t seg_len;
+	int error;
+
+	error = 0;
+	while (offset >= src->ds_len) {
+		offset -= src->ds_len;
+		src++;
+	}
+
+	while (len > 0 && error == 0) {
+		seg_len = MIN(src->ds_len - offset, len);
+		error = physcopyin((void *)(uintptr_t)(src->ds_addr + offset),
+		    dst, seg_len);
+		offset = 0;
+		src++;
+		len -= seg_len;
+		dst += seg_len;
+	}
+
+	return (error);
+}
+
+int
+physcopyout_vlist(vm_paddr_t src, bus_dma_segment_t *dst, off_t offset,
+    size_t len)
+{
+	size_t seg_len;
+	int error;
+
+	error = 0;
+	while (offset >= dst->ds_len) {
+		offset -= dst->ds_len;
+		dst++;
+	}
+
+	while (len > 0 && error == 0) {
+		seg_len = MIN(dst->ds_len - offset, len);
+		error = physcopyout(src, (void *)(uintptr_t)(dst->ds_addr +
+		    offset), seg_len);
+		offset = 0;
+		dst++;
+		len -= seg_len;
+		src += seg_len;
+	}
+
+	return (error);
+}
 
 int
 uiomove(void *cp, int n, struct uio *uio)
@@ -409,15 +463,13 @@ copyout_map(struct thread *td, vm_offset_t *addr, size_t sz)
 	/*
 	 * Map somewhere after heap in process memory.
 	 */
-	PROC_LOCK(td->td_proc);
 	*addr = round_page((vm_offset_t)vms->vm_daddr +
-	    lim_max(td->td_proc, RLIMIT_DATA));
-	PROC_UNLOCK(td->td_proc);
+	    lim_max(td, RLIMIT_DATA));
 
 	/* round size up to page boundry */
 	size = (vm_size_t)round_page(sz);
 
-	error = vm_mmap(&vms->vm_map, addr, size, PROT_READ | PROT_WRITE,
+	error = vm_mmap(&vms->vm_map, addr, size, VM_PROT_READ | VM_PROT_WRITE,
 	    VM_PROT_ALL, MAP_PRIVATE | MAP_ANON, OBJT_DEFAULT, NULL, 0);
 
 	return (error);

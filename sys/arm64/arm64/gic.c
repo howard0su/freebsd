@@ -47,15 +47,15 @@ __FBSDID("$FreeBSD$");
 #include <sys/cpuset.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+
 #include <machine/bus.h>
 #include <machine/intr.h>
 #include <machine/smp.h>
 
-#include <dev/fdt/fdt_common.h>
-#include <dev/ofw/openfirm.h>
-#include <dev/ofw/ofw_bus.h>
-#include <dev/ofw/ofw_bus_subr.h>
+#include <vm/vm.h>
+#include <vm/pmap.h>
 
+#include <arm64/arm64/gic.h>
 
 #include "pic_if.h"
 
@@ -102,18 +102,6 @@ __FBSDID("$FreeBSD$");
 #define GICD_ICFGR_TRIG_EDGE	(1 << 1)
 #define GICD_ICFGR_TRIG_MASK	0x2
 
-struct arm_gic_softc {
-	device_t		gic_dev;
-	struct resource *	gic_res[3];
-	bus_space_tag_t		gic_c_bst;
-	bus_space_tag_t		gic_d_bst;
-	bus_space_handle_t	gic_c_bsh;
-	bus_space_handle_t	gic_d_bsh;
-	uint8_t			ver;
-	struct mtx		mutex;
-	uint32_t		nirqs;
-};
-
 static struct resource_spec arm_gic_spec[] = {
 	{ SYS_RES_MEMORY,	0,	RF_ACTIVE },	/* Distributor registers */
 	{ SYS_RES_MEMORY,	1,	RF_ACTIVE },	/* CPU Interrupt Intf. registers */
@@ -135,31 +123,6 @@ static pic_dispatch_t gic_dispatch;
 static pic_eoi_t gic_eoi;
 static pic_mask_t gic_mask_irq;
 static pic_unmask_t gic_unmask_irq;
-
-static struct ofw_compat_data compat_data[] = {
-	{"arm,gic",		true},	/* Non-standard, used in FreeBSD dts. */
-	{"arm,gic-400",		true},
-	{"arm,cortex-a15-gic",	true},
-	{"arm,cortex-a9-gic",	true},
-	{"arm,cortex-a7-gic",	true},
-	{"arm,arm11mp-gic",	true},
-	{"brcm,brahma-b15-gic",	true},
-	{NULL,			false}
-};
-
-static int
-arm_gic_probe(device_t dev)
-{
-
-	if (!ofw_bus_status_okay(dev))
-		return (ENXIO);
-
-	if (!ofw_bus_search_compatible(dev, compat_data)->ocd_data)
-		return (ENXIO);
-
-	device_set_desc(dev, "ARM Generic Interrupt Controller");
-	return (BUS_PROBE_DEFAULT);
-}
 
 #ifdef SMP
 static void
@@ -194,7 +157,7 @@ gic_init_secondary(device_t dev)
 }
 #endif
 
-static int
+int
 arm_gic_attach(device_t dev)
 {
 	struct		arm_gic_softc *sc;
@@ -367,7 +330,6 @@ arm_gic_ipi_clear(device_t dev, int ipi)
 
 static device_method_t arm_gic_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_probe,		arm_gic_probe),
 	DEVMETHOD(device_attach,	arm_gic_attach),
 
 	/* pic_if */
@@ -384,15 +346,131 @@ static device_method_t arm_gic_methods[] = {
 	{ 0, 0 }
 };
 
-static driver_t arm_gic_driver = {
-	"gic",
-	arm_gic_methods,
-	sizeof(struct arm_gic_softc),
+DEFINE_CLASS_0(gic, arm_gic_driver, arm_gic_methods,
+    sizeof(struct arm_gic_softc));
+
+#define	GICV2M_MSI_TYPER	0x008
+#define	 MSI_TYPER_SPI_BASE(x)	(((x) >> 16) & 0x3ff)
+#define	 MSI_TYPER_SPI_COUNT(x)	(((x) >> 0) & 0x3ff)
+#define	GICv2M_MSI_SETSPI_NS	0x040
+#define	GICV2M_MSI_IIDR		0xFCC
+
+static int
+gicv2m_attach(device_t dev)
+{
+	struct gicv2m_softc *sc;
+	uint32_t typer;
+	int rid;
+
+	sc = device_get_softc(dev);
+
+	rid = 0;
+	sc->sc_mem = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	if (sc->sc_mem == NULL) {
+		device_printf(dev, "Unable to allocate resources\n");
+		return (ENXIO);
+	}
+
+	typer = bus_read_4(sc->sc_mem, GICV2M_MSI_TYPER);
+	sc->sc_spi_start = MSI_TYPER_SPI_BASE(typer);
+	sc->sc_spi_count = MSI_TYPER_SPI_COUNT(typer);
+
+	device_printf(dev, "using spi %u to %u\n", sc->sc_spi_start,
+	    sc->sc_spi_start + sc->sc_spi_count - 1);
+
+	mtx_init(&sc->sc_mutex, "GICv2m lock", "", MTX_DEF);
+
+	arm_register_msi_pic(dev);
+
+	return (0);
+}
+
+static int
+gicv2m_alloc_msix(device_t dev, device_t pci_dev, int *pirq)
+{
+	struct arm_gic_softc *psc;
+	struct gicv2m_softc *sc;
+	uint32_t reg;
+	int irq;
+
+	psc = device_get_softc(device_get_parent(dev));
+	sc = device_get_softc(dev);
+
+	mtx_lock(&sc->sc_mutex);
+	/* Find an unused interrupt */
+	KASSERT(sc->sc_spi_offset < sc->sc_spi_count, ("No free SPIs"));
+
+	irq = sc->sc_spi_start + sc->sc_spi_offset;
+	sc->sc_spi_offset++;
+
+	/* Interrupts need to be edge triggered, set this */
+	reg = gic_d_read_4(psc, GICD_ICFGR(irq >> 4));
+	reg |= (GICD_ICFGR_TRIG_EDGE | GICD_ICFGR_POL_HIGH) <<
+	    ((irq & 0xf) * 2);
+	gic_d_write_4(psc, GICD_ICFGR(irq >> 4), reg);
+
+	*pirq = irq;
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
+}
+
+static int
+gicv2m_alloc_msi(device_t dev, device_t pci_dev, int count, int *irqs)
+{
+	struct arm_gic_softc *psc;
+	struct gicv2m_softc *sc;
+	uint32_t reg;
+	int i, irq;
+
+	psc = device_get_softc(device_get_parent(dev));
+	sc = device_get_softc(dev);
+
+	mtx_lock(&sc->sc_mutex);
+	KASSERT(sc->sc_spi_offset + count <= sc->sc_spi_count,
+	    ("No free SPIs for %d MSI interrupts", count));
+
+	/* Find an unused interrupt */
+	for (i = 0; i < count; i++) {
+		irq = sc->sc_spi_start + sc->sc_spi_offset;
+		sc->sc_spi_offset++;
+
+		/* Interrupts need to be edge triggered, set this */
+		reg = gic_d_read_4(psc, GICD_ICFGR(irq >> 4));
+		reg |= (GICD_ICFGR_TRIG_EDGE | GICD_ICFGR_POL_HIGH) <<
+		    ((irq & 0xf) * 2);
+		gic_d_write_4(psc, GICD_ICFGR(irq >> 4), reg);
+
+		irqs[i] = irq;
+	}
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
+}
+
+static int
+gicv2m_map_msi(device_t dev, device_t pci_dev, int irq, uint64_t *addr,
+    uint32_t *data)
+{
+	struct gicv2m_softc *sc = device_get_softc(dev);
+
+	*addr = vtophys(rman_get_virtual(sc->sc_mem)) + 0x40;
+	*data = irq;
+
+	return (0);
+}
+
+static device_method_t arm_gicv2m_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_attach,	gicv2m_attach),
+
+	/* MSI/MSI-X */
+	DEVMETHOD(pic_alloc_msix,	gicv2m_alloc_msix),
+	DEVMETHOD(pic_alloc_msi,	gicv2m_alloc_msi),
+	DEVMETHOD(pic_map_msi,		gicv2m_map_msi),
+
+	{ 0, 0 }
 };
 
-static devclass_t arm_gic_devclass;
-
-EARLY_DRIVER_MODULE(gic, simplebus, arm_gic_driver, arm_gic_devclass, 0, 0,
-    BUS_PASS_INTERRUPT + BUS_PASS_ORDER_MIDDLE);
-EARLY_DRIVER_MODULE(gic, ofwbus, arm_gic_driver, arm_gic_devclass, 0, 0,
-    BUS_PASS_INTERRUPT + BUS_PASS_ORDER_MIDDLE);
+DEFINE_CLASS_0(gicv2m, arm_gicv2m_driver, arm_gicv2m_methods,
+    sizeof(struct gicv2m_softc));

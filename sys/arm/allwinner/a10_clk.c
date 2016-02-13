@@ -36,19 +36,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/module.h>
 #include <sys/malloc.h>
 #include <sys/rman.h>
-#include <sys/timeet.h>
-#include <sys/timetc.h>
-#include <sys/watchdog.h>
 #include <machine/bus.h>
-#include <machine/cpu.h>
-#include <machine/intr.h>
 
-#include <dev/fdt/fdt_common.h>
 #include <dev/ofw/openfirm.h>
-#include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
-
-#include <machine/bus.h>
 
 #include "a10_clk.h"
 
@@ -56,6 +47,7 @@ struct a10_ccm_softc {
 	struct resource		*res;
 	bus_space_tag_t		bst;
 	bus_space_handle_t	bsh;
+	int			pll6_enabled;
 };
 
 static struct a10_ccm_softc *a10_ccm_sc = NULL;
@@ -174,7 +166,8 @@ a10_clk_usb_deactivate(void)
 }
 
 int
-a10_clk_emac_activate(void) {
+a10_clk_emac_activate(void)
+{
 	struct a10_ccm_softc *sc = a10_ccm_sc;
 	uint32_t reg_value;
 
@@ -189,3 +182,262 @@ a10_clk_emac_activate(void) {
 	return (0);
 }
 
+int
+a10_clk_gmac_activate(phandle_t node)
+{
+	char *phy_type;
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	/* Gating AHB clock for GMAC */
+	reg_value = ccm_read_4(sc, CCM_AHB_GATING1);
+	reg_value |= CCM_AHB_GATING_GMAC;
+	ccm_write_4(sc, CCM_AHB_GATING1, reg_value);
+
+	/* Set GMAC mode. */
+	reg_value = CCM_GMAC_CLK_MII;
+	if (OF_getprop_alloc(node, "phy-type", 1, (void **)&phy_type) > 0) {
+		if (strcasecmp(phy_type, "rgmii") == 0)
+			reg_value = CCM_GMAC_CLK_RGMII | CCM_GMAC_MODE_RGMII;
+		else if (strcasecmp(phy_type, "rgmii-bpi") == 0) {
+			reg_value = CCM_GMAC_CLK_RGMII | CCM_GMAC_MODE_RGMII;
+			reg_value |= (3 << CCM_GMAC_CLK_DELAY_SHIFT);
+		}
+		free(phy_type, M_OFWPROP);
+	}
+	ccm_write_4(sc, CCM_GMAC_CLK, reg_value);
+
+	return (0);
+}
+
+static void
+a10_clk_pll6_enable(void)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+
+	/*
+	 * SATA needs PLL6 to be a 100MHz clock.
+	 * The SATA output frequency is 24MHz * n * k / m / 6.
+	 * To get to 100MHz, k & m must be equal and n must be 25.
+	 * For other uses the output frequency is 24MHz * n * k / 2.
+	 */
+	sc = a10_ccm_sc;
+	if (sc->pll6_enabled)
+		return;
+	reg_value = ccm_read_4(sc, CCM_PLL6_CFG);
+	reg_value &= ~CCM_PLL_CFG_BYPASS;
+	reg_value &= ~(CCM_PLL_CFG_FACTOR_K | CCM_PLL_CFG_FACTOR_M |
+	    CCM_PLL_CFG_FACTOR_N);
+	reg_value |= (25 << CCM_PLL_CFG_FACTOR_N_SHIFT);
+	reg_value |= CCM_PLL6_CFG_SATA_CLKEN;
+	reg_value |= CCM_PLL_CFG_ENABLE;
+	ccm_write_4(sc, CCM_PLL6_CFG, reg_value);
+	sc->pll6_enabled = 1;
+}
+
+static unsigned int
+a10_clk_pll6_get_rate(void)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t k, n, reg_value;
+
+	sc = a10_ccm_sc;
+	reg_value = ccm_read_4(sc, CCM_PLL6_CFG);
+	n = ((reg_value & CCM_PLL_CFG_FACTOR_N) >> CCM_PLL_CFG_FACTOR_N_SHIFT);
+	k = ((reg_value & CCM_PLL_CFG_FACTOR_K) >> CCM_PLL_CFG_FACTOR_K_SHIFT) +
+	    1;
+
+	return ((CCM_CLK_REF_FREQ * n * k) / 2);
+}
+
+static int
+a10_clk_pll2_set_rate(unsigned int freq)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+	unsigned int prediv, postdiv, n;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	reg_value = ccm_read_4(sc, CCM_PLL2_CFG);
+	reg_value &= ~(CCM_PLL2_CFG_PREDIV | CCM_PLL2_CFG_POSTDIV |
+	    CCM_PLL_CFG_FACTOR_N);
+
+	/*
+	 * Audio Codec needs PLL2 to be either 24576000 Hz or 22579200 Hz
+	 *
+	 * PLL2 output frequency is 24MHz * n / prediv / postdiv.
+	 * To get as close as possible to the desired rate, we use a
+	 * pre-divider of 21 and a post-divider of 4. With these values,
+	 * a multiplier of 86 or 79 gets us close to the target rates.
+	 */
+	prediv = 21;
+	postdiv = 4;
+
+	switch (freq) {
+	case 24576000:
+		n = 86;
+		reg_value |= CCM_PLL_CFG_ENABLE;
+		break;
+	case 22579200:
+		n = 79;
+		reg_value |= CCM_PLL_CFG_ENABLE;
+		break;
+	case 0:
+		n = 1;
+		reg_value &= ~CCM_PLL_CFG_ENABLE;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	reg_value |= (prediv << CCM_PLL2_CFG_PREDIV_SHIFT);
+	reg_value |= (postdiv << CCM_PLL2_CFG_POSTDIV_SHIFT);
+	reg_value |= (n << CCM_PLL_CFG_FACTOR_N_SHIFT);
+	ccm_write_4(sc, CCM_PLL2_CFG, reg_value);
+
+	return (0);
+}
+
+int
+a10_clk_ahci_activate(void)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	a10_clk_pll6_enable();
+
+	/* Gating AHB clock for SATA */
+	reg_value = ccm_read_4(sc, CCM_AHB_GATING0);
+	reg_value |= CCM_AHB_GATING_SATA;
+	ccm_write_4(sc, CCM_AHB_GATING0, reg_value);
+	DELAY(1000);
+
+	ccm_write_4(sc, CCM_SATA_CLK, CCM_PLL_CFG_ENABLE);
+
+	return (0);
+}
+
+int
+a10_clk_mmc_activate(int devid)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	a10_clk_pll6_enable();
+
+	/* Gating AHB clock for SD/MMC */
+	reg_value = ccm_read_4(sc, CCM_AHB_GATING0);
+	reg_value |= CCM_AHB_GATING_SDMMC0 << devid;
+	ccm_write_4(sc, CCM_AHB_GATING0, reg_value);
+
+	return (0);
+}
+
+int
+a10_clk_mmc_cfg(int devid, int freq)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t clksrc, m, n, ophase, phase, reg_value;
+	unsigned int pll_freq;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	freq /= 1000;
+	if (freq <= 400) {
+		pll_freq = CCM_CLK_REF_FREQ / 1000;
+		clksrc = CCM_SD_CLK_SRC_SEL_OSC24M;
+		ophase = 0;
+		phase = 0;
+		n = 2;
+	} else if (freq <= 25000) {
+		pll_freq = a10_clk_pll6_get_rate() / 1000;
+		clksrc = CCM_SD_CLK_SRC_SEL_PLL6;
+		ophase = 0;
+		phase = 5;
+		n = 2;
+	} else if (freq <= 50000) {
+		pll_freq = a10_clk_pll6_get_rate() / 1000;
+		clksrc = CCM_SD_CLK_SRC_SEL_PLL6;
+		ophase = 3;
+		phase = 5;
+		n = 0;
+	} else
+		return (EINVAL);
+	m = ((pll_freq / (1 << n)) / (freq)) - 1;
+	reg_value = ccm_read_4(sc, CCM_MMC0_SCLK_CFG + (devid * 4));
+	reg_value &= ~CCM_SD_CLK_SRC_SEL;
+	reg_value |= (clksrc << CCM_SD_CLK_SRC_SEL_SHIFT);
+	reg_value &= ~CCM_SD_CLK_PHASE_CTR;
+	reg_value |= (phase << CCM_SD_CLK_PHASE_CTR_SHIFT);
+	reg_value &= ~CCM_SD_CLK_DIV_RATIO_N;
+	reg_value |= (n << CCM_SD_CLK_DIV_RATIO_N_SHIFT);
+	reg_value &= ~CCM_SD_CLK_OPHASE_CTR;
+	reg_value |= (ophase << CCM_SD_CLK_OPHASE_CTR_SHIFT);
+	reg_value &= ~CCM_SD_CLK_DIV_RATIO_M;
+	reg_value |= m;
+	reg_value |= CCM_PLL_CFG_ENABLE;
+	ccm_write_4(sc, CCM_MMC0_SCLK_CFG + (devid * 4), reg_value);
+
+	return (0);
+}
+
+int
+a10_clk_dmac_activate(void)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	/* Gating AHB clock for DMA controller */
+	reg_value = ccm_read_4(sc, CCM_AHB_GATING0);
+	reg_value |= CCM_AHB_GATING_DMA;
+	ccm_write_4(sc, CCM_AHB_GATING0, reg_value);
+
+	return (0);
+}
+
+int
+a10_clk_codec_activate(unsigned int freq)
+{
+	struct a10_ccm_softc *sc;
+	uint32_t reg_value;
+
+	sc = a10_ccm_sc;
+	if (sc == NULL)
+		return (ENXIO);
+
+	a10_clk_pll2_set_rate(freq);
+
+	/* Gating APB clock for ADDA */
+	reg_value = ccm_read_4(sc, CCM_APB0_GATING);
+	reg_value |= CCM_APB0_GATING_ADDA;
+	ccm_write_4(sc, CCM_APB0_GATING, reg_value);
+
+	/* Enable audio codec clock */
+	reg_value = ccm_read_4(sc, CCM_AUDIO_CODEC_CLK);
+	reg_value |= CCM_AUDIO_CODEC_ENABLE;
+	ccm_write_4(sc, CCM_AUDIO_CODEC_CLK, reg_value);
+
+	return (0);
+}

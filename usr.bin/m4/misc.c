@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.44 2014/05/12 19:11:19 espie Exp $	*/
+/*	$OpenBSD: misc.c,v 1.46 2015/12/07 14:12:46 espie Exp $	*/
 /*	$NetBSD: misc.c,v 1.6 1995/09/28 05:37:41 tls Exp $	*/
 
 /*
@@ -63,6 +63,7 @@ unsigned char *bufbase;			/* the base for current ilevel */
 unsigned char *bbase[MAXINP];		/* the base for each ilevel    */
 unsigned char *bp;			/* first available character   */
 unsigned char *endpbb;			/* end of push-back buffer     */
+
 
 /*
  * find the index of second str in the first str.
@@ -186,7 +187,7 @@ enlarge_strspace(void)
 		errx(1, "string space overflow");
 	memcpy(newstrspace, strspace, strsize/2);
 	for (i = 0; i <= sp; i++)
-		if (sstack[i])
+		if (sstack[i] == STORAGE_STRSPACE)
 			mstack[i].sstr = (mstack[i].sstr - strspace)
 			    + newstrspace;
 	ep = (ep-strspace) + newstrspace;
@@ -264,7 +265,7 @@ killdiv(void)
 extern char *__progname;
 
 void
-m4errx(int exitstatus, const char *fmt, ...)
+m4errx(int eval, const char *fmt, ...)
 {
 	fprintf(stderr, "%s: ", __progname);
 	fprintf(stderr, "%s at line %lu: ", CURRENT_NAME, CURRENT_LINE);
@@ -276,7 +277,7 @@ m4errx(int exitstatus, const char *fmt, ...)
 		va_end(ap);
 	}
 	fprintf(stderr, "\n");
-	exit(exitstatus);
+	exit(eval);
 }
 
 /*
@@ -423,6 +424,8 @@ do_emit_synchline(void)
 void
 release_input(struct input_file *f)
 {
+	if (ferror(f->file))
+		errx(1, "Fatal error reading from %s\n", f->name);
 	if (f->file != stdin)
 	    fclose(f->file);
 	f->c = EOF;

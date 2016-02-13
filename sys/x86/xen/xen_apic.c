@@ -74,12 +74,6 @@ static driver_filter_t xen_cpususpend_handler;
 static driver_filter_t xen_cpustophard_handler;
 #endif
 
-/*---------------------------- Extern Declarations ---------------------------*/
-/* Variables used by mp_machdep to perform the MMU related IPIs */
-#ifdef __amd64__
-extern int pmap_pcid_enabled;
-#endif
-
 /*---------------------------------- Macros ----------------------------------*/
 #define	IPI_TO_IDX(ipi) ((ipi) - APIC_IPI_INTS)
 
@@ -423,6 +417,14 @@ xen_invltlb(void *arg)
 
 #ifdef __amd64__
 static int
+xen_invltlb_invpcid(void *arg)
+{
+
+	invltlb_invpcid_handler();
+	return (FILTER_HANDLED);
+}
+
+static int
 xen_invltlb_pcid(void *arg)
 {
 
@@ -438,16 +440,6 @@ xen_invlpg(void *arg)
 	invlpg_handler();
 	return (FILTER_HANDLED);
 }
-
-#ifdef __amd64__
-static int
-xen_invlpg_pcid(void *arg)
-{
-
-	invlpg_pcid_handler();
-	return (FILTER_HANDLED);
-}
-#endif
 
 static int
 xen_invlrng(void *arg)
@@ -532,8 +524,8 @@ xen_setup_cpus(void)
 
 #ifdef __amd64__
 	if (pmap_pcid_enabled) {
-		xen_ipis[IPI_TO_IDX(IPI_INVLTLB)].filter = xen_invltlb_pcid;
-		xen_ipis[IPI_TO_IDX(IPI_INVLPG)].filter = xen_invlpg_pcid;
+		xen_ipis[IPI_TO_IDX(IPI_INVLTLB)].filter = invpcid_works ?
+		    xen_invltlb_invpcid : xen_invltlb_pcid;
 	}
 #endif
 	CPU_FOREACH(i)

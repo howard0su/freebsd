@@ -67,6 +67,10 @@ __FBSDID("$FreeBSD$");
 #include <x86/vmware.h>
 
 #ifdef __i386__
+#if !defined(CPU_DISABLE_SSE) && defined(I686_CPU)
+#define CPU_ENABLE_SSE
+#endif
+
 #define	IDENTBLUE_CYRIX486	0
 #define	IDENTBLUE_IBMCPU	1
 #define	IDENTBLUE_CYRIXM2	2
@@ -83,8 +87,42 @@ static void print_svm_info(void);
 static void print_via_padlock_info(void);
 static void print_vmx_info(void);
 
+int	cpu;			/* Are we 386, 386sx, 486, etc? */
 int	cpu_class;
+u_int	cpu_feature;		/* Feature flags */
+u_int	cpu_feature2;		/* Feature flags */
+u_int	amd_feature;		/* AMD feature flags */
+u_int	amd_feature2;		/* AMD feature flags */
+u_int	amd_pminfo;		/* AMD advanced power management info */
+u_int	via_feature_rng;	/* VIA RNG features */
+u_int	via_feature_xcrypt;	/* VIA ACE features */
+u_int	cpu_high;		/* Highest arg to CPUID */
+u_int	cpu_exthigh;		/* Highest arg to extended CPUID */
+u_int	cpu_id;			/* Stepping ID */
+u_int	cpu_procinfo;		/* HyperThreading Info / Brand Index / CLFUSH */
+u_int	cpu_procinfo2;		/* Multicore info */
+char	cpu_vendor[20];		/* CPU Origin code */
+u_int	cpu_vendor_id;		/* CPU vendor ID */
+#if defined(__amd64__) || defined(CPU_ENABLE_SSE)
+u_int	cpu_fxsr;		/* SSE enabled */
+u_int	cpu_mxcsr_mask;		/* Valid bits in mxcsr */
+#endif
+u_int	cpu_clflush_line_size = 32;
+u_int	cpu_stdext_feature;
+u_int	cpu_stdext_feature2;
+u_int	cpu_max_ext_state_size;
+u_int	cpu_mon_mwait_flags;	/* MONITOR/MWAIT flags (CPUID.05H.ECX) */
+u_int	cpu_mon_min_size;	/* MONITOR minimum range size, bytes */
+u_int	cpu_mon_max_size;	/* MONITOR minimum range size, bytes */
+u_int	cpu_maxphyaddr;		/* Max phys addr width in bits */
 char machine[] = MACHINE;
+
+SYSCTL_UINT(_hw, OID_AUTO, via_feature_rng, CTLFLAG_RD,
+    &via_feature_rng, 0,
+    "VIA RNG feature available in CPU");
+SYSCTL_UINT(_hw, OID_AUTO, via_feature_xcrypt, CTLFLAG_RD,
+    &via_feature_xcrypt, 0,
+    "VIA xcrypt feature available in CPU");
 
 #ifdef __amd64__
 #ifdef SCTL_MASK32
@@ -894,6 +932,8 @@ printcpuinfo(void)
 				       "\005HLE"
 				       /* Advanced Vector Instructions 2 */
 				       "\006AVX2"
+				       /* FDP_EXCPTN_ONLY */
+				       "\007FDPEXC"
 				       /* Supervisor Mode Execution Prot. */
 				       "\010SMEP"
 				       /* Bit Manipulation Instructions */
@@ -903,22 +943,41 @@ printcpuinfo(void)
 				       "\013INVPCID"
 				       /* Restricted Transactional Memory */
 				       "\014RTM"
+				       "\015PQM"
+				       "\016NFPUSG"
+				       "\020PQE"
 				       /* Intel Memory Protection Extensions */
 				       "\017MPX"
 				       /* AVX512 Foundation */
 				       "\021AVX512F"
+				       "\022AVX512DQ"
 				       /* Enhanced NRBG */
 				       "\023RDSEED"
 				       /* ADCX + ADOX */
 				       "\024ADX"
 				       /* Supervisor Mode Access Prevention */
 				       "\025SMAP"
+				       "\026AVX512IFMA"
+				       "\027PCOMMIT"
 				       "\030CLFLUSHOPT"
+				       "\031CLWB"
 				       "\032PROCTRACE"
 				       "\033AVX512PF"
 				       "\034AVX512ER"
 				       "\035AVX512CD"
 				       "\036SHA"
+				       "\037AVX512BW"
+				       );
+			}
+
+			if (cpu_stdext_feature2 != 0) {
+				printf("\n  Structured Extended Features2=0x%b",
+				    cpu_stdext_feature2,
+				       "\020"
+				       "\001PREFETCHWT1"
+				       "\002AVX512VBMI"
+				       "\004PKU"
+				       "\005OSPKE"
 				       );
 			}
 
@@ -1235,6 +1294,8 @@ identify_hypervisor(void)
 			hv_vendor[12] = '\0';
 			if (strcmp(hv_vendor, "VMwareVMware") == 0)
 				vm_guest = VM_GUEST_VMWARE;
+			else if (strcmp(hv_vendor, "Microsoft Hv") == 0)
+				vm_guest = VM_GUEST_HV;
 		}
 		return;
 	}
@@ -1282,6 +1343,33 @@ identify_hypervisor(void)
 }
 
 /*
+ * Clear "Limit CPUID Maxval" bit and return true if the caller should
+ * get the largest standard CPUID function number again if it is set
+ * from BIOS.  It is necessary for probing correct CPU topology later
+ * and for the correct operation of the AVX-aware userspace.
+ */
+bool
+intel_fix_cpuid(void)
+{
+	uint64_t msr;
+
+	if (cpu_vendor_id != CPU_VENDOR_INTEL)
+		return (false);
+	if ((CPUID_TO_FAMILY(cpu_id) == 0xf &&
+	    CPUID_TO_MODEL(cpu_id) >= 0x3) ||
+	    (CPUID_TO_FAMILY(cpu_id) == 0x6 &&
+	    CPUID_TO_MODEL(cpu_id) >= 0xe)) {
+		msr = rdmsr(MSR_IA32_MISC_ENABLE);
+		if ((msr & IA32_MISC_EN_LIMCPUID) != 0) {
+			msr &= ~IA32_MISC_EN_LIMCPUID;
+			wrmsr(MSR_IA32_MISC_ENABLE, msr);
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/*
  * Final stage of CPU identification.
  */
 #ifdef __i386__
@@ -1315,22 +1403,9 @@ identify_cpu(void)
 	identify_hypervisor();
 	cpu_vendor_id = find_cpu_vendor_id();
 
-	/*
-	 * Clear "Limit CPUID Maxval" bit and get the largest standard CPUID
-	 * function number again if it is set from BIOS.  It is necessary
-	 * for probing correct CPU topology later.
-	 * XXX This is only done on the BSP package.
-	 */
-	if (cpu_vendor_id == CPU_VENDOR_INTEL && cpu_high > 0 && cpu_high < 4 &&
-	    ((CPUID_TO_FAMILY(cpu_id) == 0xf && CPUID_TO_MODEL(cpu_id) >= 0x3) ||
-	    (CPUID_TO_FAMILY(cpu_id) == 0x6 && CPUID_TO_MODEL(cpu_id) >= 0xe))) {
-		uint64_t msr;
-		msr = rdmsr(MSR_IA32_MISC_ENABLE);
-		if ((msr & 0x400000ULL) != 0) {
-			wrmsr(MSR_IA32_MISC_ENABLE, msr & ~0x400000ULL);
-			do_cpuid(0, regs);
-			cpu_high = regs[0];
-		}
+	if (intel_fix_cpuid()) {
+		do_cpuid(0, regs);
+		cpu_high = regs[0];
 	}
 
 	if (cpu_high >= 5 && (cpu_feature2 & CPUID2_MON) != 0) {
@@ -1357,6 +1432,7 @@ identify_cpu(void)
 			cpu_stdext_disable = 0;
 		TUNABLE_INT_FETCH("hw.cpu_stdext_disable", &cpu_stdext_disable);
 		cpu_stdext_feature &= ~cpu_stdext_disable;
+		cpu_stdext_feature2 = regs[2];
 	}
 
 #ifdef __i386__
@@ -1701,17 +1777,38 @@ print_INTEL_TLB(u_int data)
 	case 0x8:
 		printf("1st-level instruction cache: 16 KB, 4-way set associative, 32 byte line size\n");
 		break;
+	case 0x9:
+		printf("1st-level instruction cache: 32 KB, 4-way set associative, 64 byte line size\n");
+		break;
 	case 0xa:
 		printf("1st-level data cache: 8 KB, 2-way set associative, 32 byte line size\n");
 		break;
+	case 0xb:
+		printf("Instruction TLB: 4 MByte pages, 4-way set associative, 4 entries\n");
+		break;
 	case 0xc:
 		printf("1st-level data cache: 16 KB, 4-way set associative, 32 byte line size\n");
+		break;
+	case 0xd:
+		printf("1st-level data cache: 16 KBytes, 4-way set associative, 64 byte line size");
+		break;
+	case 0xe:
+		printf("1st-level data cache: 24 KBytes, 6-way set associative, 64 byte line size\n");
+		break;
+	case 0x1d:
+		printf("2nd-level cache: 128 KBytes, 2-way set associative, 64 byte line size\n");
+		break;
+	case 0x21:
+		printf("2nd-level cache: 256 KBytes, 8-way set associative, 64 byte line size\n");
 		break;
 	case 0x22:
 		printf("3rd-level cache: 512 KB, 4-way set associative, sectored cache, 64 byte line size\n");
 		break;
 	case 0x23:
 		printf("3rd-level cache: 1 MB, 8-way set associative, sectored cache, 64 byte line size\n");
+		break;
+	case 0x24:
+		printf("2nd-level cache: 1 MBytes, 16-way set associative, 64 byte line size\n");
 		break;
 	case 0x25:
 		printf("3rd-level cache: 2 MB, 8-way set associative, sectored cache, 64 byte line size\n");
@@ -1725,13 +1822,13 @@ print_INTEL_TLB(u_int data)
 	case 0x30:
 		printf("1st-level instruction cache: 32 KB, 8-way set associative, 64 byte line size\n");
 		break;
-	case 0x39:
+	case 0x39: /* De-listed in SDM rev. 54 */
 		printf("2nd-level cache: 128 KB, 4-way set associative, sectored cache, 64 byte line size\n");
 		break;
-	case 0x3b:
+	case 0x3b: /* De-listed in SDM rev. 54 */
 		printf("2nd-level cache: 128 KB, 2-way set associative, sectored cache, 64 byte line size\n");
 		break;
-	case 0x3c:
+	case 0x3c: /* De-listed in SDM rev. 54 */
 		printf("2nd-level cache: 256 KB, 4-way set associative, sectored cache, 64 byte line size\n");
 		break;
 	case 0x41:
@@ -1755,6 +1852,34 @@ print_INTEL_TLB(u_int data)
 	case 0x47:
 		printf("3rd-level cache: 8 MB, 8-way set associative, 64 byte line size\n");
 		break;
+	case 0x48:
+		printf("2nd-level cache: 3MByte, 12-way set associative, 64 byte line size\n");
+		break;
+	case 0x49:
+		if (CPUID_TO_FAMILY(cpu_id) == 0xf &&
+		    CPUID_TO_MODEL(cpu_id) == 0x6)
+			printf("3rd-level cache: 4MB, 16-way set associative, 64-byte line size\n");
+		else
+			printf("2nd-level cache: 4 MByte, 16-way set associative, 64 byte line size");
+		break;
+	case 0x4a:
+		printf("3rd-level cache: 6MByte, 12-way set associative, 64 byte line size\n");
+		break;
+	case 0x4b:
+		printf("3rd-level cache: 8MByte, 16-way set associative, 64 byte line size\n");
+		break;
+	case 0x4c:
+		printf("3rd-level cache: 12MByte, 12-way set associative, 64 byte line size\n");
+		break;
+	case 0x4d:
+		printf("3rd-level cache: 16MByte, 16-way set associative, 64 byte line size\n");
+		break;
+	case 0x4e:
+		printf("2nd-level cache: 6MByte, 24-way set associative, 64 byte line size\n");
+		break;
+	case 0x4f:
+		printf("Instruction TLB: 4 KByte pages, 32 entries\n");
+		break;
 	case 0x50:
 		printf("Instruction TLB: 4 KB, 2 MB or 4 MB pages, fully associative, 64 entries\n");
 		break;
@@ -1763,6 +1888,21 @@ print_INTEL_TLB(u_int data)
 		break;
 	case 0x52:
 		printf("Instruction TLB: 4 KB, 2 MB or 4 MB pages, fully associative, 256 entries\n");
+		break;
+	case 0x55:
+		printf("Instruction TLB: 2-MByte or 4-MByte pages, fully associative, 7 entries\n");
+		break;
+	case 0x56:
+		printf("Data TLB0: 4 MByte pages, 4-way set associative, 16 entries\n");
+		break;
+	case 0x57:
+		printf("Data TLB0: 4 KByte pages, 4-way associative, 16 entries\n");
+		break;
+	case 0x59:
+		printf("Data TLB0: 4 KByte pages, fully associative, 16 entries\n");
+		break;
+	case 0x5a:
+		printf("Data TLB0: 2-MByte or 4 MByte pages, 4-way set associative, 32 entries\n");
 		break;
 	case 0x5b:
 		printf("Data TLB: 4 KB or 4 MB pages, fully associative, 64 entries\n");
@@ -1776,6 +1916,12 @@ print_INTEL_TLB(u_int data)
 	case 0x60:
 		printf("1st-level data cache: 16 KB, 8-way set associative, sectored cache, 64 byte line size\n");
 		break;
+	case 0x61:
+		printf("Instruction TLB: 4 KByte pages, fully associative, 48 entries\n");
+		break;
+	case 0x63:
+		printf("Data TLB: 1 GByte pages, 4-way set associative, 4 entries\n");
+		break;
 	case 0x66:
 		printf("1st-level data cache: 8 KB, 4-way set associative, sectored cache, 64 byte line size\n");
 		break;
@@ -1785,6 +1931,18 @@ print_INTEL_TLB(u_int data)
 	case 0x68:
 		printf("1st-level data cache: 32 KB, 4 way set associative, sectored cache, 64 byte line size\n");
 		break;
+	case 0x6a:
+		printf("uTLB: 4KByte pages, 8-way set associative, 64 entries\n");
+		break;
+	case 0x6b:
+		printf("DTLB: 4KByte pages, 8-way set associative, 256 entries\n");
+		break;
+	case 0x6c:
+		printf("DTLB: 2M/4M pages, 8-way set associative, 128 entries\n");
+		break;
+	case 0x6d:
+		printf("DTLB: 1 GByte pages, fully associative, 16 entries\n");
+		break;
 	case 0x70:
 		printf("Trace cache: 12K-uops, 8-way set associative\n");
 		break;
@@ -1793,6 +1951,9 @@ print_INTEL_TLB(u_int data)
 		break;
 	case 0x72:
 		printf("Trace cache: 32K-uops, 8-way set associative\n");
+		break;
+	case 0x76:
+		printf("Instruction TLB: 2M/4M pages, fully associative, 8 entries\n");
 		break;
 	case 0x78:
 		printf("2nd-level cache: 1 MB, 4-way set associative, 64-byte line size\n");
@@ -1815,6 +1976,9 @@ print_INTEL_TLB(u_int data)
 	case 0x7f:
 		printf("2nd-level cache: 512-KB, 2-way set associative, 64-byte line size\n");
 		break;
+	case 0x80:
+		printf("2nd-level cache: 512 KByte, 8-way set associative, 64-byte line size\n");
+		break;
 	case 0x82:
 		printf("2nd-level cache: 256 KB, 8-way set associative, 32 byte line size\n");
 		break;
@@ -1833,11 +1997,98 @@ print_INTEL_TLB(u_int data)
 	case 0x87:
 		printf("2nd-level cache: 1 MB, 8-way set associative, 64 byte line size\n");
 		break;
+	case 0xa0:
+		printf("DTLB: 4k pages, fully associative, 32 entries\n");
+		break;
 	case 0xb0:
 		printf("Instruction TLB: 4 KB Pages, 4-way set associative, 128 entries\n");
 		break;
+	case 0xb1:
+		printf("Instruction TLB: 2M pages, 4-way, 8 entries or 4M pages, 4-way, 4 entries\n");
+		break;
+	case 0xb2:
+		printf("Instruction TLB: 4KByte pages, 4-way set associative, 64 entries\n");
+		break;
 	case 0xb3:
 		printf("Data TLB: 4 KB Pages, 4-way set associative, 128 entries\n");
+		break;
+	case 0xb4:
+		printf("Data TLB1: 4 KByte pages, 4-way associative, 256 entries\n");
+		break;
+	case 0xb5:
+		printf("Instruction TLB: 4KByte pages, 8-way set associative, 64 entries\n");
+		break;
+	case 0xb6:
+		printf("Instruction TLB: 4KByte pages, 8-way set associative, 128 entries\n");
+		break;
+	case 0xba:
+		printf("Data TLB1: 4 KByte pages, 4-way associative, 64 entries\n");
+		break;
+	case 0xc0:
+		printf("Data TLB: 4 KByte and 4 MByte pages, 4-way associative, 8 entries\n");
+		break;
+	case 0xc1:
+		printf("Shared 2nd-Level TLB: 4 KByte/2MByte pages, 8-way associative, 1024 entries\n");
+		break;
+	case 0xc2:
+		printf("DTLB: 4 KByte/2 MByte pages, 4-way associative, 16 entries\n");
+		break;
+	case 0xc3:
+		printf("Shared 2nd-Level TLB: 4 KByte /2 MByte pages, 6-way associative, 1536 entries. Also 1GBbyte pages, 4-way, 16 entries\n");
+		break;
+	case 0xca:
+		printf("Shared 2nd-Level TLB: 4 KByte pages, 4-way associative, 512 entries\n");
+		break;
+	case 0xd0:
+		printf("3rd-level cache: 512 KByte, 4-way set associative, 64 byte line size\n");
+		break;
+	case 0xd1:
+		printf("3rd-level cache: 1 MByte, 4-way set associative, 64 byte line size\n");
+		break;
+	case 0xd2:
+		printf("3rd-level cache: 2 MByte, 4-way set associative, 64 byte line size\n");
+		break;
+	case 0xd6:
+		printf("3rd-level cache: 1 MByte, 8-way set associative, 64 byte line size\n");
+		break;
+	case 0xd7:
+		printf("3rd-level cache: 2 MByte, 8-way set associative, 64 byte line size\n");
+		break;
+	case 0xd8:
+		printf("3rd-level cache: 4 MByte, 8-way set associative, 64 byte line size\n");
+		break;
+	case 0xdc:
+		printf("3rd-level cache: 1.5 MByte, 12-way set associative, 64 byte line size\n");
+		break;
+	case 0xdd:
+		printf("3rd-level cache: 3 MByte, 12-way set associative, 64 byte line size\n");
+		break;
+	case 0xde:
+		printf("3rd-level cache: 6 MByte, 12-way set associative, 64 byte line size\n");
+		break;
+	case 0xe2:
+		printf("3rd-level cache: 2 MByte, 16-way set associative, 64 byte line size\n");
+		break;
+	case 0xe3:
+		printf("3rd-level cache: 4 MByte, 16-way set associative, 64 byte line size\n");
+		break;
+	case 0xe4:
+		printf("3rd-level cache: 8 MByte, 16-way set associative, 64 byte line size\n");
+		break;
+	case 0xea:
+		printf("3rd-level cache: 12MByte, 24-way set associative, 64 byte line size\n");
+		break;
+	case 0xeb:
+		printf("3rd-level cache: 18MByte, 24-way set associative, 64 byte line size\n");
+		break;
+	case 0xec:
+		printf("3rd-level cache: 24MByte, 24-way set associative, 64 byte line size\n");
+		break;
+	case 0xf0:
+		printf("64-Byte prefetching\n");
+		break;
+	case 0xf1:
+		printf("128-Byte prefetching\n");
 		break;
 	}
 }

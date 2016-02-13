@@ -36,7 +36,13 @@ CODE {
 	{
 		return (0);
 	}
-	
+
+	static int
+	null_msix_bar(device_t dev, device_t child)
+	{
+		return (-1);
+	}
+
 	static device_t
 	null_create_iov_child(device_t bus, device_t pf, uint16_t rid,
 	    uint16_t vid, uint16_t did)
@@ -192,6 +198,16 @@ METHOD int msix_count {
 	device_t	child;
 } DEFAULT null_msi_count;
 
+METHOD int msix_pba_bar {
+	device_t	dev;
+	device_t	child;
+} DEFAULT null_msix_bar;
+
+METHOD int msix_table_bar {
+	device_t	dev;
+	device_t	child;
+} DEFAULT null_msix_bar;
+
 METHOD uint16_t get_rid {
 	device_t	dev;
 	device_t	child;
@@ -214,22 +230,6 @@ METHOD int iov_detach {
 	device_t	child;
 };
 
-METHOD int init_iov {
-	device_t		dev;
-	uint16_t		num_vfs;
-	const struct nvlist	*config;
-};
-
-METHOD void uninit_iov {
-	device_t		dev;
-};
-
-METHOD int add_vf {
-	device_t		dev;
-	uint16_t		vfnum;
-	const struct nvlist	*config;
-};
-
 METHOD device_t create_iov_child {
 	device_t bus;
 	device_t pf;
@@ -237,4 +237,3 @@ METHOD device_t create_iov_child {
 	uint16_t vid;
 	uint16_t did;
 } DEFAULT null_create_iov_child;
-

@@ -5,9 +5,9 @@
 PROG=	bhyvectl
 SRCS=	bhyvectl.c
 
-MAN=
+MAN=	bhyvectl.8
 
-LIBADD=	vmmapi
+LIBADD=	vmmapi util
 
 WARNS?=	3
 

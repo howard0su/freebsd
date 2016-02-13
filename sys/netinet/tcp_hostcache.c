@@ -32,8 +32,8 @@
  * table to a dedicated structure indexed by the remote IP address.  It keeps
  * information on the measured TCP parameters of past TCP sessions to allow
  * better initial start values to be used with later connections to/from the
- * same source.  Depending on the network parameters (delay, bandwidth, max
- * MTU, congestion window) between local and remote sites, this can lead to
+ * same source.  Depending on the network parameters (delay, max MTU,
+ * congestion window) between local and remote sites, this can lead to
  * significant speed-ups for new TCP connections after the first one.
  *
  * Due to the tcp_hostcache, all TCP-specific metrics information in the
@@ -117,6 +117,7 @@ static VNET_DEFINE(struct callout, tcp_hc_callout);
 static struct hc_metrics *tcp_hc_lookup(struct in_conninfo *);
 static struct hc_metrics *tcp_hc_insert(struct in_conninfo *);
 static int sysctl_tcp_hc_list(SYSCTL_HANDLER_ARGS);
+static int sysctl_tcp_hc_purgenow(SYSCTL_HANDLER_ARGS);
 static void tcp_hc_purge_internal(int);
 static void tcp_hc_purge(void *);
 
@@ -155,6 +156,9 @@ SYSCTL_PROC(_net_inet_tcp_hostcache, OID_AUTO, list,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_SKIP, 0, 0,
     sysctl_tcp_hc_list, "A", "List of all hostcache entries");
 
+SYSCTL_PROC(_net_inet_tcp_hostcache, OID_AUTO, purgenow,
+    CTLTYPE_INT | CTLFLAG_RW, NULL, 0,
+    sysctl_tcp_hc_purgenow, "I", "Immediately purge all entries");
 
 static MALLOC_DEFINE(M_HOSTCACHE, "hostcache", "TCP hostcache");
 
@@ -234,7 +238,7 @@ tcp_hc_init(void)
 	/*
 	 * Set up periodic cache cleanup.
 	 */
-	callout_init(&V_tcp_hc_callout, CALLOUT_MPSAFE);
+	callout_init(&V_tcp_hc_callout, 1);
 	callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
 	    tcp_hc_purge, curvnet);
 }
@@ -436,7 +440,6 @@ tcp_hc_get(struct in_conninfo *inc, struct hc_metrics_lite *hc_metrics_lite)
 	hc_metrics_lite->rmx_ssthresh = hc_entry->rmx_ssthresh;
 	hc_metrics_lite->rmx_rtt = hc_entry->rmx_rtt;
 	hc_metrics_lite->rmx_rttvar = hc_entry->rmx_rttvar;
-	hc_metrics_lite->rmx_bandwidth = hc_entry->rmx_bandwidth;
 	hc_metrics_lite->rmx_cwnd = hc_entry->rmx_cwnd;
 	hc_metrics_lite->rmx_sendpipe = hc_entry->rmx_sendpipe;
 	hc_metrics_lite->rmx_recvpipe = hc_entry->rmx_recvpipe;
@@ -551,14 +554,6 @@ tcp_hc_update(struct in_conninfo *inc, struct hc_metrics_lite *hcml)
 			    (hc_entry->rmx_ssthresh + hcml->rmx_ssthresh) / 2;
 		TCPSTAT_INC(tcps_cachedssthresh);
 	}
-	if (hcml->rmx_bandwidth != 0) {
-		if (hc_entry->rmx_bandwidth == 0)
-			hc_entry->rmx_bandwidth = hcml->rmx_bandwidth;
-		else
-			hc_entry->rmx_bandwidth =
-			    (hc_entry->rmx_bandwidth + hcml->rmx_bandwidth) / 2;
-		/* TCPSTAT_INC(tcps_cachedbandwidth); */
-	}
 	if (hcml->rmx_cwnd != 0) {
 		if (hc_entry->rmx_cwnd == 0)
 			hc_entry->rmx_cwnd = hcml->rmx_cwnd;
@@ -608,7 +603,7 @@ sysctl_tcp_hc_list(SYSCTL_HANDLER_ARGS)
 		SBUF_INCLUDENUL);
 
 	sbuf_printf(&sb,
-	        "\nIP address        MTU  SSTRESH      RTT   RTTVAR BANDWIDTH "
+	        "\nIP address        MTU  SSTRESH      RTT   RTTVAR "
 		"    CWND SENDPIPE RECVPIPE HITS  UPD  EXP\n");
 
 #define msec(u) (((u) + 500) / 1000)
@@ -617,8 +612,8 @@ sysctl_tcp_hc_list(SYSCTL_HANDLER_ARGS)
 		TAILQ_FOREACH(hc_entry, &V_tcp_hostcache.hashbase[i].hch_bucket,
 			      rmx_q) {
 			sbuf_printf(&sb,
-			    "%-15s %5lu %8lu %6lums %6lums %9lu %8lu %8lu %8lu "
-			    "%4lu %4lu %4i\n",
+			    "%-15s %5lu %8lu %6lums %6lums %8lu %8lu %8lu %4lu "
+			    "%4lu %4i\n",
 			    hc_entry->ip4.s_addr ? inet_ntoa(hc_entry->ip4) :
 #ifdef INET6
 				ip6_sprintf(ip6buf, &hc_entry->ip6),
@@ -631,7 +626,6 @@ sysctl_tcp_hc_list(SYSCTL_HANDLER_ARGS)
 				(RTM_RTTUNIT / (hz * TCP_RTT_SCALE))),
 			    msec(hc_entry->rmx_rttvar *
 				(RTM_RTTUNIT / (hz * TCP_RTTVAR_SCALE))),
-			    hc_entry->rmx_bandwidth * 8,
 			    hc_entry->rmx_cwnd,
 			    hc_entry->rmx_sendpipe,
 			    hc_entry->rmx_recvpipe,
@@ -695,4 +689,25 @@ tcp_hc_purge(void *arg)
 	callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
 	    tcp_hc_purge, arg);
 	CURVNET_RESTORE();
+}
+
+/*
+ * Expire and purge all entries in hostcache immediately.
+ */
+static int
+sysctl_tcp_hc_purgenow(SYSCTL_HANDLER_ARGS)
+{
+	int error, val;
+
+	val = 0;
+	error = sysctl_handle_int(oidp, &val, 0, req);
+	if (error || !req->newptr)
+		return (error);
+
+	tcp_hc_purge_internal(1);
+
+	callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
+	    tcp_hc_purge, curvnet);
+
+	return (0);
 }

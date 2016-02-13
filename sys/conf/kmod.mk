@@ -28,8 +28,8 @@
 #
 # KMODUNLOAD	Command to unload a kernel module [/sbin/kldunload]
 #
-# MFILES	Optionally a list of interfaces used by the module.
-#		This file contains a default list of interfaces.
+# KMODISLOADED	Command to check whether a kernel module is
+#		loaded [/sbin/kldstat -q -n]
 #
 # PROG		The name of the kernel module to build.
 #		If not supplied, ${KMOD}.ko is used.
@@ -59,10 +59,14 @@
 # 	unload:
 #		Unload a module.
 #
+#	reload:
+#		Unload if loaded, then load.
+#
 
 AWK?=		awk
 KMODLOAD?=	/sbin/kldload
 KMODUNLOAD?=	/sbin/kldunload
+KMODISLOADED?=	/sbin/kldstat -q -n
 OBJCOPY?=	objcopy
 
 .include <bsd.init.mk>
@@ -72,7 +76,7 @@ OBJCOPY?=	objcopy
 .include <bsd.compiler.mk>
 .include "config.mk"
 
-.SUFFIXES: .out .o .c .cc .cxx .C .y .l .s .S
+.SUFFIXES: .out .o .c .cc .cxx .C .y .l .s .S .m
 
 # amd64 and mips use direct linking for kmod, all others use shared binaries
 .if ${MACHINE_CPUARCH} != amd64 && ${MACHINE_CPUARCH} != mips
@@ -114,6 +118,10 @@ LDFLAGS+=	-d -warn-common
 CFLAGS+=	${DEBUG_FLAGS}
 .if ${MACHINE_CPUARCH} == amd64
 CFLAGS+=	-fno-omit-frame-pointer -mno-omit-leaf-frame-pointer
+.endif
+
+.if ${MACHINE_CPUARCH} == "aarch64"
+CFLAGS+=	-fPIC
 .endif
 
 # Temporary workaround for PR 196407, which contains the fascinating details.
@@ -175,17 +183,27 @@ PROG=	${KMOD}.ko
 .if !defined(DEBUG_FLAGS)
 FULLPROG=	${PROG}
 .else
-FULLPROG=	${PROG}.debug
-${PROG}: ${FULLPROG} ${PROG}.symbols
-	${OBJCOPY} --strip-debug --add-gnu-debuglink=${PROG}.symbols\
+FULLPROG=	${PROG}.full
+${PROG}: ${FULLPROG} ${PROG}.debug
+	${OBJCOPY} --strip-debug --add-gnu-debuglink=${PROG}.debug \
 	    ${FULLPROG} ${.TARGET}
-${PROG}.symbols: ${FULLPROG}
+${PROG}.debug: ${FULLPROG}
 	${OBJCOPY} --only-keep-debug ${FULLPROG} ${.TARGET}
 .endif
 
 .if ${__KLD_SHARED} == yes
 ${FULLPROG}: ${KMOD}.kld
+.if ${MACHINE_CPUARCH} != "aarch64"
 	${LD} -Bshareable ${_LDFLAGS} -o ${.TARGET} ${KMOD}.kld
+.else
+#XXXKIB Relocatable linking in aarch64 ld from binutils 2.25.1 does
+#       not work.  The linker corrupts the references to the external
+#       symbols which are defined by other object in the linking set
+#       and should therefore loose the GOT entry.  The problem seems
+#       to be fixed in the binutils-gdb git HEAD as of 2015-10-04.  Hack
+#       below allows to get partially functioning modules for now.
+	${LD} -Bshareable ${_LDFLAGS} -o ${.TARGET} ${OBJS}
+.endif
 .if !defined(DEBUG_FLAGS)
 	${OBJCOPY} --strip-debug ${.TARGET}
 .endif
@@ -214,7 +232,7 @@ ${FULLPROG}: ${OBJS}
 .else
 	grep -v '^#' < ${EXPORT_SYMS} > export_syms
 .endif
-	awk -f ${SYSDIR}/conf/kmod_syms.awk ${.TARGET} \
+	${AWK} -f ${SYSDIR}/conf/kmod_syms.awk ${.TARGET} \
 	    export_syms | xargs -J% ${OBJCOPY} % ${.TARGET}
 .endif
 .endif
@@ -223,7 +241,7 @@ ${FULLPROG}: ${OBJS}
 .endif
 
 _ILINKS=machine
-.if ${MACHINE} != ${MACHINE_CPUARCH}
+.if ${MACHINE} != ${MACHINE_CPUARCH} && ${MACHINE} != "arm64"
 _ILINKS+=${MACHINE_CPUARCH}
 .endif
 .if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"
@@ -239,7 +257,7 @@ beforedepend: ${_ILINKS}
 # causes all the modules to be rebuilt when the directory pointed to changes.
 .for _link in ${_ILINKS}
 .if !exists(${.OBJDIR}/${_link})
-${OBJS}: ${.OBJDIR}/${_link}
+${OBJS}: ${_link}
 .endif
 .endfor
 
@@ -253,12 +271,10 @@ SYSDIR=	${_dir}
 .error "can't find kernel source tree"
 .endif
 
-.for _link in ${_ILINKS}
-.PHONY: ${_link}
-${_link}: ${.OBJDIR}/${_link}
+.NOPATH: ${_ILINKS}
 
-${.OBJDIR}/${_link}:
-	@case ${.TARGET:T} in \
+${_ILINKS}:
+	@case ${.TARGET} in \
 	machine) \
 		path=${SYSDIR}/${MACHINE}/include ;; \
 	*) \
@@ -267,12 +283,11 @@ ${.OBJDIR}/${_link}:
 	path=`(cd $$path && /bin/pwd)` ; \
 	${ECHO} ${.TARGET:T} "->" $$path ; \
 	ln -sf $$path ${.TARGET:T}
-.endfor
 
 CLEANFILES+= ${PROG} ${KMOD}.kld ${OBJS}
 
 .if defined(DEBUG_FLAGS)
-CLEANFILES+= ${FULLPROG} ${PROG}.symbols
+CLEANFILES+= ${FULLPROG} ${PROG}.debug
 .endif
 
 .if !target(install)
@@ -283,14 +298,15 @@ _INSTALLFLAGS:=	${_INSTALLFLAGS${ie}}
 .endfor
 
 .if !target(realinstall)
+KERN_DEBUGDIR?=	${DEBUGDIR}
 realinstall: _kmodinstall
 .ORDER: beforeinstall _kmodinstall
 _kmodinstall:
 	${INSTALL} -o ${KMODOWN} -g ${KMODGRP} -m ${KMODMODE} \
-	    ${_INSTALLFLAGS} ${PROG} ${DESTDIR}${KMODDIR}
+	    ${_INSTALLFLAGS} ${PROG} ${DESTDIR}${KMODDIR}/
 .if defined(DEBUG_FLAGS) && !defined(INSTALL_NODEBUG) && ${MK_KERNEL_SYMBOLS} != "no"
 	${INSTALL} -o ${KMODOWN} -g ${KMODGRP} -m ${KMODMODE} \
-	    ${_INSTALLFLAGS} ${PROG}.symbols ${DESTDIR}${KMODDIR}
+	    ${_INSTALLFLAGS} ${PROG}.debug ${DESTDIR}${KERN_DEBUGDIR}${KMODDIR}/
 .endif
 
 .include <bsd.links.mk>
@@ -316,7 +332,11 @@ load: ${PROG}
 
 .if !target(unload)
 unload:
-	${KMODUNLOAD} -v ${PROG}
+	if ${KMODISLOADED} ${PROG} ; then ${KMODUNLOAD} -v ${PROG} ; fi
+.endif
+
+.if !target(reload)
+reload: unload load
 .endif
 
 .if defined(KERNBUILDDIR)
@@ -342,37 +362,6 @@ ${_src}:
 # Respect configuration-specific C flags.
 CFLAGS+=	${CONF_CFLAGS}
 
-MFILES?= dev/acpica/acpi_if.m dev/acpi_support/acpi_wmi_if.m \
-	dev/agp/agp_if.m dev/ata/ata_if.m dev/eisa/eisa_if.m \
-	dev/fb/fb_if.m dev/gpio/gpio_if.m dev/gpio/gpiobus_if.m \
-	dev/iicbus/iicbb_if.m dev/iicbus/iicbus_if.m \
-	dev/mbox/mbox_if.m dev/mmc/mmcbr_if.m dev/mmc/mmcbus_if.m \
-	dev/mii/miibus_if.m dev/mvs/mvs_if.m dev/ofw/ofw_bus_if.m \
-	dev/pccard/card_if.m dev/pccard/power_if.m dev/pci/pci_if.m \
-	dev/pci/pcib_if.m dev/ppbus/ppbus_if.m \
-	dev/sdhci/sdhci_if.m dev/smbus/smbus_if.m dev/spibus/spibus_if.m \
-	dev/sound/pci/hda/hdac_if.m \
-	dev/sound/pcm/ac97_if.m dev/sound/pcm/channel_if.m \
-	dev/sound/pcm/feeder_if.m dev/sound/pcm/mixer_if.m \
-	dev/sound/midi/mpu_if.m dev/sound/midi/mpufoi_if.m \
-	dev/sound/midi/synth_if.m dev/usb/usb_if.m isa/isa_if.m \
-	kern/bus_if.m kern/clock_if.m \
-	kern/cpufreq_if.m kern/device_if.m kern/serdev_if.m \
-	libkern/iconv_converter_if.m opencrypto/cryptodev_if.m \
-	pc98/pc98/canbus_if.m dev/etherswitch/mdio_if.m
-
-.for _srcsrc in ${MFILES}
-.for _ext in c h
-.for _src in ${SRCS:M${_srcsrc:T:R}.${_ext}}
-CLEANFILES+=	${_src}
-.if !target(${_src})
-${_src}: ${SYSDIR}/tools/makeobjops.awk ${SYSDIR}/${_srcsrc}
-	${AWK} -f ${SYSDIR}/tools/makeobjops.awk ${SYSDIR}/${_srcsrc} -${_ext}
-.endif
-.endfor # _src
-.endfor # _ext
-.endfor # _srcsrc
-
 .if !empty(SRCS:Mvnode_if.c)
 CLEANFILES+=	vnode_if.c
 vnode_if.c: ${SYSDIR}/tools/vnode_if.awk ${SYSDIR}/kern/vnode_if.src
@@ -390,6 +379,28 @@ vnode_if_newproto.h:
 vnode_if_typedef.h:
 	${AWK} -f ${SYSDIR}/tools/vnode_if.awk ${SYSDIR}/kern/vnode_if.src -q
 .endif
+
+# Build _if.[ch] from _if.m, and clean them when we're done.
+# This is duplicated in sys/modules/Makefile.
+.if !defined(__MPATH)
+__MPATH!=find ${SYSDIR:tA}/ -name \*_if.m
+.export __MPATH
+.endif
+_MFILES=${__MPATH:T:O}
+_MPATH=${__MPATH:H:O:u}
+.PATH.m: ${_MPATH}
+.for _i in ${SRCS:M*_if.[ch]}
+_MATCH=M${_i:R:S/$/.m/}
+_MATCHES=${_MFILES:${_MATCH}}
+.if !empty(_MATCHES)
+CLEANFILES+=	${_i}
+.endif
+.endfor # _i
+.m.c:	${SYSDIR}/tools/makeobjops.awk
+	${AWK} -f ${SYSDIR}/tools/makeobjops.awk ${.IMPSRC} -c
+
+.m.h:	${SYSDIR}/tools/makeobjops.awk
+	${AWK} -f ${SYSDIR}/tools/makeobjops.awk ${.IMPSRC} -h
 
 .for _i in mii pccard
 .if !empty(SRCS:M${_i}devs.h)

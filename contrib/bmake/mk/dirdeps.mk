@@ -1,4 +1,4 @@
-# $Id: dirdeps.mk,v 1.49 2015/03/11 21:39:28 sjg Exp $
+# $Id: dirdeps.mk,v 1.55 2015/10/20 22:04:53 sjg Exp $
 
 # Copyright (c) 2010-2013, Juniper Networks, Inc.
 # All rights reserved.
@@ -242,6 +242,21 @@ DEP_${TARGET_SPEC_VARS:[$i]} := ${_tspec:[$i]}
 DEP_MACHINE := ${_DEP_TARGET_SPEC}
 .endif
 
+.if ${MAKEFILE:T} == ${.PARSEFILE} && empty(DIRDEPS) && ${.TARGETS:Uall:M*/*} != ""
+# This little trick let's us do
+#
+# mk -f dirdeps.mk some/dir.${TARGET_SPEC}
+#
+all:
+${.TARGETS:Nall}: all
+DIRDEPS := ${.TARGETS:M*/*}
+# so that -DNO_DIRDEPS works
+DEP_RELDIR := ${DIRDEPS:R:[1]}
+# disable DIRDEPS_CACHE as it does not like this trick
+MK_DIRDEPS_CACHE = no
+.endif
+
+
 # pickup customizations
 # as below you can use !target(_DIRDEP_USE) to protect things
 # which should only be done once.
@@ -349,7 +364,7 @@ BUILD_DIRDEPS ?= yes
 .if !defined(NO_DIRDEPS)
 .if ${MK_DIRDEPS_CACHE} == "yes"
 # this is where we will cache all our work
-DIRDEPS_CACHE?= ${_OBJDIR}/dirdeps.cache${.TARGETS:Nall:O:u:ts-:S,^,.,:N.}
+DIRDEPS_CACHE?= ${_OBJDIR}/dirdeps.cache${.TARGETS:Nall:O:u:ts-:S,/,_,g:S,^,.,:N.}
 
 # just ensure this exists
 build-dirdeps:
@@ -383,6 +398,7 @@ ${DIRDEPS_CACHE}:	.META .NOMETA_CMP
 	DIRDEPS="${DIRDEPS}" \
 	MAKEFLAGS= ${.MAKE} -C ${_CURDIR} -f ${BUILD_DIRDEPS_MAKEFILE} \
 	${BUILD_DIRDEPS_TARGETS} BUILD_DIRDEPS_CACHE=yes \
+	.MAKE.DEPENDFILE=.none \
 	3>&1 1>&2 | sed 's,${SRCTOP},$${SRCTOP},g' >> ${.TARGET}.new && \
 	mv ${.TARGET}.new ${.TARGET}
 
@@ -394,13 +410,14 @@ _count_dirdeps: .NOMETA
 	@echo '.info $${.newline}$${TRACER}Makefiles read: total=${.MAKE.MAKEFILES:[#]} depend=${.MAKE.MAKEFILES:M*depend*:[#]} dirdeps=${.ALLTARGETS:M${SRCTOP}*:O:u:[#]}' >&3
 
 .endif
-.endif
-.elif !target(_count_dirdeps)
+.elif !make(dirdeps) && !target(_count_dirdeps)
 beforedirdeps: _count_dirdeps
 _count_dirdeps: .NOMETA
 	@echo "${TRACER}Makefiles read: total=${.MAKE.MAKEFILES:[#]} depend=${.MAKE.MAKEFILES:M*depend*:[#]} dirdeps=${.ALLTARGETS:M${SRCTOP}*:O:u:[#]} seconds=`expr ${now_utc} - ${start_utc}`"
 
 .endif
+.endif
+
 .if ${BUILD_DIRDEPS} == "yes"
 .if ${DEBUG_DIRDEPS:@x@${DEP_RELDIR:M$x}${${DEP_RELDIR}.${DEP_MACHINE}:L:M$x}@} != ""
 _debug_reldir = 1
@@ -586,6 +603,11 @@ _qm := ${_m:C;(\.depend)$;\1.${d:E};:${M_dep_qual_fixes:ts:}}
 _DEP_TARGET_SPEC := ${d:E}
 # some makefiles may still look at this
 _DEP_MACHINE := ${d:E:C/,.*//}
+# set this "just in case" 
+# we can skip :tA since we computed the path above
+DEP_RELDIR := ${_m:H:S,${SRCTOP}/,,}
+# and reset this
+DIRDEPS =
 .if ${_debug_reldir} && ${_qm} != ${_m}
 .info loading ${_m} for ${d:E}
 .endif
@@ -601,13 +623,15 @@ _DEP_MACHINE := ${d:E:C/,.*//}
 .elif ${.MAKE.LEVEL} > 42
 .error You should have stopped recursing by now.
 .else
-_DEP_RELDIR := ${DEP_RELDIR}
+# we are building something
+DEP_RELDIR := ${RELDIR}
+_DEP_RELDIR := ${RELDIR}
 # pickup local dependencies
 .-include <.depend>
 .endif
 
 # bootstrapping new dependencies made easy?
-.if make(bootstrap*) && !target(bootstrap)
+.if (make(bootstrap) || make(bootstrap-recurse)) && !target(bootstrap)
 
 .if exists(${.CURDIR}/${.MAKE.DEPENDFILE:T})
 # stop here

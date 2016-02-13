@@ -758,7 +758,6 @@ aml8726_sdxc_attach(device_t dev)
 		device_printf(dev, "unsupported SoC\n");
 		return (ENXIO);
 		/* NOTREACHED */
-		break;
 	}
 
 	node = ofw_bus_get_node(dev);
@@ -1378,3 +1377,4 @@ static devclass_t aml8726_sdxc_devclass;
 DRIVER_MODULE(aml8726_sdxc, simplebus, aml8726_sdxc_driver,
     aml8726_sdxc_devclass, 0, 0);
 MODULE_DEPEND(aml8726_sdxc, aml8726_gpio, 1, 1, 1);
+DRIVER_MODULE(mmc, aml8726_sdxc, mmc_driver, mmc_devclass, NULL, NULL);

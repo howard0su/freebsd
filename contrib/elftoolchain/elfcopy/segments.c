@@ -34,7 +34,7 @@
 
 #include "elfcopy.h"
 
-ELFTC_VCSID("$Id: segments.c 3177 2015-03-30 18:19:41Z emaste $");
+ELFTC_VCSID("$Id: segments.c 3269 2015-12-11 18:38:43Z kaiwang27 $");
 
 static void	insert_to_inseg_list(struct segment *seg, struct section *sec);
 
@@ -76,8 +76,6 @@ add_to_inseg_list(struct elfcopy *ecp, struct section *s)
 			continue;
 		if (s->off + s->sz > seg->off + seg->fsz &&
 		    s->type != SHT_NOBITS)
-			continue;
-		if (s->off + s->sz > seg->off + seg->msz)
 			continue;
 		if (s->vma + s->sz > seg->addr + seg->msz)
 			continue;
@@ -442,7 +440,7 @@ copy_phdr(struct elfcopy *ecp)
 			s = seg->v_sec[i];
 			seg->msz = s->vma + s->sz - seg->addr;
 			if (s->type != SHT_NOBITS)
-				seg->fsz = seg->msz;
+				seg->fsz = s->off + s->sz - seg->off;
 		}
 	}
 

@@ -87,8 +87,6 @@ __FBSDID("$FreeBSD$");
 #include <xen/interface/io/netif.h>
 #include <xen/xenbus/xenbusvar.h>
 
-#include <machine/xen/xenvar.h>
-
 /*--------------------------- Compile-time Tunables --------------------------*/
 
 /*---------------------------------- Macros ----------------------------------*/
@@ -132,7 +130,7 @@ static MALLOC_DEFINE(M_XENNETBACK, "xnb", "Xen Net Back Driver Data");
 	req < rsp ? req : rsp;                                          \
 })
 
-#define	virt_to_mfn(x) (vtomach(x) >> PAGE_SHIFT)
+#define	virt_to_mfn(x) (vtophys(x) >> PAGE_SHIFT)
 #define	virt_to_offset(x) ((x) & (PAGE_SIZE - 1))
 
 /**
@@ -526,13 +524,15 @@ xnb_dump_gnttab_copy(const struct gnttab_copy *entry)
 	if (entry->flags & GNTCOPY_dest_gref)
 		printf("gnttab dest ref=\t%u\n", entry->dest.u.ref);
 	else
-		printf("gnttab dest gmfn=\t%lu\n", entry->dest.u.gmfn);
+		printf("gnttab dest gmfn=\t%"PRI_xen_pfn"\n",
+		       entry->dest.u.gmfn);
 	printf("gnttab dest offset=\t%hu\n", entry->dest.offset);
 	printf("gnttab dest domid=\t%hu\n", entry->dest.domid);
 	if (entry->flags & GNTCOPY_source_gref)
 		printf("gnttab source ref=\t%u\n", entry->source.u.ref);
 	else
-		printf("gnttab source gmfn=\t%lu\n", entry->source.u.gmfn);
+		printf("gnttab source gmfn=\t%"PRI_xen_pfn"\n",
+		       entry->source.u.gmfn);
 	printf("gnttab source offset=\t%hu\n", entry->source.offset);
 	printf("gnttab source domid=\t%hu\n", entry->source.domid);
 	printf("gnttab len=\t%hu\n", entry->len);
@@ -625,8 +625,7 @@ xnb_free_communication_mem(struct xnb_softc *xnb)
 {
 	if (xnb->kva != 0) {
 		if (xnb->pseudo_phys_res != NULL) {
-			bus_release_resource(xnb->dev, SYS_RES_MEMORY,
-			    xnb->pseudo_phys_res_id,
+			xenmem_free(xnb->dev, xnb->pseudo_phys_res_id,
 			    xnb->pseudo_phys_res);
 			xnb->pseudo_phys_res = NULL;
 		}
@@ -819,10 +818,8 @@ xnb_alloc_communication_mem(struct xnb_softc *xnb)
 	 * into this space.
 	 */
 	xnb->pseudo_phys_res_id = 0;
-	xnb->pseudo_phys_res = bus_alloc_resource(xnb->dev, SYS_RES_MEMORY,
-						  &xnb->pseudo_phys_res_id,
-						  0, ~0, xnb->kva_size,
-						  RF_ACTIVE);
+	xnb->pseudo_phys_res = xenmem_alloc(xnb->dev, &xnb->pseudo_phys_res_id,
+	    xnb->kva_size);
 	if (xnb->pseudo_phys_res == NULL) {
 		xnb->kva = 0;
 		return (ENOMEM);

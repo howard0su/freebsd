@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 #include <sys/sbuf.h>
 #include <sys/sysctl.h>
+#include <sys/taskqueue.h>
 #include <sys/time.h>
 #include <sys/vmem.h>
 
@@ -475,6 +476,8 @@ malloc(unsigned long size, struct malloc_type *mtp, int flags)
 	if (flags & M_WAITOK)
 		KASSERT(curthread->td_intr_nesting_level == 0,
 		   ("malloc(M_WAITOK) in interrupt context"));
+	KASSERT(curthread->td_critnest == 0 || SCHEDULER_STOPPED(),
+	    ("malloc: called with spinlock or critical section held"));
 
 #ifdef DEBUG_MEMGUARD
 	if (memguard_cmp_mtp(mtp, size)) {
@@ -541,6 +544,8 @@ free(void *addr, struct malloc_type *mtp)
 	u_long size;
 
 	KASSERT(mtp->ks_magic == M_MAGIC, ("free: bad malloc type magic"));
+	KASSERT(curthread->td_critnest == 0 || SCHEDULER_STOPPED(),
+	    ("free: called with spinlock or critical section held"));
 
 	/* free(NULL, ...) does nothing */
 	if (addr == NULL)
@@ -604,6 +609,8 @@ realloc(void *addr, unsigned long size, struct malloc_type *mtp, int flags)
 
 	KASSERT(mtp->ks_magic == M_MAGIC,
 	    ("realloc: bad malloc type magic"));
+	KASSERT(curthread->td_critnest == 0 || SCHEDULER_STOPPED(),
+	    ("realloc: called with spinlock or critical section held"));
 
 	/* realloc(NULL, ...) is equivalent to malloc(...) */
 	if (addr == NULL)
@@ -665,13 +672,15 @@ reallocf(void *addr, unsigned long size, struct malloc_type *mtp, int flags)
 }
 
 /*
- * Wake the page daemon when we exhaust KVA.  It will call the lowmem handler
- * and uma_reclaim() callbacks in a context that is safe.
+ * Wake the uma reclamation pagedaemon thread when we exhaust KVA.  It
+ * will call the lowmem handler and uma_reclaim() callbacks in a
+ * context that is safe.
  */
 static void
 kmem_reclaim(vmem_t *vm, int flags)
 {
 
+	uma_reclaim_wakeup();
 	pagedaemon_wakeup();
 }
 

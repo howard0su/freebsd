@@ -86,7 +86,7 @@ extern struct pr_usrreqs sctp_usrreqs;
 
 #define	sctp_sbspace_failedmsgs(sb) ((long) ((sctp_maxspace(sb) > (sb)->sb_cc) ? (sctp_maxspace(sb) - (sb)->sb_cc) : 0))
 
-#define sctp_sbspace_sub(a,b) ((a > b) ? (a - b) : 0)
+#define sctp_sbspace_sub(a,b) (((a) > (b)) ? ((a) - (b)) : 0)
 
 /*
  * I tried to cache the readq entries at one point. But the reality
@@ -178,6 +178,7 @@ extern struct pr_usrreqs sctp_usrreqs;
 		if (SCTP_DECREMENT_AND_CHECK_REFCOUNT(&(__net)->ref_count)) { \
 			(void)SCTP_OS_TIMER_STOP(&(__net)->rxt_timer.timer); \
 			(void)SCTP_OS_TIMER_STOP(&(__net)->pmtu_timer.timer); \
+			(void)SCTP_OS_TIMER_STOP(&(__net)->hb_timer.timer); \
 			if ((__net)->ro.ro_rt) { \
 				RTFREE((__net)->ro.ro_rt); \
 				(__net)->ro.ro_rt = NULL; \

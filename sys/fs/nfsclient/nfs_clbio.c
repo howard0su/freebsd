@@ -100,7 +100,7 @@ ncl_getpages(struct vop_getpages_args *ap)
 	cred = curthread->td_ucred;		/* XXX */
 	nmp = VFSTONFS(vp->v_mount);
 	pages = ap->a_m;
-	count = ap->a_count;
+	npages = ap->a_count;
 
 	if ((object = vp->v_object) == NULL) {
 		ncl_printf("nfs_getpages: called with non-merged cache vnode??\n");
@@ -126,24 +126,17 @@ ncl_getpages(struct vop_getpages_args *ap)
 	} else
 		mtx_unlock(&nmp->nm_mtx);
 
-	npages = btoc(count);
-
-	/*
-	 * Since the caller has busied the requested page, that page's valid
-	 * field will not be changed by other threads.
-	 */
-	vm_page_assert_xbusied(pages[ap->a_reqpage]);
-
 	/*
 	 * If the requested page is partially valid, just return it and
 	 * allow the pager to zero-out the blanks.  Partially valid pages
 	 * can only occur at the file EOF.
+	 *
+	 * XXXGL: is that true for NFS, where short read can occur???
 	 */
-	if (pages[ap->a_reqpage]->valid != 0) {
-		vm_pager_free_nonreq(object, pages, ap->a_reqpage, npages,
-		    FALSE);
-		return (VM_PAGER_OK);
-	}
+	VM_OBJECT_WLOCK(object);
+	if (pages[npages - 1]->valid != 0 && --npages == 0)
+		goto out;
+	VM_OBJECT_WUNLOCK(object);
 
 	/*
 	 * We use only the kva address for the buffer, but this is extremely
@@ -156,6 +149,7 @@ ncl_getpages(struct vop_getpages_args *ap)
 	PCPU_INC(cnt.v_vnodein);
 	PCPU_ADD(cnt.v_vnodepgsin, npages);
 
+	count = npages << PAGE_SHIFT;
 	iov.iov_base = (caddr_t) kva;
 	iov.iov_len = count;
 	uio.uio_iov = &iov;
@@ -173,8 +167,6 @@ ncl_getpages(struct vop_getpages_args *ap)
 
 	if (error && (uio.uio_resid == count)) {
 		ncl_printf("nfs_getpages: error %d\n", error);
-		vm_pager_free_nonreq(object, pages, ap->a_reqpage, npages,
-		    FALSE);
 		return (VM_PAGER_ERROR);
 	}
 
@@ -218,11 +210,14 @@ ncl_getpages(struct vop_getpages_args *ap)
 			 */
 			;
 		}
-		if (i != ap->a_reqpage)
-			vm_page_readahead_finish(m);
 	}
+out:
 	VM_OBJECT_WUNLOCK(object);
-	return (0);
+	if (ap->a_rbehind)
+		*ap->a_rbehind = 0;
+	if (ap->a_rahead)
+		*ap->a_rahead = 0;
+	return (VM_PAGER_OK);
 }
 
 /*
@@ -864,7 +859,7 @@ ncl_write(struct vop_write_args *ap)
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
 	daddr_t lbn;
 	int bcount, noncontig_write, obcount;
-	int bp_cached, n, on, error = 0, error1;
+	int bp_cached, n, on, error = 0, error1, wouldcommit;
 	size_t orig_resid, local_resid;
 	off_t orig_size, tmp_off;
 
@@ -908,7 +903,6 @@ ncl_write(struct vop_write_args *ap)
 			if (ioflag & IO_NDELAY)
 				return (EAGAIN);
 #endif
-flush_and_restart:
 			np->n_attrstamp = 0;
 			KDTRACE_NFS_ATTRCACHE_FLUSH_DONE(vp);
 			error = ncl_vinvalbuf(vp, V_SAVE, td, 1);
@@ -965,27 +959,14 @@ flush_and_restart:
 	 * IO_UNIT -- we just make all writes atomic anyway, as there's
 	 * no point optimizing for something that really won't ever happen.
 	 */
+	wouldcommit = 0;
 	if (!(ioflag & IO_SYNC)) {
 		int nflag;
 
 		mtx_lock(&np->n_mtx);
 		nflag = np->n_flag;
 		mtx_unlock(&np->n_mtx);
-		int needrestart = 0;
-		if (nmp->nm_wcommitsize < uio->uio_resid) {
-			/*
-			 * If this request could not possibly be completed
-			 * without exceeding the maximum outstanding write
-			 * commit size, see if we can convert it into a
-			 * synchronous write operation.
-			 */
-			if (ioflag & IO_NDELAY)
-				return (EAGAIN);
-			ioflag |= IO_SYNC;
-			if (nflag & NMODIFIED)
-				needrestart = 1;
-		} else if (nflag & NMODIFIED) {
-			int wouldcommit = 0;
+		if (nflag & NMODIFIED) {
 			BO_LOCK(&vp->v_bufobj);
 			if (vp->v_bufobj.bo_dirty.bv_cnt != 0) {
 				TAILQ_FOREACH(bp, &vp->v_bufobj.bo_dirty.bv_hd,
@@ -995,27 +976,22 @@ flush_and_restart:
 				}
 			}
 			BO_UNLOCK(&vp->v_bufobj);
-			/*
-			 * Since we're not operating synchronously and
-			 * bypassing the buffer cache, we are in a commit
-			 * and holding all of these buffers whether
-			 * transmitted or not.  If not limited, this
-			 * will lead to the buffer cache deadlocking,
-			 * as no one else can flush our uncommitted buffers.
-			 */
-			wouldcommit += uio->uio_resid;
-			/*
-			 * If we would initially exceed the maximum
-			 * outstanding write commit size, flush and restart.
-			 */
-			if (wouldcommit > nmp->nm_wcommitsize)
-				needrestart = 1;
 		}
-		if (needrestart)
-			goto flush_and_restart;
 	}
 
 	do {
+		if (!(ioflag & IO_SYNC)) {
+			wouldcommit += biosize;
+			if (wouldcommit > nmp->nm_wcommitsize) {
+				np->n_attrstamp = 0;
+				KDTRACE_NFS_ATTRCACHE_FLUSH_DONE(vp);
+				error = ncl_vinvalbuf(vp, V_SAVE, td, 1);
+				if (error)
+					return (error);
+				wouldcommit = biosize;
+			}
+		}
+
 		NFSINCRGLOBAL(newnfsstats.biocache_writes);
 		lbn = uio->uio_offset / biosize;
 		on = uio->uio_offset - (lbn * biosize);

@@ -128,6 +128,7 @@ struct vop_vector ext2_vnodeops = {
 	.vop_create =		ext2_create,
 	.vop_fsync =		ext2_fsync,
 	.vop_getpages =		vnode_pager_local_getpages,
+	.vop_getpages_async =	vnode_pager_local_getpages_async,
 	.vop_getattr =		ext2_getattr,
 	.vop_inactive =		ext2_inactive,
 	.vop_ioctl =		ext2_ioctl,
@@ -1786,6 +1787,7 @@ ext2_ioctl(struct vop_ioctl_args *ap)
 static int
 ext4_ext_read(struct vop_read_args *ap)
 {
+	static unsigned char zeroes[EXT2_MAX_BLOCK_SIZE];
 	struct vnode *vp;
 	struct inode *ip;
 	struct uio *uio;
@@ -1830,11 +1832,15 @@ ext4_ext_read(struct vop_read_args *ap)
 		switch (cache_type) {
 		case EXT4_EXT_CACHE_NO:
 			ext4_ext_find_extent(fs, ip, lbn, &path);
-			ep = path.ep_ext;
+			if (path.ep_is_sparse)
+				ep = &path.ep_sparse_ext;
+			else
+				ep = path.ep_ext;
 			if (ep == NULL)
 				return (EIO);
 
-			ext4_ext_put_cache(ip, ep, EXT4_EXT_CACHE_IN);
+			ext4_ext_put_cache(ip, ep,
+			    path.ep_is_sparse ? EXT4_EXT_CACHE_GAP : EXT4_EXT_CACHE_IN);
 
 			newblk = lbn - ep->e_blk + (ep->e_start_lo |
 			    (daddr_t)ep->e_start_hi << 32);
@@ -1847,7 +1853,7 @@ ext4_ext_read(struct vop_read_args *ap)
 
 		case EXT4_EXT_CACHE_GAP:
 			/* block has not been allocated yet */
-			return (0);
+			break;
 
 		case EXT4_EXT_CACHE_IN:
 			newblk = lbn - nex.e_blk + (nex.e_start_lo |
@@ -1858,24 +1864,34 @@ ext4_ext_read(struct vop_read_args *ap)
 			panic("%s: invalid cache type", __func__);
 		}
 
-		error = bread(ip->i_devvp, fsbtodb(fs, newblk), size, NOCRED, &bp);
-		if (error) {
-			brelse(bp);
-			return (error);
-		}
-
-		size -= bp->b_resid;
-		if (size < xfersize) {
-			if (size == 0) {
-				bqrelse(bp);
-				break;
+		if (cache_type == EXT4_EXT_CACHE_GAP ||
+		    (cache_type == EXT4_EXT_CACHE_NO && path.ep_is_sparse)) {
+			if (xfersize > sizeof(zeroes))
+				xfersize = sizeof(zeroes);
+			error = uiomove(zeroes, xfersize, uio);
+			if (error)
+				return (error);
+		} else {
+			error = bread(ip->i_devvp, fsbtodb(fs, newblk), size,
+			    NOCRED, &bp);
+			if (error) {
+				brelse(bp);
+				return (error);
 			}
-			xfersize = size;
+
+			size -= bp->b_resid;
+			if (size < xfersize) {
+				if (size == 0) {
+					bqrelse(bp);
+					break;
+				}
+				xfersize = size;
+			}
+			error = uiomove(bp->b_data + blkoffset, xfersize, uio);
+			bqrelse(bp);
+			if (error)
+				return (error);
 		}
-		error = uiomove(bp->b_data + blkoffset, (int)xfersize, uio);
-		bqrelse(bp);
-		if (error)
-			return (error);
 	}
 
 	return (0);

@@ -39,7 +39,7 @@
 
 #include "elfcopy.h"
 
-ELFTC_VCSID("$Id: main.c 3174 2015-03-27 17:13:41Z emaste $");
+ELFTC_VCSID("$Id: main.c 3268 2015-12-07 20:30:55Z emaste $");
 
 enum options
 {
@@ -404,8 +404,19 @@ create_elf(struct elfcopy *ecp)
 	 * Insert SHDR table into the internal section list as a "pseudo"
 	 * section, so later it will get sorted and resynced just as "normal"
 	 * sections.
+	 *
+	 * Under FreeBSD, Binutils objcopy always put the section header
+	 * at the end of all the sections. We want to do the same here.
+	 *
+	 * However, note that the behaviour is still different with Binutils:
+	 * elfcopy checks the FreeBSD OSABI tag to tell whether it needs to
+	 * move the section headers, while Binutils is probably configured
+	 * this way when it's compiled on FreeBSD.
 	 */
-	shtab = insert_shtab(ecp, 0);
+	if (oeh.e_ident[EI_OSABI] == ELFOSABI_FREEBSD)
+		shtab = insert_shtab(ecp, 1);
+	else
+		shtab = insert_shtab(ecp, 0);
 
 	/*
 	 * Resync section offsets in the output object. This is needed
@@ -484,6 +495,11 @@ free_elf(struct elfcopy *ecp)
 				free(sec->pad);
 			free(sec);
 		}
+	}
+
+	if (ecp->secndx != NULL) {
+		free(ecp->secndx);
+		ecp->secndx = NULL;
 	}
 }
 
@@ -1359,11 +1375,13 @@ Usage: %s [options] infile [outfile]\n\
   -w | --wildcard              Use shell-style patterns to name symbols.\n\
   -x | --discard-all           Do not copy non-globals to the output.\n\
   -I FORMAT | --input-target=FORMAT\n\
-                               (Accepted but ignored).\n\
+                               Specify object format for the input file.\n\
   -K SYM | --keep-symbol=SYM   Copy symbol SYM to the output.\n\
   -L SYM | --localize-symbol=SYM\n\
                                Make symbol SYM local to the output file.\n\
   -N SYM | --strip-symbol=SYM  Do not copy symbol SYM to the output.\n\
+  -O FORMAT | --output-target=FORMAT\n\
+                               Specify object format for the output file.\n\
   -R NAME | --remove-section=NAME\n\
                                Remove the named section.\n\
   -S | --strip-all             Remove all symbol and relocation information\n\

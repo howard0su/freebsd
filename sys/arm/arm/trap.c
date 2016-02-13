@@ -78,10 +78,6 @@
  * Created      : 28/11/94
  */
 
-#ifdef KDTRACE_HOOKS
-#include <sys/dtrace_bsd.h>
-#endif
-
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
@@ -98,6 +94,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_map.h>
 #include <vm/vm_extern.h>
 
+#include <machine/acle-compat.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
 #include <machine/machdep.h>
@@ -108,7 +105,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/kdb.h>
 #endif
 
-extern char fusubailout[];
+#ifdef KDTRACE_HOOKS
+#include <sys/dtrace_bsd.h>
+#endif
+
+#define ReadWord(a)	(*((volatile unsigned int *)(a)))
 
 #ifdef DEBUG
 int last_fault_code;	/* For the benefit of pmap_fault_fixup() */
@@ -119,7 +120,7 @@ struct ksig {
 	u_long code;
 };
 struct data_abort {
-	int (*func)(struct trapframe *, u_int, u_int, struct thread *, 
+	int (*func)(struct trapframe *, u_int, u_int, struct thread *,
 	    struct ksig *);
 	const char *desc;
 };
@@ -214,8 +215,8 @@ abort_handler(struct trapframe *tf, int type)
 	if (user) {
 		td->td_pticks = 0;
 		td->td_frame = tf;
-		if (td->td_ucred != td->td_proc->p_ucred)
-			cred_update_thread(td);
+		if (td->td_cowgen != td->td_proc->p_cowgen)
+			thread_cow_update(td);
 
 	}
 	/* Grab the current pcb */
@@ -251,13 +252,6 @@ abort_handler(struct trapframe *tf, int type)
 	 * These are the main virtual memory-related faults signalled by
 	 * the MMU.
 	 */
-
-	/* fusubailout is used by [fs]uswintr to avoid page faulting */
-	if (__predict_false(pcb->pcb_onfault == fusubailout)) {
-		tf->tf_r0 = EFAULT;
-		tf->tf_pc = (register_t)(intptr_t) pcb->pcb_onfault;
-		return;
-	}
 
 	/*
 	 * Make sure the Program Counter is sane. We could fall foul of
@@ -325,7 +319,7 @@ abort_handler(struct trapframe *tf, int type)
 	 * location, so we can deal with those quickly.  Otherwise we need to
 	 * disassemble the faulting instruction to determine if it was a write.
 	 */
-#if ARM_ARCH_6 || ARM_ARCH_7A
+#if __ARM_ARCH >= 6
 	ftype = (fsr & FAULT_WNR) ? VM_PROT_READ | VM_PROT_WRITE : VM_PROT_READ;
 #else
 	if (IS_PERMISSION_FAULT(fsr))
@@ -364,19 +358,8 @@ abort_handler(struct trapframe *tf, int type)
 
 	onfault = pcb->pcb_onfault;
 	pcb->pcb_onfault = NULL;
-	if (map != kernel_map) {
-		PROC_LOCK(p);
-		p->p_lock++;
-		PROC_UNLOCK(p);
-	}
 	error = vm_fault(map, va, ftype, VM_FAULT_NORMAL);
 	pcb->pcb_onfault = onfault;
-
-	if (map != kernel_map) {
-		PROC_LOCK(p);
-		p->p_lock--;
-		PROC_UNLOCK(p);
-	}
 	if (__predict_true(error == 0))
 		goto out;
 fatal_pagefault:
@@ -644,8 +627,8 @@ prefetch_abort_handler(struct trapframe *tf)
 
 	if (TRAP_USERMODE(tf)) {
 		td->td_frame = tf;
-		if (td->td_ucred != td->td_proc->p_ucred)
-			cred_update_thread(td);
+		if (td->td_cowgen != td->td_proc->p_cowgen)
+			thread_cow_update(td);
 	}
 	fault_pc = tf->tf_pc;
 	if (td->td_md.md_spinlock_count == 0) {
@@ -681,20 +664,8 @@ prefetch_abort_handler(struct trapframe *tf)
 	if (pmap_fault_fixup(map->pmap, va, VM_PROT_READ, 1))
 		goto out;
 
-	if (map != kernel_map) {
-		PROC_LOCK(p);
-		p->p_lock++;
-		PROC_UNLOCK(p);
-	}
-
 	error = vm_fault(map, va, VM_PROT_READ | VM_PROT_EXECUTE,
 	    VM_FAULT_NORMAL);
-	if (map != kernel_map) {
-		PROC_LOCK(p);
-		p->p_lock--;
-		PROC_UNLOCK(p);
-	}
-
 	if (__predict_true(error == 0))
 		goto out;
 

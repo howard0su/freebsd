@@ -972,7 +972,7 @@ ng_btsocket_rfcomm_send(struct socket *so, int flags, struct mbuf *m,
 	}
 
 	/* Put the packet on the socket's send queue and wakeup RFCOMM task */
-	sbappend(&pcb->so->so_snd, m);
+	sbappend(&pcb->so->so_snd, m, flags);
 	m = NULL;
 	
 	if (!(pcb->flags & NG_BTSOCKET_RFCOMM_DLC_SENDING)) {
@@ -1339,6 +1339,8 @@ ng_btsocket_rfcomm_session_create(ng_btsocket_rfcomm_session_p *sp,
 	l2sa.l2cap_family = AF_BLUETOOTH;
 	l2sa.l2cap_psm = (dst == NULL)? htole16(NG_L2CAP_PSM_RFCOMM) : 0;
 	bcopy(src, &l2sa.l2cap_bdaddr, sizeof(l2sa.l2cap_bdaddr));
+	l2sa.l2cap_cid = 0;
+	l2sa.l2cap_bdaddr_type = BDADDR_BREDR;
 
 	error = sobind(s->l2so, (struct sockaddr *) &l2sa, td);
 	if (error != 0)
@@ -1360,6 +1362,8 @@ ng_btsocket_rfcomm_session_create(ng_btsocket_rfcomm_session_p *sp,
 		l2sa.l2cap_family = AF_BLUETOOTH;
 		l2sa.l2cap_psm = htole16(NG_L2CAP_PSM_RFCOMM);
 	        bcopy(dst, &l2sa.l2cap_bdaddr, sizeof(l2sa.l2cap_bdaddr));
+		l2sa.l2cap_cid = 0;
+		l2sa.l2cap_bdaddr_type = BDADDR_BREDR;
 
 		error = soconnect(s->l2so, (struct sockaddr *) &l2sa, td);
 		if (error != 0)
@@ -2392,7 +2396,7 @@ ng_btsocket_rfcomm_receive_uih(ng_btsocket_rfcomm_session_p s, int dlci,
 			error = ENOBUFS;
 		} else {
 			/* Append packet to the socket receive queue */
-			sbappend(&pcb->so->so_rcv, m0);
+			sbappend(&pcb->so->so_rcv, m0, 0);
 			m0 = NULL;
 
 			sorwakeup(pcb->so);
