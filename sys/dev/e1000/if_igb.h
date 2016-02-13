@@ -37,9 +37,6 @@
 
 /* Tunables */
 
-/* XXX */
-#define USE_BUS_GET_CPUS
-
 /*
  * IGB_TXD: Maximum number of Transmit Descriptors
  *
@@ -390,9 +387,6 @@ struct adapter {
 	int			msix;
 	int			if_flags;
 	int			pause_frames;
-#ifdef USE_BUS_GET_CPUS
-	cpuset_t		cpus;
-#endif
 
 	struct mtx		core_mtx;
 
