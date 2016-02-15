@@ -1780,7 +1780,7 @@ aio_queue_file(struct file *fp, struct kaiocb *job)
 #endif
 queueit:
 	if (!enable_aio_unsafe)
-		return (EINVAL);
+		return (EOPNOTSUPP);
 
 	if (opcode == LIO_SYNC) {
 		AIO_LOCK(ki);
