@@ -47,6 +47,7 @@
 #include <unistd.h>
 
 #include "freebsd_test_suite/macros.h"
+#include "local.h"
 
 #define PATH_TEMPLATE   "aio.XXXXXXXXXX"
 
