@@ -147,11 +147,6 @@ static int aiod_lifetime;
 SYSCTL_INT(_vfs_aio, OID_AUTO, aiod_lifetime, CTLFLAG_RW, &aiod_lifetime, 0,
     "Maximum lifetime for idle aiod");
 
-static int unloadable = 0;
-SYSCTL_INT(_vfs_aio, OID_AUTO, unloadable, CTLFLAG_RW, &unloadable, 0,
-    "Allow unload of aio (not recommended)");
-
-
 static int max_aio_per_proc = MAX_AIO_PER_PROC;
 SYSCTL_INT(_vfs_aio, OID_AUTO, max_aio_per_proc, CTLFLAG_RW, &max_aio_per_proc,
     0,
@@ -307,7 +302,6 @@ static void	aio_proc_rundown_exec(void *arg, struct proc *p,
 		    struct image_params *imgp);
 static int	aio_qphysio(struct proc *p, struct kaiocb *job);
 static void	aio_daemon(void *param);
-static int	aio_unload(void);
 static void	aio_bio_done_notify(struct proc *userp, struct kaiocb *job);
 static int	aio_kick(struct proc *userp);
 static void	aio_kick_nowait(struct proc *userp);
@@ -359,13 +353,10 @@ aio_modload(struct module *module, int cmd, void *arg)
 	case MOD_LOAD:
 		aio_onceonly();
 		break;
-	case MOD_UNLOAD:
-		error = aio_unload();
-		break;
 	case MOD_SHUTDOWN:
 		break;
 	default:
-		error = EINVAL;
+		error = EOPNOTSUPP;
 		break;
 	}
 	return (error);
@@ -469,54 +460,6 @@ aio_onceonly(void)
 	if (error)
 		return (error);
 #endif
-	return (0);
-}
-
-/*
- * Callback for unload of AIO when used as a module.
- */
-static int
-aio_unload(void)
-{
-	int error;
-
-	/*
-	 * XXX: no unloads by default, it's too dangerous.
-	 * perhaps we could do it if locked out callers and then
-	 * did an aio_proc_rundown() on each process.
-	 *
-	 * jhb: aio_proc_rundown() needs to run on curproc though,
-	 * so I don't think that would fly.
-	 */
-	if (!unloadable)
-		return (EOPNOTSUPP);
-
-#ifdef COMPAT_FREEBSD32
-	syscall32_helper_unregister(aio32_syscalls);
-#endif
-	syscall_helper_unregister(aio_syscalls);
-
-	error = kqueue_del_filteropts(EVFILT_AIO);
-	if (error)
-		return error;
-	error = kqueue_del_filteropts(EVFILT_LIO);
-	if (error)
-		return error;
-	async_io_version = 0;
-	taskqueue_free(taskqueue_aiod_kick);
-	delete_unrhdr(aiod_unr);
-	uma_zdestroy(kaio_zone);
-	uma_zdestroy(aiop_zone);
-	uma_zdestroy(aiocb_zone);
-	uma_zdestroy(aiol_zone);
-	uma_zdestroy(aiolio_zone);
-	EVENTHANDLER_DEREGISTER(process_exit, exit_tag);
-	EVENTHANDLER_DEREGISTER(process_exec, exec_tag);
-	mtx_destroy(&aio_job_mtx);
-	sema_destroy(&aio_newproc_sem);
-	p31b_setcfg(CTL_P1003_1B_AIO_LISTIO_MAX, -1);
-	p31b_setcfg(CTL_P1003_1B_AIO_MAX, -1);
-	p31b_setcfg(CTL_P1003_1B_AIO_PRIO_DELTA_MAX, -1);
 	return (0);
 }
 
