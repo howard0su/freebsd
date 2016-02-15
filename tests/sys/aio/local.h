@@ -30,6 +30,15 @@
 #ifndef _AIO_TEST_LOCAL_H_
 #define	_AIO_TEST_LOCAL_H_
 
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <atf-c.h>
+
 #define	ATF_REQUIRE_UNSAFE_AIO() do {					\
 	size_t _len;							\
 	int _unsafe;							\
