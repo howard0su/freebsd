@@ -74,6 +74,7 @@ main(int argc, char *argv[])
 	int tmp_file = 0, failed = 0;
 
 	PLAIN_REQUIRE_KERNEL_MODULE("aio", 0);
+	PLAIN_REQUIRE_UNSAFE_AIO(0);
 
 	kq = kqueue();
 	if (kq < 0)
