@@ -183,7 +183,6 @@ so_gen_t	so_gencnt;	/* generation count for sockets */
 
 MALLOC_DEFINE(M_SONAME, "soname", "socket name");
 MALLOC_DEFINE(M_PCB, "pcb", "protocol control block");
-MALLOC_DEFINE(M_SOAIO, "soaio", "socket AIO data");
 
 #define	VNET_SO_ASSERT(so)						\
 	VNET_ASSERT(curvnet != NULL,					\
