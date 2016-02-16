@@ -27,24 +27,28 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd October 24, 2002
+.Dd February 15, 2016
 .Dt AIO 4
 .Os
 .Sh NAME
 .Nm aio
 .Nd asynchronous I/O
-.Sh SYNOPSIS
-To link into the kernel:
-.Cd "options VFS_AIO"
-.Pp
-To load as a kernel loadable module:
-.Dl kldload aio
 .Sh DESCRIPTION
 The
 .Nm
 facility provides system calls for asynchronous I/O.
-It is available both as a kernel option for static inclusion and as a
-dynamic kernel module.
+It is included in all kernels;
+however, asynchronous I/O operations are only enabled on certain file
+types by default.
+Asynchronous I/O operations for other file types may block an AIO daemon
+resulting in process and/or system hangs.
+Asynchronous I/O operations can be enabled for all file types by setting
+the
+.Va vfs.aio.enable_unsafe
+sysctl node to a non-zero value.
+.Pp
+Asynchronous I/O operations on sockets and raw disk devices do not block
+and are enabled by default.
 .Sh SEE ALSO
 .Xr aio_cancel 2 ,
 .Xr aio_error 2 ,
@@ -53,10 +57,7 @@ dynamic kernel module.
 .Xr aio_suspend 2 ,
 .Xr aio_waitcomplete 2 ,
 .Xr aio_write 2 ,
-.Xr lio_listio 2 ,
-.Xr config 8 ,
-.Xr kldload 8 ,
-.Xr kldunload 8
+.Xr lio_listio 2
 .Sh HISTORY
 The
 .Nm
@@ -66,3 +67,7 @@ The
 .Nm
 kernel module appeared in
 .Fx 5.0 .
+The
+.Nm
+facility was integrated into all kernels in
+.Fx 11.0 .
