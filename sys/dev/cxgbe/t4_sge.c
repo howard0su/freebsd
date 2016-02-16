@@ -507,7 +507,7 @@ int
 t4_read_chip_settings(struct adapter *sc)
 {
 	struct sge *s = &sc->sge;
-	int i, j, n, rc = 0;
+	int i, j, n;
 	uint32_t m, v, r;
 	uint16_t indsz = min(RX_COPY_THRESHOLD - 1, M_INDICATESIZE);
 	static int sw_buf_sizes[] = {	/* Sorted by size */
@@ -529,12 +529,12 @@ t4_read_chip_settings(struct adapter *sc)
 		r = t4_read_reg(sc, A_SGE_CONTROL);
 	if ((r & m) != v) {
 		device_printf(sc->dev, "invalid SGE_CONTROL(0x%x)\n", r);
-		rc = EINVAL;
+		return (EINVAL);
 	}
 	s->pktshift = G_PKTSHIFT(r);
 	if (!(sc->flags & IS_VF) && s->pktshift != fl_pktshift) {
 		device_printf(sc->dev, "invalid pktshift %d\n", s->pktshift);
-		rc = EINVAL;
+		return (EINVAL);
 	}
 	s->pad_boundary = 1 << (G_INGPADBOUNDARY(r) + 5);
 
@@ -559,7 +559,7 @@ t4_read_chip_settings(struct adapter *sc)
 	r = t4_read_reg(sc, A_SGE_HOST_PAGE_SIZE);
 	if (r != v) {
 		device_printf(sc->dev, "invalid SGE_HOST_PAGE_SIZE(0x%x)\n", r);
-		rc = EINVAL;
+		return (EINVAL);
 	}
 
 	/* Filter out unusable hw buffer sizes entirely (mark with -2). */
@@ -647,7 +647,7 @@ t4_read_chip_settings(struct adapter *sc)
 	}
 	if (n == 0) {
 		device_printf(sc->dev, "no usable SGE FL buffer size.\n");
-		rc = EINVAL;
+		return (EINVAL);
 	}
 
 	s->safe_hwidx1 = -1;
@@ -690,14 +690,14 @@ t4_read_chip_settings(struct adapter *sc)
 	r = t4_read_reg(sc, A_ULP_RX_TDDP_PSZ);
 	if (r != v) {
 		device_printf(sc->dev, "invalid ULP_RX_TDDP_PSZ(0x%x)\n", r);
-		rc = EINVAL;
+		return (EINVAL);
 	}
 
 	m = v = F_TDDPTAGTCB;
 	r = t4_read_reg(sc, A_ULP_RX_CTL);
 	if ((r & m) != v) {
 		device_printf(sc->dev, "invalid ULP_RX_CTL(0x%x)\n", r);
-		rc = EINVAL;
+		return (EINVAL);
 	}
 
 	m = V_INDICATESIZE(M_INDICATESIZE) | F_REARMDDPOFFSET |
@@ -706,7 +706,7 @@ t4_read_chip_settings(struct adapter *sc)
 	r = t4_read_reg(sc, A_TP_PARA_REG5);
 	if ((r & m) != v) {
 		device_printf(sc->dev, "invalid TP_PARA_REG5(0x%x)\n", r);
-		rc = EINVAL;
+		return (EINVAL);
 	}
 
 	r = t4_read_reg(sc, A_SGE_CONM_CTRL);
@@ -733,7 +733,7 @@ t4_read_chip_settings(struct adapter *sc)
 	t4_read_mtu_tbl(sc, sc->params.mtus, NULL);
 	t4_load_mtus(sc, sc->params.mtus, sc->params.a_wnd, sc->params.b_wnd);
 
-	return (rc);
+	return (0);
 }
 
 int
