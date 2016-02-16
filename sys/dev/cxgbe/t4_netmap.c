@@ -57,7 +57,6 @@ __FBSDID("$FreeBSD$");
 
 extern int fl_pad;	/* XXXNM */
 extern int spg_len;	/* XXXNM */
-extern int fl_pktshift;	/* XXXNM */
 
 SYSCTL_NODE(_hw, OID_AUTO, cxgbe, CTLFLAG_RD, 0, "cxgbe netmap parameters");
 
@@ -1220,7 +1219,8 @@ t4_nm_intr(void *arg)
 				    (const void *)&d->cpl[0]);
 				break;
 			case CPL_RX_PKT:
-				ring->slot[fl_cidx].len = G_RSPD_LEN(lq) - fl_pktshift;
+				ring->slot[fl_cidx].len = G_RSPD_LEN(lq) -
+				    sc->sge.pktshift;
 				ring->slot[fl_cidx].flags = kring->nkr_slot_flags;
 				fl_cidx += (lq & F_RSPD_NEWBUF) ? 1 : 0;
 				fl_credits += (lq & F_RSPD_NEWBUF) ? 1 : 0;

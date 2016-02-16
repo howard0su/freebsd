@@ -80,7 +80,7 @@ __FBSDID("$FreeBSD$");
  * Ethernet frames are DMA'd at this byte offset into the freelist buffer.
  * 0-7 are valid values.
  */
-int fl_pktshift = 2;
+static int fl_pktshift = 2;
 TUNABLE_INT("hw.cxgbe.fl_pktshift", &fl_pktshift);
 
 /*
@@ -521,12 +521,19 @@ t4_read_chip_settings(struct adapter *sc)
 	struct sw_zone_info *swz, *safe_swz;
 	struct hw_buf_info *hwb;
 
-	m = V_PKTSHIFT(M_PKTSHIFT) | F_RXPKTCPLMODE | F_EGRSTATUSPAGESIZE;
-	v = V_PKTSHIFT(fl_pktshift) | F_RXPKTCPLMODE |
-	    V_EGRSTATUSPAGESIZE(spg_len == 128);
-	r = t4_read_reg(sc, A_SGE_CONTROL);
+	m = F_RXPKTCPLMODE | F_EGRSTATUSPAGESIZE;
+	v = F_RXPKTCPLMODE | V_EGRSTATUSPAGESIZE(spg_len == 128);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge.sge_control;
+	else
+		r = t4_read_reg(sc, A_SGE_CONTROL);
 	if ((r & m) != v) {
 		device_printf(sc->dev, "invalid SGE_CONTROL(0x%x)\n", r);
+		rc = EINVAL;
+	}
+	s->pktshift = G_PKTSHIFT(r);
+	if (!(sc->flags & IS_VF) && s->pktshift != fl_pktshift) {
+		device_printf(sc->dev, "invalid pktshift %d\n", s->pktshift);
 		rc = EINVAL;
 	}
 	s->pad_boundary = 1 << (G_INGPADBOUNDARY(r) + 5);
@@ -756,7 +763,7 @@ t4_sge_sysctls(struct adapter *sc, struct sysctl_ctx_list *ctx,
 	    "freelist buffer sizes");
 
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "fl_pktshift", CTLFLAG_RD,
-	    NULL, fl_pktshift, "payload DMA offset in rx buffer (bytes)");
+	    NULL, sc->sge.pktshift, "payload DMA offset in rx buffer (bytes)");
 
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "fl_pad", CTLFLAG_RD,
 	    NULL, sc->sge.pad_boundary, "payload pad boundary (bytes)");
@@ -907,8 +914,8 @@ mtu_to_max_payload(struct adapter *sc, int mtu, const int toe)
 	} else {
 #endif
 		/* large enough even when hw VLAN extraction is disabled */
-		payload = fl_pktshift + ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN +
-		    mtu;
+		payload = sc->sge.pktshift + ETHER_HDR_LEN +
+		    ETHER_VLAN_ENCAP_LEN + mtu;
 #ifdef TCP_OFFLOAD
 	}
 #endif
@@ -1700,13 +1707,15 @@ t4_eth_rx(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m0)
 		{M_HASHTYPE_RSS_TCP_IPV4, M_HASHTYPE_RSS_TCP_IPV6},
 		{M_HASHTYPE_RSS_UDP_IPV4, M_HASHTYPE_RSS_UDP_IPV6},
 	};
+	int pktshift;
 
 	KASSERT(m0 != NULL, ("%s: no payload with opcode %02x", __func__,
 	    rss->opcode));
 
-	m0->m_pkthdr.len -= fl_pktshift;
-	m0->m_len -= fl_pktshift;
-	m0->m_data += fl_pktshift;
+	pktshift = iq->adapter->sge.pktshift;
+	m0->m_pkthdr.len -= pktshift;
+	m0->m_len -= pktshift;
+	m0->m_data += pktshift;
 
 	m0->m_pkthdr.rcvif = ifp;
 	M_HASHTYPE_SET(m0, sw_hashtype[rss->hash_type][rss->ipv6]);

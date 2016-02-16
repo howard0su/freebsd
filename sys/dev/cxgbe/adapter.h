@@ -711,6 +711,7 @@ struct sge {
 	struct sge_iq **iqmap;	/* iq->cntxt_id to iq mapping */
 	struct sge_eq **eqmap;	/* eq->cntxt_id to eq mapping */
 
+	int pktshift;
 	int pad_boundary;
 	int pack_boundary;
 	int8_t safe_hwidx1;	/* may not have room for metadata */
