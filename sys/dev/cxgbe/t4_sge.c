@@ -97,7 +97,7 @@ TUNABLE_INT("hw.cxgbe.fl_pad", &fl_pad);
  * -1: driver should figure out a good value.
  *  64 or 128 are the only other valid values.
  */
-int spg_len = -1;
+static int spg_len = -1;
 TUNABLE_INT("hw.cxgbe.spg_len", &spg_len);
 
 /*
@@ -166,8 +166,8 @@ static struct mbuf *get_fl_payload(struct adapter *, struct sge_fl *, uint32_t);
 static int t4_eth_rx(struct sge_iq *, const struct rss_header *, struct mbuf *);
 static inline void init_iq(struct sge_iq *, struct adapter *, int, int, int);
 static inline void init_fl(struct adapter *, struct sge_fl *, int, int, char *);
-static inline void init_eq(struct sge_eq *, int, int, uint8_t, uint16_t,
-    char *);
+static inline void init_eq(struct adapter *, struct sge_eq *, int, int, uint8_t,
+    uint16_t, char *);
 static int alloc_ring(struct adapter *, size_t, bus_dma_tag_t *, bus_dmamap_t *,
     bus_addr_t *, void **);
 static int free_ring(struct adapter *, bus_dma_tag_t, bus_dmamap_t, bus_addr_t,
@@ -521,20 +521,27 @@ t4_read_chip_settings(struct adapter *sc)
 	struct sw_zone_info *swz, *safe_swz;
 	struct hw_buf_info *hwb;
 
-	m = F_RXPKTCPLMODE | F_EGRSTATUSPAGESIZE;
-	v = F_RXPKTCPLMODE | V_EGRSTATUSPAGESIZE(spg_len == 128);
 	if (sc->flags & IS_VF)
 		r = sc->params.sge.sge_control;
 	else
 		r = t4_read_reg(sc, A_SGE_CONTROL);
-	if ((r & m) != v) {
-		device_printf(sc->dev, "invalid SGE_CONTROL(0x%x)\n", r);
+	if ((r & F_RXPKTCPLMODE) == 0) {
+		device_printf(sc->dev, "invalid SGE CPL mode\n");
 		return (EINVAL);
 	}
+	s->spg_len = r & F_EGRSTATUSPAGESIZE ? 128 : 64;
 	s->pktshift = G_PKTSHIFT(r);
-	if (!(sc->flags & IS_VF) && s->pktshift != fl_pktshift) {
-		device_printf(sc->dev, "invalid pktshift %d\n", s->pktshift);
-		return (EINVAL);
+	if (!(sc->flags & IS_VF)) {
+		if (s->pktshift != fl_pktshift) {
+			device_printf(sc->dev, "invalid pktshift %d\n",
+			    s->pktshift);
+			return (EINVAL);
+		}
+		if (s->spg_len != spg_len) {
+			device_printf(sc->dev, "invalid status page len %d\n",
+			    s->spg_len);
+			return (EINVAL);
+		}
 	}
 	s->pad_boundary = 1 << (G_INGPADBOUNDARY(r) + 5);
 
@@ -769,7 +776,7 @@ t4_sge_sysctls(struct adapter *sc, struct sysctl_ctx_list *ctx,
 	    NULL, sc->sge.pad_boundary, "payload pad boundary (bytes)");
 
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "spg_len", CTLFLAG_RD,
-	    NULL, spg_len, "status page size (bytes)");
+	    NULL, sc->sge.spg_len, "status page size (bytes)");
 
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "cong_drop", CTLFLAG_RD,
 	    NULL, cong_drop, "congestion drop setting");
@@ -1076,7 +1083,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 		iqid = vi_intr_iq(vi, j)->cntxt_id;
 		snprintf(name, sizeof(name), "%s txq%d",
 		    device_get_nameunit(vi->dev), i);
-		init_eq(&txq->eq, EQ_ETH, vi->qsize_txq, pi->tx_chan, iqid,
+		init_eq(sc, &txq->eq, EQ_ETH, vi->qsize_txq, pi->tx_chan, iqid,
 		    name);
 
 		rc = alloc_txq(vi, txq, i, oid);
@@ -1093,7 +1100,7 @@ t4_setup_vi_queues(struct vi_info *vi)
 		iqid = vi_intr_iq(vi, j)->cntxt_id;
 		snprintf(name, sizeof(name), "%s ofld_txq%d",
 		    device_get_nameunit(vi->dev), i);
-		init_eq(&ofld_txq->eq, EQ_OFLD, vi->qsize_txq, pi->tx_chan,
+		init_eq(sc, &ofld_txq->eq, EQ_OFLD, vi->qsize_txq, pi->tx_chan,
 		    iqid, name);
 
 		snprintf(name, sizeof(name), "%d", i);
@@ -1117,7 +1124,8 @@ t4_setup_vi_queues(struct vi_info *vi)
 	ctrlq = &sc->sge.ctrlq[pi->port_id];
 	iqid = vi_intr_iq(vi, 0)->cntxt_id;
 	snprintf(name, sizeof(name), "%s ctrlq", device_get_nameunit(vi->dev));
-	init_eq(&ctrlq->eq, EQ_CTRL, CTRL_EQ_QSIZE, pi->tx_chan, iqid, name);
+	init_eq(sc, &ctrlq->eq, EQ_CTRL, CTRL_EQ_QSIZE, pi->tx_chan, iqid,
+	    name);
 	rc = alloc_wrq(sc, vi, ctrlq, oid);
 
 done:
@@ -2454,7 +2462,7 @@ init_iq(struct sge_iq *iq, struct adapter *sc, int tmr_idx, int pktc_idx,
 		iq->intr_pktc_idx = pktc_idx;
 	}
 	iq->qsize = roundup2(qsize, 16);	/* See FW_IQ_CMD/iqsize */
-	iq->sidx = iq->qsize - spg_len / IQ_ESIZE;
+	iq->sidx = iq->qsize - sc->sge.spg_len / IQ_ESIZE;
 }
 
 static inline void
@@ -2462,7 +2470,7 @@ init_fl(struct adapter *sc, struct sge_fl *fl, int qsize, int maxp, char *name)
 {
 
 	fl->qsize = qsize;
-	fl->sidx = qsize - spg_len / EQ_ESIZE;
+	fl->sidx = qsize - sc->sge.spg_len / EQ_ESIZE;
 	strlcpy(fl->lockname, name, sizeof(fl->lockname));
 	if (sc->flags & BUF_PACKING_OK &&
 	    ((!is_t4(sc) && buffer_packing) ||	/* T5+: enabled unless 0 */
@@ -2473,15 +2481,15 @@ init_fl(struct adapter *sc, struct sge_fl *fl, int qsize, int maxp, char *name)
 }
 
 static inline void
-init_eq(struct sge_eq *eq, int eqtype, int qsize, uint8_t tx_chan,
-    uint16_t iqid, char *name)
+init_eq(struct adapter *sc, struct sge_eq *eq, int eqtype, int qsize,
+    uint8_t tx_chan, uint16_t iqid, char *name)
 {
 	KASSERT(eqtype <= EQ_TYPEMASK, ("%s: bad qtype %d", __func__, eqtype));
 
 	eq->flags = eqtype & EQ_TYPEMASK;
 	eq->tx_chan = tx_chan;
 	eq->iqid = iqid;
-	eq->sidx = qsize - spg_len / EQ_ESIZE;
+	eq->sidx = qsize - sc->sge.spg_len / EQ_ESIZE;
 	strlcpy(eq->lockname, name, sizeof(eq->lockname));
 }
 
@@ -2865,7 +2873,7 @@ alloc_mgmtq(struct adapter *sc)
 	    NULL, "management queue");
 
 	snprintf(name, sizeof(name), "%s mgmtq", device_get_nameunit(sc->dev));
-	init_eq(&mgmtq->eq, EQ_CTRL, CTRL_EQ_QSIZE, sc->port[0]->tx_chan,
+	init_eq(sc, &mgmtq->eq, EQ_CTRL, CTRL_EQ_QSIZE, sc->port[0]->tx_chan,
 	    sc->sge.fwq.cntxt_id, name);
 	rc = alloc_wrq(sc, NULL, mgmtq, oid);
 	if (rc != 0) {
@@ -3050,7 +3058,7 @@ alloc_nm_rxq(struct vi_info *vi, struct sge_nm_rxq *nm_rxq, int intr_idx,
 	if (rc != 0)
 		return (rc);
 
-	len = na->num_rx_desc * EQ_ESIZE + spg_len;
+	len = na->num_rx_desc * EQ_ESIZE + sc->sge.spg_len;
 	rc = alloc_ring(sc, len, &nm_rxq->fl_desc_tag, &nm_rxq->fl_desc_map,
 	    &nm_rxq->fl_ba, (void **)&nm_rxq->fl_desc);
 	if (rc != 0)
@@ -3059,7 +3067,7 @@ alloc_nm_rxq(struct vi_info *vi, struct sge_nm_rxq *nm_rxq, int intr_idx,
 	nm_rxq->vi = vi;
 	nm_rxq->nid = idx;
 	nm_rxq->iq_cidx = 0;
-	nm_rxq->iq_sidx = vi->qsize_rxq - spg_len / IQ_ESIZE;
+	nm_rxq->iq_sidx = vi->qsize_rxq - sc->sge.spg_len / IQ_ESIZE;
 	nm_rxq->iq_gen = F_RSPD_GEN;
 	nm_rxq->fl_pidx = nm_rxq->fl_cidx = 0;
 	nm_rxq->fl_sidx = na->num_rx_desc;
@@ -3125,7 +3133,7 @@ alloc_nm_txq(struct vi_info *vi, struct sge_nm_txq *nm_txq, int iqidx, int idx,
 	char name[16];
 	struct sysctl_oid_list *children = SYSCTL_CHILDREN(oid);
 
-	len = na->num_tx_desc * EQ_ESIZE + spg_len;
+	len = na->num_tx_desc * EQ_ESIZE + sc->sge.spg_len;
 	rc = alloc_ring(sc, len, &nm_txq->desc_tag, &nm_txq->desc_map,
 	    &nm_txq->ba, (void **)&nm_txq->desc);
 	if (rc)
@@ -3173,7 +3181,7 @@ ctrl_eq_alloc(struct adapter *sc, struct sge_eq *eq)
 {
 	int rc, cntxt_id;
 	struct fw_eq_ctrl_cmd c;
-	int qsize = eq->sidx + spg_len / EQ_ESIZE;
+	int qsize = eq->sidx + sc->sge.spg_len / EQ_ESIZE;
 
 	bzero(&c, sizeof(c));
 
@@ -3217,7 +3225,7 @@ eth_eq_alloc(struct adapter *sc, struct vi_info *vi, struct sge_eq *eq)
 {
 	int rc, cntxt_id;
 	struct fw_eq_eth_cmd c;
-	int qsize = eq->sidx + spg_len / EQ_ESIZE;
+	int qsize = eq->sidx + sc->sge.spg_len / EQ_ESIZE;
 
 	bzero(&c, sizeof(c));
 
@@ -3261,7 +3269,7 @@ ofld_eq_alloc(struct adapter *sc, struct vi_info *vi, struct sge_eq *eq)
 {
 	int rc, cntxt_id;
 	struct fw_eq_ofld_cmd c;
-	int qsize = eq->sidx + spg_len / EQ_ESIZE;
+	int qsize = eq->sidx + sc->sge.spg_len / EQ_ESIZE;
 
 	bzero(&c, sizeof(c));
 
@@ -3307,7 +3315,7 @@ alloc_eq(struct adapter *sc, struct vi_info *vi, struct sge_eq *eq)
 
 	mtx_init(&eq->eq_lock, eq->lockname, NULL, MTX_DEF);
 
-	qsize = eq->sidx + spg_len / EQ_ESIZE;
+	qsize = eq->sidx + sc->sge.spg_len / EQ_ESIZE;
 	len = qsize * EQ_ESIZE;
 	rc = alloc_ring(sc, len, &eq->desc_tag, &eq->desc_map,
 	    &eq->ba, (void **)&eq->desc);

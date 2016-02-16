@@ -714,6 +714,7 @@ struct sge {
 	int pktshift;
 	int pad_boundary;
 	int pack_boundary;
+	int spg_len;
 	int8_t safe_hwidx1;	/* may not have room for metadata */
 	int8_t safe_hwidx2;	/* with room for metadata and maybe more */
 	struct sw_zone_info sw_zone_info[SW_ZONE_SIZES];

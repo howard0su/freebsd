@@ -56,7 +56,6 @@ __FBSDID("$FreeBSD$");
 #include "common/t4_regs_values.h"
 
 extern int fl_pad;	/* XXXNM */
-extern int spg_len;	/* XXXNM */
 
 SYSCTL_NODE(_hw, OID_AUTO, cxgbe, CTLFLAG_RD, 0, "cxgbe netmap parameters");
 
@@ -292,7 +291,7 @@ alloc_nm_rxq_hwq(struct vi_info *vi, struct sge_nm_rxq *nm_rxq, int cong)
 	MPASS(nm_rxq->fl_desc != NULL);
 
 	bzero(nm_rxq->iq_desc, vi->qsize_rxq * IQ_ESIZE);
-	bzero(nm_rxq->fl_desc, na->num_rx_desc * EQ_ESIZE + spg_len);
+	bzero(nm_rxq->fl_desc, na->num_rx_desc * EQ_ESIZE + sc->sge.spg_len);
 
 	bzero(&c, sizeof(c));
 	c.op_to_vfn = htobe32(V_FW_CMD_OP(FW_IQ_CMD) | F_FW_CMD_REQUEST |
@@ -333,7 +332,7 @@ alloc_nm_rxq_hwq(struct vi_info *vi, struct sge_nm_rxq *nm_rxq, int cong)
 	c.fl0dcaen_to_fl0cidxfthresh =
 	    htobe16(V_FW_IQ_CMD_FL0FBMIN(X_FETCHBURSTMIN_128B) |
 		V_FW_IQ_CMD_FL0FBMAX(X_FETCHBURSTMAX_512B));
-	c.fl0size = htobe16(na->num_rx_desc / 8 + spg_len / EQ_ESIZE);
+	c.fl0size = htobe16(na->num_rx_desc / 8 + sc->sge.spg_len / EQ_ESIZE);
 	c.fl0addr = htobe64(nm_rxq->fl_ba);
 
 	rc = -t4_wr_mbox(sc, sc->mbox, &c, sizeof(c), &c);
@@ -344,7 +343,7 @@ alloc_nm_rxq_hwq(struct vi_info *vi, struct sge_nm_rxq *nm_rxq, int cong)
 	}
 
 	nm_rxq->iq_cidx = 0;
-	MPASS(nm_rxq->iq_sidx == vi->qsize_rxq - spg_len / IQ_ESIZE);
+	MPASS(nm_rxq->iq_sidx == vi->qsize_rxq - sc->sge.spg_len / IQ_ESIZE);
 	nm_rxq->iq_gen = F_RSPD_GEN;
 	nm_rxq->iq_cntxt_id = be16toh(c.iqid);
 	nm_rxq->iq_abs_id = be16toh(c.physiqid);
@@ -429,7 +428,7 @@ alloc_nm_txq_hwq(struct vi_info *vi, struct sge_nm_txq *nm_txq)
 	MPASS(na != NULL);
 	MPASS(nm_txq->desc != NULL);
 
-	len = na->num_tx_desc * EQ_ESIZE + spg_len;
+	len = na->num_tx_desc * EQ_ESIZE + sc->sge.spg_len;
 	bzero(nm_txq->desc, len);
 
 	bzero(&c, sizeof(c));
@@ -1111,7 +1110,7 @@ ncxgbe_attach(device_t dev)
 	na.na_flags = NAF_BDG_MAYSLEEP;
 
 	/* Netmap doesn't know about the space reserved for the status page. */
-	na.num_tx_desc = vi->qsize_txq - spg_len / EQ_ESIZE;
+	na.num_tx_desc = vi->qsize_txq - sc->sge.spg_len / EQ_ESIZE;
 
 	/*
 	 * The freelist's cidx/pidx drives netmap's rx cidx/pidx.  So
