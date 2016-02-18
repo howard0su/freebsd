@@ -493,6 +493,7 @@ soaio_kproc_create(void *context, int pending)
 			 */
 			break;
 		}
+		soaio_starting++;
 		mtx_unlock(&soaio_jobs_lock);
 
 		id = alloc_unr(soaio_kproc_unr);
@@ -500,12 +501,13 @@ soaio_kproc_create(void *context, int pending)
 		    &p, 0, 0, "soaiod%d", id);
 		if (error != 0) {
 			free_unr(soaio_kproc_unr, id);
-			return;
+			mtx_lock(&soaio_jobs_lock);
+			soaio_starting--;
+			break;
 		}
 
 		mtx_lock(&soaio_jobs_lock);
 		soaio_num_procs++;
-		soaio_starting++;
 	}
 	mtx_unlock(&soaio_jobs_lock);
 }
