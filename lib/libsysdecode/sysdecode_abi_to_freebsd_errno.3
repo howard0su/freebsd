@@ -57,7 +57,7 @@ is returned.
 .Pp
 The
 .Fn sysdecode_freebsd_to_abi_errno
-function the error value for the process ABI
+function returns the error value for the process ABI
 .Fa abi
 that corresponds to the native
 .Xr errno 3
@@ -77,7 +77,7 @@ values and errors for other ABIs are not exhaustive.
 If a mapping does not exist,
 these functions return
 .Dv INT_MAX .
-In addition, multiple error values in one ABI may map to a single
+In addition, multiple error values in one ABI can map to a single
 error in another ABI.
 .Sh RETURN VALUES
 These functions return an error value on success or
