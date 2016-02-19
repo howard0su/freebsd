@@ -708,11 +708,7 @@ t4_attach(device_t dev)
 	sc->mbox = sc->pf;
 
 	memset(sc->chan_map, 0xff, sizeof(sc->chan_map));
-	sc->an_handler = an_not_handled;
-	for (i = 0; i < nitems(sc->cpl_handler); i++)
-		sc->cpl_handler[i] = cpl_not_handled;
-	for (i = 0; i < nitems(sc->fw_msg_handler); i++)
-		sc->fw_msg_handler[i] = fw_msg_not_handled;
+	t4_set_default_handlers(sc);
 	t4_register_cpl_handler(sc, CPL_SET_TCB_RPL, t4_filter_rpl);
 	t4_register_cpl_handler(sc, CPL_TRACE_PKT, t4_trace_pkt);
 	t4_register_cpl_handler(sc, CPL_T5_TRACE_PKT, t5_trace_pkt);
@@ -1927,6 +1923,17 @@ t4_fatal_err(struct adapter *sc)
 	t4_intr_disable(sc);
 	log(LOG_EMERG, "%s: encountered fatal error, adapter stopped.\n",
 	    device_get_nameunit(sc->dev));
+}
+
+void
+t4_set_default_handlers(struct adapter *sc)
+{
+
+	sc->an_handler = an_not_handled;
+	for (i = 0; i < nitems(sc->cpl_handler); i++)
+		sc->cpl_handler[i] = cpl_not_handled;
+	for (i = 0; i < nitems(sc->fw_msg_handler); i++)
+		sc->fw_msg_handler[i] = fw_msg_not_handled;
 }
 
 int

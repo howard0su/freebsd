@@ -528,6 +528,7 @@ int t4_filter_field_shift(const struct adapter *adap, int filter_sel);
 int t4_port_init(struct port_info *p, int mbox, int pf, int vf);
 int t4_reinit_adapter(struct adapter *adap);
 void t4_fatal_err(struct adapter *adapter);
+void t4_set_default_handlers(struct adapter *adapter);
 int t4_map_bars_0_and_4(struct adapter *adapter);
 int t4_map_bar_2(struct adapter *adapter);
 
