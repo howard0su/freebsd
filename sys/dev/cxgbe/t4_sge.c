@@ -487,7 +487,7 @@ t4_tweak_chip_settings(struct adapter *sc)
 
 /*
  * SGE wants the buffer to be at least 64B and then a multiple of 16.  If
- * padding is is use the buffer's start and end need to be aligned to the pad
+ * padding is in use the buffer's start and end need to be aligned to the pad
  * boundary as well.  We'll just make sure that the size is a multiple of the
  * boundary here, it is up to the buffer allocation code to make sure the start
  * of the buffer is aligned as well.
@@ -563,7 +563,10 @@ t4_read_chip_settings(struct adapter *sc)
 	    V_HOSTPAGESIZEPF5(PAGE_SHIFT - 10) |
 	    V_HOSTPAGESIZEPF6(PAGE_SHIFT - 10) |
 	    V_HOSTPAGESIZEPF7(PAGE_SHIFT - 10);
-	r = t4_read_reg(sc, A_SGE_HOST_PAGE_SIZE);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge.sge_host_page_size;
+	else
+		r = t4_read_reg(sc, A_SGE_HOST_PAGE_SIZE);
 	if (r != v) {
 		device_printf(sc->dev, "invalid SGE_HOST_PAGE_SIZE(0x%x)\n", r);
 		return (EINVAL);
@@ -572,7 +575,10 @@ t4_read_chip_settings(struct adapter *sc)
 	/* Filter out unusable hw buffer sizes entirely (mark with -2). */
 	hwb = &s->hw_buf_info[0];
 	for (i = 0; i < nitems(s->hw_buf_info); i++, hwb++) {
-		r = t4_read_reg(sc, A_SGE_FL_BUFFER_SIZE0 + (4 * i));
+		if (sc->flags & IS_VF)
+			r = sc->params.sge.sge_fl_buffer_size[i];
+		else
+			r = t4_read_reg(sc, A_SGE_FL_BUFFER_SIZE0 + (4 * i));
 		hwb->size = r;
 		hwb->zidx = hwsz_ok(sc, r) ? -1 : -2;
 		hwb->next = -1;
@@ -677,19 +683,31 @@ t4_read_chip_settings(struct adapter *sc)
 		}
 	}
 
-	r = t4_read_reg(sc, A_SGE_INGRESS_RX_THRESHOLD);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge_params.sge_ingress_rx_threshold;
+	else
+		r = t4_read_reg(sc, A_SGE_INGRESS_RX_THRESHOLD);
 	s->counter_val[0] = G_THRESHOLD_0(r);
 	s->counter_val[1] = G_THRESHOLD_1(r);
 	s->counter_val[2] = G_THRESHOLD_2(r);
 	s->counter_val[3] = G_THRESHOLD_3(r);
 
-	r = t4_read_reg(sc, A_SGE_TIMER_VALUE_0_AND_1);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge_params.sge_timer_value_0_and_1;
+	else
+		r = t4_read_reg(sc, A_SGE_TIMER_VALUE_0_AND_1);
 	s->timer_val[0] = G_TIMERVALUE0(r) / core_ticks_per_usec(sc);
 	s->timer_val[1] = G_TIMERVALUE1(r) / core_ticks_per_usec(sc);
-	r = t4_read_reg(sc, A_SGE_TIMER_VALUE_2_AND_3);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge_params.sge_timer_value_2_and_3;
+	else
+		r = t4_read_reg(sc, A_SGE_TIMER_VALUE_2_AND_3);
 	s->timer_val[2] = G_TIMERVALUE2(r) / core_ticks_per_usec(sc);
 	s->timer_val[3] = G_TIMERVALUE3(r) / core_ticks_per_usec(sc);
-	r = t4_read_reg(sc, A_SGE_TIMER_VALUE_4_AND_5);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge_params.sge_timer_value_4_and_5;
+	else
+		r = t4_read_reg(sc, A_SGE_TIMER_VALUE_4_AND_5);
 	s->timer_val[4] = G_TIMERVALUE4(r) / core_ticks_per_usec(sc);
 	s->timer_val[5] = G_TIMERVALUE5(r) / core_ticks_per_usec(sc);
 
