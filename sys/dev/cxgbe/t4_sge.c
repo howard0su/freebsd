@@ -684,7 +684,7 @@ t4_read_chip_settings(struct adapter *sc)
 	}
 
 	if (sc->flags & IS_VF)
-		r = sc->params.sge_params.sge_ingress_rx_threshold;
+		r = sc->params.sge.sge_ingress_rx_threshold;
 	else
 		r = t4_read_reg(sc, A_SGE_INGRESS_RX_THRESHOLD);
 	s->counter_val[0] = G_THRESHOLD_0(r);
@@ -693,23 +693,26 @@ t4_read_chip_settings(struct adapter *sc)
 	s->counter_val[3] = G_THRESHOLD_3(r);
 
 	if (sc->flags & IS_VF)
-		r = sc->params.sge_params.sge_timer_value_0_and_1;
+		r = sc->params.sge.sge_timer_value_0_and_1;
 	else
 		r = t4_read_reg(sc, A_SGE_TIMER_VALUE_0_AND_1);
 	s->timer_val[0] = G_TIMERVALUE0(r) / core_ticks_per_usec(sc);
 	s->timer_val[1] = G_TIMERVALUE1(r) / core_ticks_per_usec(sc);
 	if (sc->flags & IS_VF)
-		r = sc->params.sge_params.sge_timer_value_2_and_3;
+		r = sc->params.sge.sge_timer_value_2_and_3;
 	else
 		r = t4_read_reg(sc, A_SGE_TIMER_VALUE_2_AND_3);
 	s->timer_val[2] = G_TIMERVALUE2(r) / core_ticks_per_usec(sc);
 	s->timer_val[3] = G_TIMERVALUE3(r) / core_ticks_per_usec(sc);
 	if (sc->flags & IS_VF)
-		r = sc->params.sge_params.sge_timer_value_4_and_5;
+		r = sc->params.sge.sge_timer_value_4_and_5;
 	else
 		r = t4_read_reg(sc, A_SGE_TIMER_VALUE_4_AND_5);
 	s->timer_val[4] = G_TIMERVALUE4(r) / core_ticks_per_usec(sc);
 	s->timer_val[5] = G_TIMERVALUE5(r) / core_ticks_per_usec(sc);
+
+	if (sc->flags & IS_VF)
+		goto skip_ddp;
 
 	v = V_HPZ0(0) | V_HPZ1(2) | V_HPZ2(4) | V_HPZ3(6);
 	r = t4_read_reg(sc, A_ULP_RX_TDDP_PSZ);
@@ -733,8 +736,12 @@ t4_read_chip_settings(struct adapter *sc)
 		device_printf(sc->dev, "invalid TP_PARA_REG5(0x%x)\n", r);
 		return (EINVAL);
 	}
+skip_ddp:
 
-	r = t4_read_reg(sc, A_SGE_CONM_CTRL);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge.sge_congestion_control;
+	else
+		r = t4_read_reg(sc, A_SGE_CONM_CTRL);
 	s->fl_starve_threshold = G_EGRTHRESHOLD(r) * 2 + 1;
 	if (is_t4(sc))
 		s->fl_starve_threshold2 = s->fl_starve_threshold;
@@ -742,16 +749,25 @@ t4_read_chip_settings(struct adapter *sc)
 		s->fl_starve_threshold2 = G_EGRTHRESHOLDPACKING(r) * 2 + 1;
 
 	/* egress queues: log2 of # of doorbells per BAR2 page */
-	r = t4_read_reg(sc, A_SGE_EGRESS_QUEUES_PER_PAGE_PF);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge.sge_egress_queues_per_page;
+	else
+		r = t4_read_reg(sc, A_SGE_EGRESS_QUEUES_PER_PAGE_PF);
 	r >>= S_QUEUESPERPAGEPF0 +
 	    (S_QUEUESPERPAGEPF1 - S_QUEUESPERPAGEPF0) * sc->pf;
 	s->eq_s_qpp = r & M_QUEUESPERPAGEPF0;
 
 	/* ingress queues: log2 of # of doorbells per BAR2 page */
-	r = t4_read_reg(sc, A_SGE_INGRESS_QUEUES_PER_PAGE_PF);
+	if (sc->flags & IS_VF)
+		r = sc->params.sge.sge_ingress_queues_per_page;
+	else
+		r = t4_read_reg(sc, A_SGE_INGRESS_QUEUES_PER_PAGE_PF);
 	r >>= S_QUEUESPERPAGEPF0 +
 	    (S_QUEUESPERPAGEPF1 - S_QUEUESPERPAGEPF0) * sc->pf;
 	s->iq_s_qpp = r & M_QUEUESPERPAGEPF0;
+
+	if (sc->flags & IS_VF)
+		return (0);
 
 	t4_init_tp_params(sc);
 

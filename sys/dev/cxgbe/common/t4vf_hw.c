@@ -159,8 +159,9 @@ int t4vf_get_sge_params(struct adapter *adapter)
 	 * read.
 	 */
 	if (!is_t4(adapter)) {
-		u32 whoami;
-		unsigned int pf, s_hps, s_qpp;
+#if 0
+		unsigned int s_hps;
+#endif
 
 		params[0] = (V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_REG) |
 			     V_FW_PARAMS_PARAM_XYZ(A_SGE_EGRESS_QUEUES_PER_PAGE_VF));
@@ -175,30 +176,17 @@ int t4vf_get_sge_params(struct adapter *adapter)
 		sge_params->sge_egress_queues_per_page = vals[0];
 		sge_params->sge_ingress_queues_per_page = vals[1];
 
+#if 0
 		/*
-		 * We need the Queues/Page for our VF.  This is based on the
-		 * PF from which we're instantiated and is indexed in the
-		 * register we just read.  This is an annoying enough effort
-		 * that we'll go ahead and do it once here so other code in
-		 * the driver can just use it.
+		 * The FreeBSD VF driver just bails if the page size
+		 * doesn't match what we expect.
 		 */
-		whoami = t4_read_reg(adapter, T4VF_PL_BASE_ADDR + A_PL_VF_WHOAMI);
-		pf = G_SOURCEPF(whoami);
-
 		s_hps = (S_HOSTPAGESIZEPF0 +
-			 (S_HOSTPAGESIZEPF1 - S_HOSTPAGESIZEPF0) * pf);
+			 (S_HOSTPAGESIZEPF1 - S_HOSTPAGESIZEPF0) * adapter->pf);
 		sge_params->sge_vf_hps =
 			((sge_params->sge_host_page_size >> s_hps)
 			 & M_HOSTPAGESIZEPF0);
-
-		s_qpp = (S_QUEUESPERPAGEPF0 +
-			 (S_QUEUESPERPAGEPF1 - S_QUEUESPERPAGEPF0) * pf);
-		sge_params->sge_vf_eq_qpp =
-			((sge_params->sge_egress_queues_per_page >> s_qpp)
-			 & M_QUEUESPERPAGEPF0);
-		sge_params->sge_vf_iq_qpp =
-			((sge_params->sge_ingress_queues_per_page >> s_qpp)
-			 & M_QUEUESPERPAGEPF0);
+#endif
 	}
 
 	return 0;

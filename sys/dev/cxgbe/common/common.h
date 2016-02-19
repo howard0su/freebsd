@@ -279,9 +279,9 @@ struct sge_params {
 	u32 sge_host_page_size;		/* PF0-7 page sizes */
 	u32 sge_egress_queues_per_page;	/* PF0-7 egress queues/page */
 	u32 sge_ingress_queues_per_page;/* PF0-7 ingress queues/page */
+#if 0
 	u32 sge_vf_hps;			/* host page size for our vf */
-	u32 sge_vf_eq_qpp;		/* egress queues/page for our VF */
-	u32 sge_vf_iq_qpp;		/* ingress queues/page for our VF */
+#endif
 	u32 sge_fl_buffer_size[16];	/* free list buffer sizes */
 	u32 sge_ingress_rx_threshold;	/* RX counter interrupt threshold[4] */
 	u32 sge_congestion_control;	/* congestion thresholds, etc. */

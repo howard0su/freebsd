@@ -3174,9 +3174,6 @@ set_params__post_init(struct adapter *sc)
 	return (0);
 }
 
-#undef FW_PARAM_PFVF
-#undef FW_PARAM_DEV
-
 static void
 t4_set_desc(struct adapter *sc)
 {
