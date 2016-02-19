@@ -531,7 +531,7 @@ void t4_fatal_err(struct adapter *adapter);
 void t4_set_default_handlers(struct adapter *adapter);
 int t4_map_bars_0_and_4(struct adapter *adapter);
 int t4_map_bar_2(struct adapter *adapter);
-
+int t4_detach_common(device_t dev);
 int t4_set_trace_filter(struct adapter *adapter, const struct trace_params *tp,
 			int filter_index, int enable);
 void t4_get_trace_filter(struct adapter *adapter, struct trace_params *tp,
