@@ -1928,6 +1928,7 @@ t4_fatal_err(struct adapter *sc)
 void
 t4_set_default_handlers(struct adapter *sc)
 {
+	int i;
 
 	sc->an_handler = an_not_handled;
 	for (i = 0; i < nitems(sc->cpl_handler); i++)
