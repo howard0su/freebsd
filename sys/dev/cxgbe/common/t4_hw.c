@@ -285,14 +285,21 @@ int t4_wr_mbox_meat(struct adapter *adap, int mbox, const void *cmd, int size,
 	if (adap->flags & IS_VF) {
 		data_reg = VF_MBDATA_BASE;
 		ctl_reg = VF_CIM_REG(A_CIM_VF_EXT_MAILBOX_CTRL);
+		device_printf(adap->dev, "VF[%d]: ctl_reg %#x data_reg %#x\n",
+		    mbox, data_reg, ctl_reg);
 	}
 
 	v = G_MBOWNER(t4_read_reg(adap, ctl_reg));
 	for (i = 0; v == X_MBOWNER_NONE && i < 3; i++)
 		v = G_MBOWNER(t4_read_reg(adap, ctl_reg));
 
-	if (v != X_MBOWNER_PL)
+	if (v != X_MBOWNER_PL) {
+		if (sc->flags & IS_VF)
+			device_printf(adap->dev,
+			    "VF[%d]: timed out waiting for mbox: %d\n", mbox,
+			    v);
 		return v ? -EBUSY : -ETIMEDOUT;
+	}
 
 	for (i = 0; i < size; i += 8, p++)
 		t4_write_reg64(adap, data_reg + i, be64_to_cpu(*p));
@@ -349,6 +356,9 @@ int t4_wr_mbox_meat(struct adapter *adap, int mbox, const void *cmd, int size,
 			} else if (rpl)
 				get_mbox_rpl(adap, rpl, size / 8, data_reg);
 			t4_write_reg(adap, ctl_reg, V_MBOWNER(X_MBOWNER_NONE));
+			if (sc->flags & IS_VF)
+				device_printf(adap->dev, "VF[%d]: retval %d\n",
+				    mbox, G_FW_CMD_RETVAL((int)res);
 			return -G_FW_CMD_RETVAL((int)res);
 		}
 	}
