@@ -310,15 +310,30 @@ struct rss_params {
 	} u;
 };
 
+/*
+ * Maximum resources provisioned for a PCI VF.
+ */
+struct vf_resources {
+	unsigned int nvi;		/* N virtual interfaces */
+	unsigned int neq;		/* N egress Qs */
+	unsigned int nethctrl;		/* N egress ETH or CTRL Qs */
+	unsigned int niqflint;		/* N ingress Qs/w free list(s) & intr */
+	unsigned int niq;		/* N ingress Qs */
+	unsigned int tc;		/* PCI-E traffic class */
+	unsigned int pmask;		/* port access rights mask */
+	unsigned int nexactf;		/* N exact MPS filters */
+	unsigned int r_caps;		/* read capabilities */
+	unsigned int wx_caps;		/* write/execute capabilities */
+};
+
 struct adapter_params {
-	/* PF-only */
-	struct tp_params  tp;
+	struct tp_params  tp;		/* PF-only */
 	struct vpd_params vpd;
 	struct pci_params pci;
-	struct devlog_params devlog;
-	/* VF-only */
-	struct sge_params sge;
-	struct rss_params rss;
+	struct devlog_params devlog;	/* PF-only */
+	struct sge_params sge;		/* VF-only */
+	struct rss_params rss;		/* VF-only */
+	struct vf_resources vfres;	/* VF-only */
 
 	unsigned int sf_size;             /* serial flash size in bytes */
 	unsigned int sf_nsec;             /* # of flash sectors */
@@ -513,6 +528,9 @@ int t4_filter_field_shift(const struct adapter *adap, int filter_sel);
 int t4_port_init(struct port_info *p, int mbox, int pf, int vf);
 int t4_reinit_adapter(struct adapter *adap);
 void t4_fatal_err(struct adapter *adapter);
+int t4_map_bars_0_and_4(struct adapter *adapter);
+int t4_map_bar_2(struct adapter *adapter);
+
 int t4_set_trace_filter(struct adapter *adapter, const struct trace_params *tp,
 			int filter_index, int enable);
 void t4_get_trace_filter(struct adapter *adapter, struct trace_params *tp,
@@ -697,6 +715,7 @@ int t4vf_wait_dev_ready(struct adapter *adapter);
 int t4vf_fw_reset(struct adapter *adapter);
 int t4vf_get_sge_params(struct adapter *adapter);
 int t4vf_get_rss_glb_config(struct adapter *adapter);
+int t4vf_get_vfres(struct adapter *adapter);
 int t4vf_prep_adapter(struct adapter *adapter);
 
 #endif /* __CHELSIO_COMMON_H */

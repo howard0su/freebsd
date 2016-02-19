@@ -926,8 +926,6 @@ struct adapter {
 	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_REG) | \
 	 V_FW_PARAMS_PARAM_XYZ(param))
 
-extern int t5_write_combine;
-
 static inline uint32_t
 t4_read_reg(struct adapter *sc, uint32_t reg)
 {
