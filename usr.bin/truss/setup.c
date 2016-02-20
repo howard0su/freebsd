@@ -431,8 +431,14 @@ thread_exit_syscall(struct trussinfo *info)
 	long retval[2];
 	int errorp;
 
+	/*
+	 * If a thread is killed by the kernel while it is in a system
+	 * call, its state looks the same as if the thread had
+	 * voluntarily exited.  Instead, only log system calls known
+	 * to not return (marked with a return type of 0).
+	 */
 	t = info->curthread;
-	if (!t->in_syscall)
+	if (!t->in_syscall || t->cs.sc->ret_type != 0)
 		return;
 
 	clock_gettime(CLOCK_REALTIME, &t->after);

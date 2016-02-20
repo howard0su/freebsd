@@ -324,6 +324,8 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Name, 0 }, { Atfd, 1 }, { Name, 2 } } },
 	{ .name = "sysarch", .ret_type = 1, .nargs = 2,
 	  .args = { { Sysarch, 0 }, { Ptr, 1 } } },
+	{ .name = "thr_exit", .ret_type = 0, .nargs = 1,
+	  .args = { { Ptr, 0 } } },
 	{ .name = "thr_kill", .ret_type = 1, .nargs = 2,
 	  .args = { { Long, 0 }, { Signal, 1 } } },
 	{ .name = "thr_self", .ret_type = 1, .nargs = 1,
@@ -2073,9 +2075,11 @@ print_syscall_ret(struct trussinfo *trussinfo, int errorp, long *retval)
 		    (intmax_t)off);
 	}
 #endif
-	else
+	else if (sc->ret_type != 0)
 		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval[0],
 		    retval[0]);
+	else
+		fprintf(trussinfo->outfile, "\n");
 }
 
 void
