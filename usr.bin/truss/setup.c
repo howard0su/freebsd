@@ -574,8 +574,8 @@ report_thread_birth(struct trussinfo *info)
 
 	t = info->curthread;
 	clock_gettime(CLOCK_REALTIME, &t->after);
-	assert(info->flags & FOLLOWFORKS);
-	fprintf(info->outfile, "%5d: ", t->proc->pid);
+	if (info->flags & FOLLOWFORKS)
+		fprintf(info->outfile, "%5d: ", t->proc->pid);
 	if (info->flags & ABSOLUTETIMESTAMPS) {
 		timespecsubt(&t->after, &info->start_time, &timediff);
 		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
@@ -686,7 +686,8 @@ eventloop(struct trussinfo *info)
 			find_thread(info, si.si_pid, pl.pl_lwpid);
 
 			if (si.si_status == SIGTRAP &&
-			    (pl.pl_flags & (PL_FLAG_SCE|PL_FLAG_SCX)) != 0) {
+			    (pl.pl_flags & (PL_FLAG_BORN|PL_FLAG_EXITED|
+			    PL_FLAG_SCE|PL_FLAG_SCX)) != 0) {
 				if (pl.pl_flags & PL_FLAG_BORN) {
 					if ((info->flags & COUNTONLY) == 0)
 						report_thread_birth(info);
