@@ -5836,23 +5836,11 @@ int __devinit t4_port_init(struct port_info *p, int mbox, int pf, int vf)
 	adapter_t *adap = p->adapter;
 	u32 param, val;
 
-	memset(&c, 0, sizeof(c));
-
 	for (i = 0, j = -1; i <= p->port_id; i++) {
 		do {
 			j++;
 		} while ((adap->params.portvec & (1 << j)) == 0);
 	}
-
-	c.op_to_portid = htonl(V_FW_CMD_OP(FW_PORT_CMD) |
-			       F_FW_CMD_REQUEST | F_FW_CMD_READ |
-			       V_FW_PORT_CMD_PORTID(j));
-	c.action_to_len16 = htonl(
-		V_FW_PORT_CMD_ACTION(FW_PORT_ACTION_GET_PORT_INFO) |
-		FW_LEN16(c));
-	ret = t4_wr_mbox(adap, mbox, &c, sizeof(c), &c);
-	if (ret)
-		return ret;
 
 	ret = t4_alloc_vi(adap, mbox, j, pf, vf, 1, addr, &rss_size);
 	if (ret < 0)
@@ -5865,6 +5853,26 @@ int __devinit t4_port_init(struct port_info *p, int mbox, int pf, int vf)
 	p->vi[0].rss_size = rss_size;
 	t4_os_set_hw_addr(adap, p->port_id, addr);
 
+	/*
+	 * A VF may not have read access to port information.  In that case
+	 * just bail.
+	 */
+	if ((adap->flags & IS_VF) &&
+	    !(adap->params.vfres.r_caps & FW_CMD_CAP_PORT))
+		goto rss_info;
+
+	memset(&c, 0, sizeof(c));
+
+	c.op_to_portid = htonl(V_FW_CMD_OP(FW_PORT_CMD) |
+			       F_FW_CMD_REQUEST | F_FW_CMD_READ |
+			       V_FW_PORT_CMD_PORTID(p->tx_chan));
+	c.action_to_len16 = htonl(
+		V_FW_PORT_CMD_ACTION(FW_PORT_ACTION_GET_PORT_INFO) |
+		FW_LEN16(c));
+	ret = t4_wr_mbox(adap, mbox, &c, sizeof(c), &c);
+	if (ret)
+		return ret;
+
 	ret = ntohl(c.u.info.lstatus_to_modtype);
 	p->mdio_addr = (ret & F_FW_PORT_CMD_MDIOCAP) ?
 		G_FW_PORT_CMD_MDIOADDR(ret) : -1;
@@ -5873,10 +5881,14 @@ int __devinit t4_port_init(struct port_info *p, int mbox, int pf, int vf)
 
 	init_link_config(&p->link_cfg, ntohs(c.u.info.pcap));
 
+rss_info:
 	param = V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) |
 	    V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_RSSINFO) |
 	    V_FW_PARAMS_PARAM_YZ(p->vi[0].viid);
 	ret = t4_query_params(adap, mbox, pf, vf, 1, &param, &val);
+	if (adap->flags & IS_VF)
+		device_printf(adap->dev,
+		    "RSSINFO query returned %d (val %#x)\n", ret, val);
 	if (ret)
 		p->vi[0].rss_base = 0xffff;
 	else {
