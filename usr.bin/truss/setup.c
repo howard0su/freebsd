@@ -546,47 +546,23 @@ print_line_prefix(struct trussinfo *info)
 static void
 report_thread_death(struct trussinfo *info)
 {
-	struct timespec timediff;
 	struct threadinfo *t;
 
 	t = info->curthread;
-	if (info->flags & FOLLOWFORKS)
-		fprintf(info->outfile, "%5d: ", t->proc->pid);
 	clock_gettime(CLOCK_REALTIME, &t->after);
-	if (info->flags & ABSOLUTETIMESTAMPS) {
-		timespecsubt(&t->after, &info->start_time, &timediff);
-		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
-		    timediff.tv_nsec);
-	}
-	if (info->flags & RELATIVETIMESTAMPS) {
-		timespecsubt(&t->after, &t->before, &timediff);
-		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
-		    timediff.tv_nsec);
-	}
+	print_line_prefix(info);
 	fprintf(info->outfile, "thread %ld exited\n", (long)t->tid);
 }
 
 static void
 report_thread_birth(struct trussinfo *info)
 {
-	struct timespec timediff;
 	struct threadinfo *t;
 
 	t = info->curthread;
 	clock_gettime(CLOCK_REALTIME, &t->after);
-	if (info->flags & FOLLOWFORKS)
-		fprintf(info->outfile, "%5d: ", t->proc->pid);
-	if (info->flags & ABSOLUTETIMESTAMPS) {
-		timespecsubt(&t->after, &info->start_time, &timediff);
-		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
-		    timediff.tv_nsec);
-	}
-	if (info->flags & RELATIVETIMESTAMPS) {
-		timediff.tv_sec = 0;
-		timediff.tv_nsec = 0;
-		fprintf(info->outfile, "%jd.%09ld ", (intmax_t)timediff.tv_sec,
-		    timediff.tv_nsec);
-	}
+	t->before = t->after;
+	print_line_prefix(info);
 	fprintf(info->outfile, "<new thread %ld>\n", (long)t->tid);
 }
 
