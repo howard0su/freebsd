@@ -551,7 +551,7 @@ report_thread_death(struct trussinfo *info)
 	t = info->curthread;
 	clock_gettime(CLOCK_REALTIME, &t->after);
 	print_line_prefix(info);
-	fprintf(info->outfile, "thread %ld exited\n", (long)t->tid);
+	fprintf(info->outfile, "<thread %ld exited>\n", (long)t->tid);
 }
 
 static void
