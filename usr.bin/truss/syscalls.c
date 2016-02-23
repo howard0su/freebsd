@@ -324,8 +324,6 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Name, 0 }, { Atfd, 1 }, { Name, 2 } } },
 	{ .name = "sysarch", .ret_type = 1, .nargs = 2,
 	  .args = { { Sysarch, 0 }, { Ptr, 1 } } },
-	{ .name = "thr_exit", .ret_type = 0, .nargs = 1,
-	  .args = { { Ptr, 0 } } },
 	{ .name = "thr_kill", .ret_type = 1, .nargs = 2,
 	  .args = { { Long, 0 }, { Signal, 1 } } },
 	{ .name = "thr_self", .ret_type = 1, .nargs = 1,
@@ -2056,6 +2054,16 @@ print_syscall_ret(struct trussinfo *trussinfo, int errorp, long *retval)
 
 	print_syscall(trussinfo);
 	fflush(trussinfo->outfile);
+
+	if (retval == NULL) {
+		/*
+		 * This system call resulted in the current thread's exit,
+		 * so there is no return value or error to display.
+		 */
+		fprintf("\n");
+		return;
+	}
+
 	if (errorp) {
 		error = sysdecode_abi_to_freebsd_errno(t->proc->abi->abi,
 		    retval[0]);
@@ -2075,11 +2083,9 @@ print_syscall_ret(struct trussinfo *trussinfo, int errorp, long *retval)
 		    (intmax_t)off);
 	}
 #endif
-	else if (sc->ret_type != 0)
+	else
 		fprintf(trussinfo->outfile, " = %ld (0x%lx)\n", retval[0],
 		    retval[0]);
-	else
-		fprintf(trussinfo->outfile, "\n");
 }
 
 void

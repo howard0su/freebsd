@@ -421,36 +421,20 @@ enter_syscall(struct trussinfo *info, struct threadinfo *t,
  * When a thread exits voluntarily (including when a thread calls
  * exit() to trigger a process exit), the thread's internal state
  * holds the arguments passed to the exit system call.  When the
- * thread's exit is reported, log that system call with a "fake"
- * return value of 0.
+ * thread's exit is reported, log that system call without a return
+ * value.
  */
 static void
 thread_exit_syscall(struct trussinfo *info)
 {
 	struct threadinfo *t;
-	long retval[2];
-	int errorp;
 
-	/*
-	 * If a thread is killed by the kernel while it is in a system
-	 * call, its state looks the same as if the thread had
-	 * voluntarily exited.  Instead, only log system calls known
-	 * to not return (marked with a return type of 0).
-	 */
-	t = info->curthread;
-	if (!t->in_syscall || t->cs.sc->ret_type != 0)
+	if (!t->in_syscall)
 		return;
 
 	clock_gettime(CLOCK_REALTIME, &t->after);
 
-	/*
-	 * Fake a successful exit with a return value of 0.
-	 */
-	errorp = 0;
-	retval[0] = 0;
-	retval[1] = 0;
-
-	print_syscall_ret(info, errorp, retval);
+	print_syscall_ret(info, 0, NULL);
 	free_syscall(t);
 }
 
@@ -674,10 +658,8 @@ eventloop(struct trussinfo *info)
 					if ((info->flags & COUNTONLY) == 0)
 						report_thread_birth(info);
 				} else if (pl.pl_flags & PL_FLAG_EXITED) {
-					if ((info->flags & COUNTONLY) == 0) {
-						thread_exit_syscall(info);
+					if ((info->flags & COUNTONLY) == 0)
 						report_thread_death(info);
-					}
 					free_thread(info->curthread);
 					info->curthread = NULL;
 				} else if (pl.pl_flags & PL_FLAG_SCE)
