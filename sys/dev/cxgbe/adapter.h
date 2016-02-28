@@ -916,6 +916,9 @@ struct adapter {
 /* One for errors, one for firmware events */
 #define T4_EXTRA_INTR 2
 
+/* One for firmware events */
+#define	T4VF_EXTRA_INTR 1
+
 #define FW_PARAM_DEV(param) \
 	(V_FW_PARAMS_MNEM(FW_PARAMS_MNEM_DEV) | \
 	 V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_##param))
@@ -1049,6 +1052,18 @@ tx_resume_threshold(struct sge_eq *eq)
 }
 
 /* t4_main.c */
+extern int t4_ntxq10g;
+extern int t4_nrxq10g;
+extern int t4_ntxq1g;
+extern int t4_nrxq1g;
+extern int t4_intr_types;
+extern int t4_tmr_idx_10g;
+extern int t4_pktc_idx_10g;
+extern int t4_tmr_idx_1g;
+extern int t4_pktc_idx_1g;
+extern unsigned int t4_qsize_rxq;
+extern unsigned int t4_qsize_txq;
+
 int t4_os_find_pci_capability(struct adapter *, int);
 int t4_os_pci_save_state(struct adapter *);
 int t4_os_pci_restore_state(struct adapter *);
