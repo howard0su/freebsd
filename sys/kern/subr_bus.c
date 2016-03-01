@@ -135,6 +135,10 @@ struct device {
 
 	struct sysctl_ctx_list sysctl_ctx; /**< state for sysctl variables  */
 	struct sysctl_oid *sysctl_tree;	/**< state for sysctl variables */
+
+	/* XXX: Temporary for testing */
+	cpuset_t	intr_cpus;
+	cpuset_t	local_cpus;
 };
 
 static MALLOC_DEFINE(M_BUS, "bus", "Bus data structures");
@@ -275,6 +279,17 @@ device_sysctl_handler(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
+static int
+device_cpuset_handler(SYSCTL_HANDLER_ARGS)
+{
+	char cpumask_str[CPUSETBUFSIZ];
+	int error;
+
+	cpusetobj_strprint(cpumask_str, arg1);
+	return (sysctl_handle_string(oidp, cpumask_str, sizeof(cpumask_str),
+	    req));
+}
+
 static void
 device_sysctl_init(device_t dev)
 {
@@ -313,6 +328,20 @@ device_sysctl_init(device_t dev)
 		SYSCTL_ADD_INT(&dev->sysctl_ctx,
 		    SYSCTL_CHILDREN(dev->sysctl_tree), OID_AUTO, "%domain",
 		    CTLFLAG_RD, NULL, domain, "NUMA domain");
+
+	/* XXX: For testing. */
+	if (bus_get_cpus(dev, INTR_CPUS, sizeof(dev->intr_cpus),
+	    &dev->intr_cpus) == 0)
+		SYSCTL_ADD_PROC(&dev->sysctl_ctx,
+		    SYSCTL_CHILDREN(dev->sysctl_tree), OID_AUTO, "%intr_cpus",
+		    CTLTYPE_STRING | CTLFLAG_RD, &dev->intr_cpus, 0,
+		    device_cpuset_handler, "A", "Interrupt CPUs");
+	if (bus_get_cpus(dev, LOCAL_CPUS, sizeof(dev->local_cpus),
+	    &dev->local_cpus) == 0)
+		SYSCTL_ADD_PROC(&dev->sysctl_ctx,
+		    SYSCTL_CHILDREN(dev->sysctl_tree), OID_AUTO, "%local_cpus",
+		    CTLTYPE_STRING | CTLFLAG_RD, &dev->local_cpus, 0,
+		    device_cpuset_handler, "A", "Interrupt CPUs");
 }
 
 static void
