@@ -486,6 +486,9 @@ t4vf_attach(device_t dev)
 	sc->pf = G_SOURCEPF(val);
 	sc->mbox = G_VFID(val);
 
+	/* XXX */
+	sc->debug_flags |= DF_DUMP_MBOX;
+
 	memset(sc->chan_map, 0xff, sizeof(sc->chan_map));
 	t4_set_default_handlers(sc);
 	t4_init_sge_cpl_handlers(sc);
