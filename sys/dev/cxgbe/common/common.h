@@ -692,7 +692,6 @@ int t4_sge_ctxt_rd_bd(struct adapter *adap, unsigned int cid, enum ctxt_type cty
 		      u32 *data);
 int t4_sge_ctxt_flush(struct adapter *adap, unsigned int mbox);
 int t4_handle_fw_rpl(struct adapter *adap, const __be64 *rpl);
-void t4_get_pci_mode(struct adapter *adapter, struct pci_params *p);
 int t4_fwaddrspace_write(struct adapter *adap, unsigned int mbox, u32 addr, u32 val);
 int t4_sched_config(struct adapter *adapter, int type, int minmaxen,
 		    int sleep_ok);
