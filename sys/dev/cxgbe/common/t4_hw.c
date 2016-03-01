@@ -5568,8 +5568,8 @@ int t4_handle_fw_rpl(struct adapter *adap, const __be64 *rpl)
  *	Determines a card's PCI mode and associated parameters, such as speed
  *	and width.
  */
-static void __devinit get_pci_mode(struct adapter *adapter,
-				   struct pci_params *p)
+void __devinit t4_get_pci_mode(struct adapter *adapter,
+			       struct pci_params *p)
 {
 	u16 val;
 	u32 pcie_cap;
@@ -5710,7 +5710,7 @@ int __devinit t4_prep_adapter(struct adapter *adapter)
 	uint16_t device_id;
 	uint32_t pl_rev;
 
-	get_pci_mode(adapter, &adapter->params.pci);
+	t4_get_pci_mode(adapter, &adapter->params.pci);
 
 	pl_rev = t4_read_reg(adapter, A_PL_REV);
 	adapter->params.chipid = G_CHIPID(pl_rev);

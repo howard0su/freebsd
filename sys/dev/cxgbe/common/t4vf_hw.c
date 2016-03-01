@@ -331,6 +331,8 @@ int __devinit t4vf_prep_adapter(struct adapter *adapter)
 	if (err)
 		return err;
 
+	t4_get_pci_mode(adapter, &adapter->params.pci);
+
 	adapter->params.chipid = pci_get_device(adapter->dev) >> 12;
 	if (adapter->params.chipid >= 0xa) {
 		adapter->params.chipid -= (0xa - 0x4);
