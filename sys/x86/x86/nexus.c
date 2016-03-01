@@ -636,7 +636,7 @@ nexus_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 		return (0);
 #endif
 	default:
-		return (bus_generic_get_cpus(dev, child, op, cpuset));
+		return (bus_generic_get_cpus(dev, child, op, setsize, cpuset));
 	}
 }
 

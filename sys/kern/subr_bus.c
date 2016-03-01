@@ -283,7 +283,6 @@ static int
 device_cpuset_handler(SYSCTL_HANDLER_ARGS)
 {
 	char cpumask_str[CPUSETBUFSIZ];
-	int error;
 
 	cpusetobj_strprint(cpumask_str, arg1);
 	return (sysctl_handle_string(oidp, cpumask_str, sizeof(cpumask_str),

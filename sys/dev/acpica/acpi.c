@@ -1110,7 +1110,7 @@ acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 
 	d = acpi_parse_pxm(child);
 	if (d < 0)
-		return (bus_generic_get_cpus(dev, child, op, cpuset));
+		return (bus_generic_get_cpus(dev, child, op, setsize, cpuset));
 
 	switch (op) {
 	case LOCAL_CPUS:
@@ -1119,7 +1119,7 @@ acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 		*cpuset = cpuset_domain[d];
 		return (0);
 	case INTR_CPUS:
-		error = bus_generic_get_cpus(dev, child, op, cpuset);
+		error = bus_generic_get_cpus(dev, child, op, setsize, cpuset);
 		if (error != 0)
 			return (error);
 		if (setsize != sizeof(cpuset_t))
@@ -1127,7 +1127,7 @@ acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 		CPU_AND(cpuset, &cpuset_domain[d]);
 		return (0);
 	default:
-		return (bus_generic_get_cpus(dev, child, op, cpuset));
+		return (bus_generic_get_cpus(dev, child, op, setsize, cpuset));
 	}
 }
 
