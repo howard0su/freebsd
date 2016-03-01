@@ -5886,9 +5886,6 @@ rss_info:
 	    V_FW_PARAMS_PARAM_X(FW_PARAMS_PARAM_DEV_RSSINFO) |
 	    V_FW_PARAMS_PARAM_YZ(p->vi[0].viid);
 	ret = t4_query_params(adap, mbox, pf, vf, 1, &param, &val);
-	if (adap->flags & IS_VF)
-		device_printf(adap->dev,
-		    "RSSINFO query returned %d (val %#x)\n", ret, val);
 	if (ret)
 		p->vi[0].rss_base = 0xffff;
 	else {
