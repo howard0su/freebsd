@@ -181,9 +181,7 @@ get_params__post_init(struct adapter *sc)
 		return (rc);
 	}
 	if (sc->params.rss.mode != FW_RSS_GLB_CONFIG_CMD_MODE_BASICVIRTUAL) {
-		device_printf(sc->dev,
-		    "unable to operate with global RSS mode %d\n",
-		    sc->params.rss.mode);
+		device_printf(sc->dev, "disabling RSS\n");
 		return (EINVAL);
 	}
 
@@ -311,6 +309,15 @@ cfg_itype_and_nqueues(struct adapter *sc, int n10g, int n1g,
 
 		nrxq10g = t4_nrxq10g;
 		nrxq1g = t4_nrxq1g;
+
+		/*
+		 * If the PF has not enabled support for RSS in VFs, then
+		 * just use a single queue.
+		 */
+		if (sc->params.rss.mode !=
+		    FW_RSS_GLB_CONFIG_CMD_MODE_BASICVIRTUAL)
+			nrxq10g = nrxq1g = 1;
+
 		nrxq = n10g * nrxq10g + n1g * nrxq1g;
 		if (nrxq > iq_avail && nrxq1g > 1) {
 			/* Too many ingress queues.  Try just 1 for 1G. */

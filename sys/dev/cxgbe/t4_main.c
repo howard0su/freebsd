@@ -3961,11 +3961,14 @@ vi_full_init(struct vi_info *vi)
 
 #ifdef DEV_NETMAP
 	/* Netmap VIs configure RSS when netmap is enabled. */
-	if (vi->flags & VI_NETMAP) {
-		vi->flags |= VI_INIT_DONE;
-		return (0);
-	}
+	if (vi->flags & VI_NETMAP)
+		goto skip_rss;
 #endif
+
+	/* VFs cannot use RSS if the PF is using manual RSS. */
+	if (sc->flags & IS_VF &&
+	    sc->params.rss.mode != FW_RSS_GLB_CONFIG_CMD_MODE_BASICVIRTUAL)
+		goto skip_rss;
 
 	/*
 	 * Setup RSS for this VI.  Save a copy of the RSS table for later use.
@@ -4064,6 +4067,7 @@ vi_full_init(struct vi_info *vi)
 	}
 
 	vi->rss = rss;
+skip_rss:
 	vi->flags |= VI_INIT_DONE;
 done:
 	if (rc != 0)
