@@ -693,8 +693,8 @@ pccard_function_enable(struct pccard_function *pf)
 	}
 	if (tmp == NULL) {
 		pf->ccr_rid = 0;
-		pf->ccr_res = bus_alloc_resource(dev, SYS_RES_MEMORY,
-		    &pf->ccr_rid, 0, ~0, PCCARD_MEM_PAGE_SIZE, RF_ACTIVE);
+		pf->ccr_res = bus_alloc_resource_anywhere(dev, SYS_RES_MEMORY,
+		    &pf->ccr_rid, PCCARD_MEM_PAGE_SIZE, RF_ACTIVE);
 		if (!pf->ccr_res)
 			goto bad;
 		DEVPRINTF((dev, "ccr_res == %#lx-%#lx, base=%#x\n",
@@ -1137,7 +1137,7 @@ pccard_alloc_resource(device_t dev, device_t child, int type, int *rid,
 	struct pccard_ivar *dinfo;
 	struct resource_list_entry *rle = 0;
 	int passthrough = (device_get_parent(child) != dev);
-	int isdefault = (start == 0 && end == ~0UL && count == 1);
+	int isdefault = (RMAN_IS_DEFAULT_RANGE(start, end) && count == 1);
 	struct resource *r = NULL;
 
 	/* XXX I'm no longer sure this is right */
