@@ -26,7 +26,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd March 7, 2015
+.Dd March 1, 2016
 .Dt BUS_GET_CPUS 9
 .Os
 .Sh NAME
@@ -38,10 +38,13 @@
 .In sys/bus.h
 .Ft int
 .Fo BUS_GET_CPUS
-.Fa "device_t dev" "device_t child" "enum cpu_sets op" "cpuset_t *cpuset"
+.Fa "device_t dev" "device_t child" "enum cpu_sets op" "size_t setsize"
+.Fa "cpuset_t *cpuset"
 .Fc
 .Ft int
-.Fn bus_get_cpus "device_t dev" "enum cpu_sets op" "cpuset_t *cpuset"
+.Fo bus_get_cpus
+.Fa "device_t dev" "enum cpu_sets op" "size_t setsize" "cpuset_t *cpuset"
+.Fc
 .Sh DESCRIPTION
 The
 .Fn BUS_GET_CPUS
@@ -51,6 +54,10 @@ The
 argument specifies which set of CPUs to retrieve.
 If successful,
 the requested set of CPUs are returned in
+.Fa cpuset .
+The
+.Fa setsize
+argument specifies the size in bytes of the set passed in
 .Fa cpuset .
 .Pp
 The
