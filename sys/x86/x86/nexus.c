@@ -127,7 +127,8 @@ static	int nexus_set_resource(device_t, device_t, int, int,
 static	int nexus_get_resource(device_t, device_t, int, int,
 			       rman_res_t *, rman_res_t *);
 static void nexus_delete_resource(device_t, device_t, int, int);
-static	int nexus_get_cpus(device_t, device_t, enum cpu_sets, cpuset_t *);
+static	int nexus_get_cpus(device_t, device_t, enum cpu_sets, size_t,
+			   cpuset_t *);
 #ifdef DEV_APIC
 static	int nexus_alloc_msi(device_t pcib, device_t dev, int count, int maxcount, int *irqs);
 static	int nexus_release_msi(device_t pcib, device_t dev, int count, int *irqs);
@@ -622,12 +623,14 @@ nexus_delete_resource(device_t dev, device_t child, int type, int rid)
 }
 
 static int
-nexus_get_cpus(device_t dev, device_t child, enum cpu_sets op, cpuset_t *cpuset)
+nexus_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
+    cpuset_t *cpuset)
 {
 
 	switch (op) {
 #ifdef SMP
 	case INTR_CPUS:
+		XXX use setsize;
 		*cpuset = intr_cpus;
 		return (0);
 #endif

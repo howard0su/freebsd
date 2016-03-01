@@ -507,7 +507,7 @@ int	acpi_map_pxm_to_vm_domainid(int pxm);
 #endif
 
 int	acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op,
-	    cpuset_t *cpuset);
+	    size_t setsize, cpuset_t *cpuset);
 int	acpi_get_domain(device_t dev, device_t child, int *domain);
 
 #endif /* _KERNEL */

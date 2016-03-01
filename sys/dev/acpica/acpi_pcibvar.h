@@ -37,7 +37,7 @@ void	acpi_pci_link_add_reference(device_t dev, int index, device_t pcib,
 int	acpi_pci_link_route_interrupt(device_t dev, int index);
 int	acpi_pcib_attach(device_t bus, ACPI_BUFFER *prt, int busno);
 int	acpi_pcib_get_cpus(device_t pcib, device_t dev, enum cpu_sets op,
-    cpuset_t *cpuset);
+    size_t setsize, cpuset_t *cpuset);
 int	acpi_pcib_route_interrupt(device_t pcib, device_t dev, int pin,
     ACPI_BUFFER *prtbuf);
 int	acpi_pcib_power_for_sleep(device_t pcib, device_t dev,
