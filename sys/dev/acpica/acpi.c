@@ -1114,14 +1114,16 @@ acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 
 	switch (op) {
 	case LOCAL_CPUS:
-		XXX use setsize;
+		if (setsize != sizeof(cpuset_t))
+			return (EINVAL);
 		*cpuset = cpuset_domain[d];
 		return (0);
 	case INTR_CPUS:
 		error = bus_generic_get_cpus(dev, child, op, cpuset);
 		if (error != 0)
 			return (error);
-		XXX use setsize;
+		if (setsize != sizeof(cpuset_t))
+			return (EINVAL);
 		CPU_AND(cpuset, &cpuset_domain[d]);
 		return (0);
 	default:

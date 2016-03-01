@@ -4709,7 +4709,8 @@ root_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 	switch (op) {
 	case INTR_CPUS:
 		/* Default to returning the set of all CPUs. */
-		XXX use setsize;
+		if (setsize != sizeof(cpuset_t))
+			return (EINVAL);
 		*cpuset = all_cpus;
 		return (0);
 	default:

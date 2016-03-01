@@ -630,7 +630,8 @@ nexus_get_cpus(device_t dev, device_t child, enum cpu_sets op, size_t setsize,
 	switch (op) {
 #ifdef SMP
 	case INTR_CPUS:
-		XXX use setsize;
+		if (setsize != sizeof(cpuset_t))
+			return (EINVAL);
 		*cpuset = intr_cpus;
 		return (0);
 #endif
