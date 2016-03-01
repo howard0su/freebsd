@@ -282,11 +282,26 @@ device_sysctl_handler(SYSCTL_HANDLER_ARGS)
 static int
 device_cpuset_handler(SYSCTL_HANDLER_ARGS)
 {
-	char cpumask_str[CPUSETBUFSIZ];
+	cpuset_t *mask;
+	struct sbuf *sb;
+	int cpu, error, once;
 
-	cpusetobj_strprint(cpumask_str, arg1);
-	return (sysctl_handle_string(oidp, cpumask_str, sizeof(cpumask_str),
-	    req));
+	mask = arg1;
+	sb = sbuf_new_for_sysctl(NULL, NULL, 128, req);
+	for (once = 0, cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+		if (CPU_ISSET(cpu, set)) {
+			if (once == 0) {
+				sbuf_printf(sb, "%d", cpu);
+				once = 1;
+			} else  
+				sbuf_printf(sb, ",%d", cpu);
+		}
+	}
+	if (once == 0)
+		sbuf_printf(sb, "<none>");
+	error = sbuf_finish(sb);
+	sbuf_delete(sb);
+	return (err);
 }
 
 static void
