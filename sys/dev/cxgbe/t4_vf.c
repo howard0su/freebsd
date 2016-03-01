@@ -180,10 +180,8 @@ get_params__post_init(struct adapter *sc)
 		    "unable to retrieve adapter RSS parameters: %d\n", rc);
 		return (rc);
 	}
-	if (sc->params.rss.mode != FW_RSS_GLB_CONFIG_CMD_MODE_BASICVIRTUAL) {
+	if (sc->params.rss.mode != FW_RSS_GLB_CONFIG_CMD_MODE_BASICVIRTUAL)
 		device_printf(sc->dev, "disabling RSS\n");
-		return (EINVAL);
-	}
 
 	rc = t4_read_chip_settings(sc);
 	if (rc != 0)
