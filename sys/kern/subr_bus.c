@@ -282,11 +282,11 @@ device_sysctl_handler(SYSCTL_HANDLER_ARGS)
 static int
 device_cpuset_handler(SYSCTL_HANDLER_ARGS)
 {
-	cpuset_t *mask;
+	cpuset_t *set;
 	struct sbuf *sb;
 	int cpu, error, once;
 
-	mask = arg1;
+	set = arg1;
 	sb = sbuf_new_for_sysctl(NULL, NULL, 128, req);
 	for (once = 0, cpu = 0; cpu < CPU_SETSIZE; cpu++) {
 		if (CPU_ISSET(cpu, set)) {
@@ -301,7 +301,7 @@ device_cpuset_handler(SYSCTL_HANDLER_ARGS)
 		sbuf_printf(sb, "<none>");
 	error = sbuf_finish(sb);
 	sbuf_delete(sb);
-	return (err);
+	return (error);
 }
 
 static void
