@@ -5637,7 +5637,7 @@ static void __devinit set_pcie_completion_timeout(struct adapter *adapter,
 	}
 }
 
-static const struct chip_params *get_chip_params(int chipid)
+const struct chip_params *t4_get_chip_params(int chipid)
 {
 	static const struct chip_params chip_params[] = {
 		{
@@ -5716,7 +5716,7 @@ int __devinit t4_prep_adapter(struct adapter *adapter)
 		}
 	}
 
-	adapter->chip_params = get_chip_params(chip_id(adapter));
+	adapter->chip_params = t4_get_chip_params(chip_id(adapter));
 	if (adapter->chip_params == NULL)
 		return -EINVAL;
 

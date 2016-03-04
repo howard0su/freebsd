@@ -522,6 +522,7 @@ int t4_get_fw_version(struct adapter *adapter, u32 *vers);
 int t4_get_tp_version(struct adapter *adapter, u32 *vers);
 int t4_check_fw_version(struct adapter *adapter);
 int t4_init_hw(struct adapter *adapter, u32 fw_params);
+const struct chip_params *t4_get_chip_params(int chipid);
 int t4_prep_adapter(struct adapter *adapter);
 int t4_init_tp_params(struct adapter *adap);
 int t4_filter_field_shift(const struct adapter *adap, int filter_sel);
