@@ -291,9 +291,8 @@ int t4_wr_mbox_meat(struct adapter *adap, int mbox, const void *cmd, int size,
 	for (i = 0; v == X_MBOWNER_NONE && i < 3; i++)
 		v = G_MBOWNER(t4_read_reg(adap, ctl_reg));
 
-	if (v != X_MBOWNER_PL) {
+	if (v != X_MBOWNER_PL)
 		return v ? -EBUSY : -ETIMEDOUT;
-	}
 
 	for (i = 0; i < size; i += 8, p++)
 		t4_write_reg64(adap, data_reg + i, be64_to_cpu(*p));
