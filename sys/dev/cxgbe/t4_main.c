@@ -439,7 +439,6 @@ static int cpl_not_handled(struct sge_iq *, const struct rss_header *,
     struct mbuf *);
 static int an_not_handled(struct sge_iq *, const struct rsp_ctrl *);
 static int fw_msg_not_handled(struct adapter *, const __be64 *);
-static void t4_sysctls(struct adapter *);
 static void cxgbe_sysctls(struct port_info *);
 static int sysctl_int_array(SYSCTL_HANDLER_ARGS);
 static int sysctl_bitfield(SYSCTL_HANDLER_ARGS);
@@ -5173,7 +5172,7 @@ t4_register_fw_msg_handler(struct adapter *sc, int type, fw_msg_handler_t h)
 	return (0);
 }
 
-static void
+void
 t4_sysctls(struct adapter *sc)
 {
 	struct sysctl_ctx_list *ctx;
@@ -5208,6 +5207,7 @@ t4_sysctls(struct adapter *sc)
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nports", CTLFLAG_RD, NULL,
 	    sc->params.nports, "# of ports");
 
+	if (!(sc->flags & IS_VF)) {
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "hw_revision", CTLFLAG_RD,
 	    NULL, chip_rev(sc), "chip hardware revision");
 
@@ -5219,11 +5219,13 @@ t4_sysctls(struct adapter *sc)
 
 	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "cfcsum", CTLFLAG_RD, NULL,
 	    sc->cfcsum, "config file checksum");
+	}
 
 	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "doorbells",
 	    CTLTYPE_STRING | CTLFLAG_RD, doorbells, sc->doorbells,
 	    sysctl_bitfield, "A", "available doorbells");
 
+	if (!(sc->flags & IS_VF)) {
 	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "linkcaps",
 	    CTLTYPE_STRING | CTLFLAG_RD, caps[0], sc->linkcaps,
 	    sysctl_bitfield, "A", "available link capabilities");
@@ -5247,6 +5249,7 @@ t4_sysctls(struct adapter *sc)
 	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "fcoecaps",
 	    CTLTYPE_STRING | CTLFLAG_RD, caps[5], sc->fcoecaps,
 	    sysctl_bitfield, "A", "available FCoE capabilities");
+	}
 
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "core_clock", CTLFLAG_RD, NULL,
 	    sc->params.vpd.cclk, "core clock frequency (in KHz)");
@@ -5261,12 +5264,14 @@ t4_sysctls(struct adapter *sc)
 	    sizeof(sc->sge.counter_val), sysctl_int_array, "A",
 	    "interrupt holdoff packet counter values");
 
+	if (!(sc->flags & IS_VF)) {
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "nfilters", CTLFLAG_RD,
 	    NULL, sc->tids.nftids, "number of filters");
 
 	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "temperature", CTLTYPE_INT |
 	    CTLFLAG_RD, sc, 0, sysctl_temperature, "I",
 	    "chip temperature (in Celsius)");
+	}
 
 	t4_sge_sysctls(sc, ctx, children);
 
@@ -5276,6 +5281,9 @@ t4_sysctls(struct adapter *sc)
 
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "debug_flags", CTLFLAG_RW,
 	    &sc->debug_flags, 0, "flags to enable runtime debugging");
+
+	if (sc->flags & IS_VF)
+		return;
 
 #ifdef SBUF_DRAIN
 	/*

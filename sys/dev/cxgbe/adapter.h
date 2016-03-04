@@ -1052,6 +1052,7 @@ void t4_iterate(void (*)(struct adapter *, void *), void *);
 int t4_register_cpl_handler(struct adapter *, int, cpl_handler_t);
 int t4_register_an_handler(struct adapter *, an_handler_t);
 int t4_register_fw_msg_handler(struct adapter *, int, fw_msg_handler_t);
+void t4_sysctls(struct adapter *);
 int t4_filter_rpl(struct sge_iq *, const struct rss_header *, struct mbuf *);
 int begin_synchronized_op(struct adapter *, struct vi_info *, int, char *);
 void doom_vi(struct adapter *, struct vi_info *);
