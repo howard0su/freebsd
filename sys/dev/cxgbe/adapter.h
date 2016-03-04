@@ -739,6 +739,7 @@ struct adapter {
 		int rid;
 		void *tag;
 	} *irq;
+	int sge_gts_reg;
 
 	bus_dma_tag_t dmat;	/* Parent DMA tag */
 
