@@ -2867,7 +2867,10 @@ alloc_fwq(struct adapter *sc)
 
 	init_iq(fwq, sc, 0, 0, FW_IQ_QSIZE);
 	fwq->flags |= IQ_INTR;	/* always */
-	intr_idx = sc->intr_count > 1 ? 1 : 0;
+	if (sc->intr_count > 1 && !(sc->flags & IS_VF))
+		intr_idx = 1;
+	else
+		intr_idx = 0;
 	rc = alloc_iq_fl(&sc->port[0]->vi[0], fwq, NULL, intr_idx, -1);
 	if (rc != 0) {
 		device_printf(sc->dev,
