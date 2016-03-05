@@ -3643,7 +3643,7 @@ ring_fl_db(struct adapter *sc, struct sge_fl *fl)
 	if (fl->udb)
 		*fl->udb = htole32(v);
 	else
-		t4_write_reg(sc, MYPF_REG(A_SGE_PF_KDOORBELL), v);
+		t4_write_reg(sc, sc->sge_kdoorbell_reg, v);
 	IDXINCR(fl->dbidx, n, fl->sidx);
 }
 
@@ -4376,7 +4376,7 @@ ring_eq_db(struct adapter *sc, struct sge_eq *eq, u_int n)
 		break;
 
 	case DOORBELL_KDB:
-		t4_write_reg(sc, MYPF_REG(A_SGE_PF_KDOORBELL),
+		t4_write_reg(sc, sc->sge_kdoorbell_reg,
 		    V_QID(eq->cntxt_id) | V_PIDX(n));
 		break;
 	}
