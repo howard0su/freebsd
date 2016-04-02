@@ -297,6 +297,9 @@ vmbus_child_pnpinfo_str(device_t dev, device_t child, char *buf, size_t buflen)
 	char guidbuf[40];
 	struct hv_device *dev_ctx = device_get_ivars(child);
 
+	if (dev_ctx == NULL)
+		return (0);
+
 	strlcat(buf, "classid=", buflen);
 	snprintf_hv_guid(guidbuf, sizeof(guidbuf), &dev_ctx->class_id);
 	strlcat(buf, guidbuf, buflen);
@@ -506,6 +509,9 @@ vmbus_bus_init(void)
 	if (ret != 0)
 		goto cleanup1;
 
+	/* delay attach until inerrupt is on */
+	bus_generic_attach(vmbus_devp);
+
 	hv_vmbus_request_channel_offers();
 	return (ret);
 
@@ -551,6 +557,7 @@ vmbus_attach(device_t dev)
 	if (!cold)
 		vmbus_bus_init();
 
+	bus_generic_probe(dev);
 	return (0);
 }
 
