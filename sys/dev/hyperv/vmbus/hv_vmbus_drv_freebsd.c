@@ -72,6 +72,13 @@ static hv_setup_args setup_args; /* only CPU 0 supported at this time */
 static char *vmbus_ids[] = { "VMBUS", NULL };
 
 /**
+ * Globals
+ */
+hv_vmbus_context hv_vmbus_g_context = {
+	.syn_ic_initialized = FALSE,
+};
+
+/**
  * @brief Software interrupt thread routine to handle channel messages from
  * the hypervisor.
  */
@@ -381,6 +388,135 @@ extern inthand_t IDTVEC(hv_vmbus_callback);
 #endif
 
 /**
+ * @brief hv_vmbus_synic_init
+ */
+void
+hv_vmbus_synic_init(void *arg)
+
+{
+	int			cpu;
+	uint64_t		hv_vcpu_index;
+	hv_vmbus_synic_simp	simp;
+	hv_vmbus_synic_siefp	siefp;
+	hv_vmbus_synic_scontrol sctrl;
+	hv_vmbus_synic_sint	shared_sint;
+	uint64_t		version;
+	hv_setup_args* 		setup_args = (hv_setup_args *)arg;
+
+	cpu = PCPU_GET(cpuid);
+
+	memset(
+	    hv_vmbus_g_context.syn_ic_event_page,
+	    0,
+	    sizeof(hv_vmbus_handle) * MAXCPU);
+
+	memset(
+	    hv_vmbus_g_context.syn_ic_msg_page,
+	    0,
+	    sizeof(hv_vmbus_handle) * MAXCPU);
+
+	/*
+	 * TODO: Check the version
+	 */
+	version = rdmsr(HV_X64_MSR_SVERSION);
+
+	hv_vmbus_g_context.syn_ic_msg_page[cpu] =
+	    setup_args->page_buffers[2 * cpu];
+	hv_vmbus_g_context.syn_ic_event_page[cpu] =
+	    setup_args->page_buffers[2 * cpu + 1];
+
+	/*
+	 * Setup the Synic's message page
+	 */
+
+	simp.as_uint64_t = rdmsr(HV_X64_MSR_SIMP);
+	simp.u.simp_enabled = 1;
+	simp.u.base_simp_gpa = ((hv_get_phys_addr(
+	    hv_vmbus_g_context.syn_ic_msg_page[cpu])) >> PAGE_SHIFT);
+
+	wrmsr(HV_X64_MSR_SIMP, simp.as_uint64_t);
+
+	/*
+	 * Setup the Synic's event page
+	 */
+	siefp.as_uint64_t = rdmsr(HV_X64_MSR_SIEFP);
+	siefp.u.siefp_enabled = 1;
+	siefp.u.base_siefp_gpa = ((hv_get_phys_addr(
+	    hv_vmbus_g_context.syn_ic_event_page[cpu])) >> PAGE_SHIFT);
+
+	wrmsr(HV_X64_MSR_SIEFP, siefp.as_uint64_t);
+
+	/*HV_SHARED_SINT_IDT_VECTOR + 0x20; */
+	shared_sint.as_uint64_t = 0;
+	shared_sint.u.vector = setup_args->vector;
+	shared_sint.u.masked = FALSE;
+	shared_sint.u.auto_eoi = TRUE;
+
+	wrmsr(HV_X64_MSR_SINT0 + HV_VMBUS_MESSAGE_SINT,
+	    shared_sint.as_uint64_t);
+
+	wrmsr(HV_X64_MSR_SINT0 + HV_VMBUS_TIMER_SINT,
+	    shared_sint.as_uint64_t);
+
+	/* Enable the global synic bit */
+	sctrl.as_uint64_t = rdmsr(HV_X64_MSR_SCONTROL);
+	sctrl.u.enable = 1;
+
+	wrmsr(HV_X64_MSR_SCONTROL, sctrl.as_uint64_t);
+
+	hv_vmbus_g_context.syn_ic_initialized = TRUE;
+
+	/*
+	 * Set up the cpuid mapping from Hyper-V to FreeBSD.
+	 * The array is indexed using FreeBSD cpuid.
+	 */
+	hv_vcpu_index = rdmsr(HV_X64_MSR_VP_INDEX);
+	hv_vmbus_g_context.hv_vcpu_index[cpu] = (uint32_t)hv_vcpu_index;
+
+	return;
+}
+
+/**
+ * @brief Cleanup routine for hv_vmbus_synic_init()
+ */
+void hv_vmbus_synic_cleanup(void *arg)
+{
+	hv_vmbus_synic_sint	shared_sint;
+	hv_vmbus_synic_simp	simp;
+	hv_vmbus_synic_siefp	siefp;
+
+	if (!hv_vmbus_g_context.syn_ic_initialized)
+	    return;
+
+	shared_sint.as_uint64_t = rdmsr(
+	    HV_X64_MSR_SINT0 + HV_VMBUS_MESSAGE_SINT);
+
+	shared_sint.u.masked = 1;
+
+	/*
+	 * Disable the interrupt
+	 */
+	wrmsr(
+	    HV_X64_MSR_SINT0 + HV_VMBUS_MESSAGE_SINT,
+	    shared_sint.as_uint64_t);
+	wrmsr(
+	    HV_X64_MSR_SINT0 + HV_VMBUS_TIMER_SINT,
+	    shared_sint.as_uint64_t);
+
+	simp.as_uint64_t = rdmsr(HV_X64_MSR_SIMP);
+	simp.u.simp_enabled = 0;
+	simp.u.base_simp_gpa = 0;
+
+	wrmsr(HV_X64_MSR_SIMP, simp.as_uint64_t);
+
+	siefp.as_uint64_t = rdmsr(HV_X64_MSR_SIEFP);
+	siefp.u.siefp_enabled = 0;
+	siefp.u.base_siefp_gpa = 0;
+
+	wrmsr(HV_X64_MSR_SIEFP, siefp.as_uint64_t);
+}
+
+/**
  * @brief Main vmbus driver initialization routine.
  *
  * Here, we
@@ -395,7 +531,7 @@ extern inthand_t IDTVEC(hv_vmbus_callback);
 static int
 vmbus_bus_init(void)
 {
-	int i, j, n, ret;
+	int i, j, n, ret = 0;
 	char buf[MAXCOMLEN + 1];
 	cpuset_t cpu_mask;
 
@@ -403,14 +539,6 @@ vmbus_bus_init(void)
 		return (0);
 
 	vmbus_inited = 1;
-
-	ret = hv_vmbus_init();
-
-	if (ret) {
-		if(bootverbose)
-			printf("Error VMBUS: Hypervisor Initialization Failed!\n");
-		return (ret);
-	}
 
 #ifdef HYPERV
 	/*
@@ -519,7 +647,6 @@ vmbus_bus_init(void)
 	lapic_ipi_free(hv_vmbus_g_context.hv_cb_vector);
 
 	cleanup:
-	hv_vmbus_cleanup();
 
 	return (ret);
 }
@@ -575,8 +702,6 @@ vmbus_bus_exit(void)
 			free(setup_args.page_buffers[i], M_DEVBUF);
 	}
 
-	hv_vmbus_cleanup();
-
 	/* remove swi */
 	CPU_FOREACH(i) {
 		if (hv_vmbus_g_context.hv_event_queue[i] != NULL) {
@@ -620,6 +745,9 @@ vmbus_mod_unload(void)
 static int
 vmbus_modevent(module_t mod, int what, void *arg)
 {
+	if (vm_guest != VM_GUEST_HV)
+		return (ENXIO);
+
 	switch (what) {
 
 	case MOD_LOAD:
