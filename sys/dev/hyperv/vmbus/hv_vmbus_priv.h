@@ -579,6 +579,7 @@ typedef union {
  * Define synthetic interrupt controller model specific registers
  */
 #define HV_X64_MSR_SCONTROL   (0x40000080)
+#define HV_X64_MSR_EOI        (0x40000070)
 #define HV_X64_MSR_SVERSION   (0x40000081)
 #define HV_X64_MSR_SIEFP      (0x40000082)
 #define HV_X64_MSR_SIMP       (0x40000083)

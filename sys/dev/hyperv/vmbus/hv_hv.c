@@ -360,7 +360,7 @@ hv_vmbus_synic_init(void *arg)
 	shared_sint.as_uint64_t = 0;
 	shared_sint.u.vector = setup_args->vector;
 	shared_sint.u.masked = FALSE;
-	shared_sint.u.auto_eoi = TRUE;
+	shared_sint.u.auto_eoi = FALSE;
 
 	wrmsr(HV_X64_MSR_SINT0 + HV_VMBUS_MESSAGE_SINT,
 	    shared_sint.as_uint64_t);

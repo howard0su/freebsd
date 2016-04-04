@@ -216,6 +216,9 @@ hv_vmbus_isr(struct trapframe *frame)
 		    &hv_vmbus_g_context.hv_msg_task[cpu]);
 	}
 
+	/* set EOI explict */
+	wrmsr(HV_X64_MSR_EOI, 0);
+
 	return (FILTER_HANDLED);
 }
 
