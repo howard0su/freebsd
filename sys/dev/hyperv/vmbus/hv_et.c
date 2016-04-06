@@ -102,6 +102,12 @@ hv_et_intr(struct trapframe *frame)
 static void
 hv_et_identify (driver_t *driver, device_t parent)
 {
+	if (vm_guest != VM_GUEST_HV)
+		return;
+
+	if (!(hv_features & HV_MSR_FEATURE_STIMER))
+		return;
+
 	if (device_find_child(parent, "hv_et", -1) != NULL)
 		return;
 

@@ -47,6 +47,8 @@ __FBSDID("$FreeBSD$");
 
 #define HV_NANOSECONDS_PER_SEC		1000000000L
 
+uint32_t hv_features;
+uint32_t hv_recommendation;
 
 static u_int hv_get_timecount(struct timecounter *tc);
 
@@ -76,32 +78,67 @@ hv_vmbus_query_hypervisor_presence(void)
 }
 
 /**
- * @brief Get version of the windows hypervisor
+ * @brief Get information of the hypervisor
+ * @return 0 if hyperisor info is not present.
  */
 static int
-hv_vmbus_get_hypervisor_version(void) 
+hv_vmbus_get_hypervisor_info(void)
 {
 	u_int regs[4];
 	unsigned int maxLeaf;
 	unsigned int op;
 
-	/*
-	 * Its assumed that this is called after confirming that
-	 * Viridian is present
-	 * Query id and revision.
-	 */
 	op = HV_CPU_ID_FUNCTION_HV_VENDOR_AND_MAX_FUNCTION;
 	do_cpuid(op, regs);
 
 	maxLeaf = regs[0];
 	op = HV_CPU_ID_FUNCTION_HV_INTERFACE;
 	do_cpuid(op, regs);
+	if (regs[0] != 0x31237648 /* HV#1 */
+		|| maxLeaf < HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS)
+		return (0);
 
 	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_VERSION) {
-	    op = HV_CPU_ID_FUNCTION_MS_HV_VERSION;
-	    do_cpuid(op, regs);
+		op = HV_CPU_ID_FUNCTION_MS_HV_VERSION;
+		do_cpuid(op, regs);
+		printf("Hyper-V Version: %d.%d.%d [SP%d]\n",
+			regs[1] >> 16, regs[1] & 0xffff, regs[0], regs[2]);
 	}
-	return (maxLeaf);
+
+	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_FEATURES) {
+		op = HV_CPU_ID_FUNCTION_MS_HV_FEATURES;
+		do_cpuid(op, regs);
+		hv_features = regs[0];
+		if (bootverbose)
+			printf("Hyper-V Features: %08X %08X %08X %08X\n",
+				regs[0], regs[1], regs[2], regs[3]);
+	}
+
+	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION) {
+		op = HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION;
+		do_cpuid(op, regs);
+		hv_recommendation = regs[0];
+		if (bootverbose)
+			printf("Hyper-V Recommendations: %08X %08X\n", regs[0], regs[1]);
+	}
+
+	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS) {
+		op = HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS;
+		do_cpuid(op, regs);
+		if (bootverbose)
+			printf("Hyper-V Limits: Vcpu:%d Lcpu:%d Int:%d\n",
+				regs[0], regs[1], regs[2]);
+	}
+
+	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_HARDWARE_FEATURE) {
+		op = HV_CPU_ID_FUNCTION_MS_HV_HARDWARE_FEATURE;
+		do_cpuid(op, regs);
+		if (bootverbose)
+			printf("Hyper-V HW Features: %08x AMD: %08x\n",
+				regs[0], regs[3]);
+	}
+
+	return (1);
 }
 
 /**
@@ -151,14 +188,17 @@ hv_vmbus_do_hypercall(uint64_t control, void* input, void* output)
 static int
 hv_vmbus_init(void* context)
 {
-	int					max_leaf;
 	hv_vmbus_x64_msr_hypercall_contents	hypercall_msr;
 	void*					virt_addr;
 
 	if (vm_guest != VM_GUEST_HV)
 		return (ENOTSUP);
 
-	max_leaf = hv_vmbus_get_hypervisor_version();
+	if (!hv_vmbus_get_hypervisor_info())
+		return (ENOTSUP);
+
+	if (!(hv_features & HV_MSR_FEATURE_HYPERCALL))
+		return (ENOTSUP);
 
 	/*
 	 * Write our OS info
@@ -187,6 +227,11 @@ hv_vmbus_init(void* context)
 	    goto cleanup;
 
 	hypercall_page = virt_addr;
+
+	if (hv_features & HV_MSR_FEATURE_REF_COUNT) {
+		/* register virtual timecounter */
+		tc_init(&hv_timecounter);
+	}
 
 	return (0);
 
@@ -279,16 +324,5 @@ hv_vmbus_signal_event(void *con_id)
 	return (status);
 }
 
-static void
-hv_tc_init(void)
-{
-	if (vm_guest != VM_GUEST_HV)
-		return;
-
-	/* register virtual timecounter */
-	tc_init(&hv_timecounter);
-}
-
-SYSINIT(hv_tc_init, SI_SUB_HYPERVISOR, SI_ORDER_FIRST, hv_tc_init, NULL);
-SYSINIT(hv_init, SI_SUB_HYPERVISOR, SI_ORDER_ANY, hv_vmbus_init, NULL);
+SYSINIT(hv_init, SI_SUB_HYPERVISOR, SI_ORDER_FIRST, hv_vmbus_init, NULL);
 SYSUNINIT(hv_cleanup, SI_SUB_HYPERVISOR, SI_ORDER_ANY, hv_vmbus_cleanup, NULL);

@@ -469,9 +469,16 @@ typedef enum {
 	HV_CPU_ID_FUNCTION_MS_HV_VERSION			= 0x40000002,
 	HV_CPU_ID_FUNCTION_MS_HV_FEATURES			= 0x40000003,
 	HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION	= 0x40000004,
-	HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS		= 0x40000005
+	HV_CPU_ID_FUNCTION_MS_HV_IMPLEMENTATION_LIMITS		= 0x40000005,
+	HV_CPU_ID_FUNCTION_MS_HV_HARDWARE_FEATURE		= 0x40000006
 
 } hv_vmbus_cpuid_function;
+
+#define HV_MSR_FEATURE_REF_COUNT	(1 << 1)
+#define HV_MSR_FEATURE_SYNCIC		(1 << 2)
+#define HV_MSR_FEATURE_STIMER		(1 << 3)
+#define HV_MSR_FEATURE_APIC		(1 << 4)
+#define HV_MSR_FEATURE_HYPERCALL	(1 << 5)
 
 /*
  * Define the format of the SIMP register
@@ -623,6 +630,8 @@ typedef enum {
 /**
  * Global variables
  */
+extern uint32_t			hv_features;
+extern uint32_t			hv_recommendation;
 
 extern hv_vmbus_context		hv_vmbus_g_context;
 extern hv_vmbus_connection	hv_vmbus_g_connection;
