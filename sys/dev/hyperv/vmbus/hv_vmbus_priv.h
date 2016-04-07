@@ -480,6 +480,9 @@ typedef enum {
 #define HV_MSR_FEATURE_APIC		(1 << 4)
 #define HV_MSR_FEATURE_HYPERCALL	(1 << 5)
 #define HV_MSR_FEATURE_IDLESTATE	(1 << 10)
+
+#define HV_REC_USE_MSR_FOR_APIC		(1 << 3)
+
 /*
  * Define the format of the SIMP register
  */
@@ -632,7 +635,7 @@ typedef enum {
  * Global variables
  */
 extern uint32_t			hv_features;
-extern uint32_t			hv_recommendation;
+extern uint32_t			hv_recommendations;
 
 extern hv_vmbus_context		hv_vmbus_g_context;
 extern hv_vmbus_connection	hv_vmbus_g_connection;

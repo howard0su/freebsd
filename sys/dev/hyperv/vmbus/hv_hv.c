@@ -33,6 +33,7 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <sys/bus.h>
 #include <sys/malloc.h>
 #include <sys/pcpu.h>
 #include <sys/proc.h>
@@ -44,12 +45,15 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_param.h>
 #include <vm/pmap.h>
 
+#include <machine/intr_machdep.h>
+#include <x86/apicvar.h>
+
 #include "hv_vmbus_priv.h"
 
 #define HV_NANOSECONDS_PER_SEC		1000000000L
 
 uint32_t hv_features;
-uint32_t hv_recommendation;
+uint32_t hv_recommendations;
 
 static u_int hv_get_timecount(struct timecounter *tc);
 
@@ -118,7 +122,7 @@ hv_vmbus_get_hypervisor_info(void)
 	if (maxLeaf >= HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION) {
 		op = HV_CPU_ID_FUNCTION_MS_HV_ENLIGHTENMENT_INFORMATION;
 		do_cpuid(op, regs);
-		hv_recommendation = regs[0];
+		hv_recommendations = regs[0];
 		if (bootverbose)
 			printf("Hyper-V Recommendations: %08X %08X\n", regs[0], regs[1]);
 	}
@@ -186,6 +190,12 @@ hv_idle_hook(sbintime_t sbt)
 	rdmsr(HV_X64_MSR_GUEST_IDLE);
 }
 
+static void
+hv_lapic_eoi(void)
+{
+	wrmsr(HV_X64_MSR_EOI, 0);
+}
+
 /**
  *  @brief Main initialization routine.
  *
@@ -242,6 +252,11 @@ hv_vmbus_init(void* context)
 
 	if (hv_features & HV_MSR_FEATURE_IDLESTATE) {
 		cpu_idle_hook = hv_idle_hook;
+	}
+
+	if ((hv_features & HV_MSR_FEATURE_APIC) &&
+		(hv_recommendations & HV_REC_USE_MSR_FOR_APIC)) {
+		apic_ops.eoi = hv_lapic_eoi;
 	}
 
 	return (0);
