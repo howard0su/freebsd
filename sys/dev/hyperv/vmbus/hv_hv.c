@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/pcpu.h>
+#include <sys/proc.h>
 #include <sys/timetc.h>
 #include <sys/kernel.h>
 #include <machine/bus.h>
@@ -179,6 +180,12 @@ hv_vmbus_do_hypercall(uint64_t control, void* input, void* output)
 #endif /* __x86_64__ */
 }
 
+static void
+hv_idle_hook(sbintime_t sbt)
+{
+	rdmsr(HV_X64_MSR_GUEST_IDLE);
+}
+
 /**
  *  @brief Main initialization routine.
  *
@@ -231,6 +238,10 @@ hv_vmbus_init(void* context)
 	if (hv_features & HV_MSR_FEATURE_REF_COUNT) {
 		/* register virtual timecounter */
 		tc_init(&hv_timecounter);
+	}
+
+	if (hv_features & HV_MSR_FEATURE_IDLESTATE) {
+		cpu_idle_hook = hv_idle_hook;
 	}
 
 	return (0);

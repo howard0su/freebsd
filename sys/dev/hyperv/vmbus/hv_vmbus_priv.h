@@ -479,7 +479,7 @@ typedef enum {
 #define HV_MSR_FEATURE_STIMER		(1 << 3)
 #define HV_MSR_FEATURE_APIC		(1 << 4)
 #define HV_MSR_FEATURE_HYPERCALL	(1 << 5)
-
+#define HV_MSR_FEATURE_IDLESTATE	(1 << 10)
 /*
  * Define the format of the SIMP register
  */
@@ -607,6 +607,7 @@ typedef union {
 #define HV_X64_MSR_SINT14     (0x4000009E)
 #define HV_X64_MSR_SINT15     (0x4000009F)
 
+#define HV_X64_MSR_GUEST_IDLE (0x400000F0)
 /*
  * Synthetic Timer MSRs. Four timers per vcpu.
  */
