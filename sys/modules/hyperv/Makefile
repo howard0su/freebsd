@@ -1,5 +1,5 @@
 # $FreeBSD$
 
-SUBDIR = vmbus netvsc stordisengage storvsc utilities
+SUBDIR = vmbus netvsc stordisengage storvsc utilities hyperv
 
 .include <bsd.subdir.mk>
