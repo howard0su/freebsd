@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2016 Microsoft Corp.
  * Copyright (c) 1998 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
  *
@@ -31,6 +32,37 @@ __FBSDID("$FreeBSD$");
  * i386-specific module functionality.
  *
  */
+#include <bootstrap.h>
+#include <stand.h>
+#include <string.h>
+#include <machine/cpufunc.h>
+
+#define HV_UNKNOWN	0
+#define HV_XEN		1
+#define HV_HYPERV	2
+
+/* See the kernel's function identify_hypervisor(). */
+static int
+get_hypervisor(void)
+{
+	unsigned int regs[4];
+	char hv_vendor[13];
+
+	do_cpuid(1, regs);
+	if (regs[2] & 0x80000000) {
+		do_cpuid(0x40000000, regs);
+		if (regs[0] >= 0x40000000) {
+			((u_int *)&hv_vendor)[0] = regs[1];
+			((u_int *)&hv_vendor)[1] = regs[2];
+			((u_int *)&hv_vendor)[2] = regs[3];
+			hv_vendor[12] = '\0';
+			if (strcmp(hv_vendor, "Microsoft Hv") == 0)
+				return (HV_HYPERV);
+		}
+	}
+
+	return (HV_UNKNOWN);
+}
 
 /*
  * Use voodoo to load modules required by current hardware.
@@ -38,7 +70,14 @@ __FBSDID("$FreeBSD$");
 int
 i386_autoload(void)
 {
+	switch(get_hypervisor()) {
+	case HV_HYPERV:
+		mod_loadkld("hyperv.ko", 0, NULL);
+		break;
+	default:
+		break;
+	}
 
-    /* XXX use PnP to locate stuff here */
-    return(0);
+	/* XXX use PnP to locate stuff here */
+	return(0);
 }
