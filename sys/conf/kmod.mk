@@ -91,7 +91,9 @@ CFLAGS+=	-fno-strict-aliasing
 WERROR?=	-Werror
 CFLAGS+=	${WERROR}
 CFLAGS+=	-D_KERNEL
+.if !defined(KERNBUILDDIR)
 CFLAGS+=	-DKLD_MODULE
+.endif
 
 # Don't use any standard or source-relative include directories.
 NOSTDINC=	-nostdinc
