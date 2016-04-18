@@ -947,5 +947,5 @@ static driver_t	hpet_driver = {
 	sizeof(struct hpet_softc),
 };
 
-DRIVER_MODULE(hpet, acpi, hpet_driver, hpet_devclass, 0, 0);
+TIMER_DRIVER_MODULE(hpet, acpi, hpet_driver, hpet_devclass, 0, 0);
 MODULE_DEPEND(hpet, acpi, 1, 1, 1);

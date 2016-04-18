@@ -643,7 +643,6 @@ void	bus_data_generation_update(void);
 #define	BUS_PASS_RESOURCE	30	/* Resource discovery. */
 #define	BUS_PASS_INTERRUPT	40	/* Interrupt controllers. */
 #define	BUS_PASS_TIMER		50	/* Timers and clocks. */
-#define	BUS_PASS_SCHEDULER	60	/* Start scheduler. */
 #define	BUS_PASS_DEFAULT	__INT_MAX /* Everything else. */
 
 #define	BUS_PASS_ORDER_FIRST	0
@@ -706,6 +705,26 @@ DECLARE_MODULE(name##_##busname, name##_##busname##_mod,		\
 #define	EARLY_DRIVER_MODULE(name, busname, driver, devclass, evh, arg, pass) \
 	EARLY_DRIVER_MODULE_ORDERED(name, busname, driver, devclass,	\
 	    evh, arg, SI_ORDER_MIDDLE, pass)
+
+#define BUS_DRIVER_MODULE(name, busname, driver, devclass, evh, arg)	\
+	EARLY_DRIVER_MODULE(name, busname, driver, devclass,		\
+	    evh, arg, BUS_PASS_BUS)
+
+#define INT_DRIVER_MODULE(name, busname, driver, devclass, evh, arg)	\
+	EARLY_DRIVER_MODULE(name, busname, driver, devclass,		\
+	    evh, arg, BUS_PASS_INTERRUPT)
+
+#define RES_DRIVER_MODULE(name, busname, driver, devclass, evh, arg)	\
+	EARLY_DRIVER_MODULE(name, busname, driver, devclass,		\
+	    evh, arg, BUS_PASS_RESOURCE)
+
+#define CPU_DRIVER_MODULE(name, busname, driver, devclass, evh, arg)	\
+	EARLY_DRIVER_MODULE(name, busname, driver, devclass,		\
+	    evh, arg, BUS_PASS_CPU)
+
+#define TIMER_DRIVER_MODULE(name, busname, driver, devclass, evh, arg)	\
+	EARLY_DRIVER_MODULE(name, busname, driver, devclass,		\
+	    evh, arg, BUS_PASS_TIMER)
 
 #define	DRIVER_MODULE_ORDERED(name, busname, driver, devclass, evh, arg,\
     order)								\

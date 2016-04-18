@@ -780,7 +780,7 @@ static driver_t ram_driver = {
 
 static devclass_t ram_devclass;
 
-DRIVER_MODULE(ram, nexus, ram_driver, ram_devclass, 0, 0);
+RES_DRIVER_MODULE(ram, nexus, ram_driver, ram_devclass, 0, 0);
 
 #ifdef DEV_ISA
 /*
@@ -829,5 +829,5 @@ static driver_t sysresource_driver = {
 
 static devclass_t sysresource_devclass;
 
-DRIVER_MODULE(sysresource, isa, sysresource_driver, sysresource_devclass, 0, 0);
+RES_DRIVER_MODULE(sysresource, isa, sysresource_driver, sysresource_devclass, 0, 0);
 #endif /* DEV_ISA */

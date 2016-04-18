@@ -646,7 +646,7 @@ static driver_t acpi_sysres_driver = {
 };
 
 static devclass_t acpi_sysres_devclass;
-DRIVER_MODULE(acpi_sysresource, acpi, acpi_sysres_driver, acpi_sysres_devclass,
+RES_DRIVER_MODULE(acpi_sysresource, acpi, acpi_sysres_driver, acpi_sysres_devclass,
     0, 0);
 MODULE_DEPEND(acpi_sysresource, acpi, 1, 1, 1);
 

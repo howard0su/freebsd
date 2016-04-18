@@ -230,7 +230,7 @@ static driver_t acpi_cpu_driver = {
 };
 
 static devclass_t acpi_cpu_devclass;
-DRIVER_MODULE(cpu, acpi, acpi_cpu_driver, acpi_cpu_devclass, 0, 0);
+CPU_DRIVER_MODULE(cpu, acpi, acpi_cpu_driver, acpi_cpu_devclass, 0, 0);
 MODULE_DEPEND(cpu, acpi, 1, 1, 1);
 
 static int
