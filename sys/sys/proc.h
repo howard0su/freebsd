@@ -701,6 +701,9 @@ struct proc {
 #define	P2_NOTRACE_EXEC 0x00000004	/* Keep P2_NOPTRACE on exec(2). */
 #define	P2_AST_SU	0x00000008	/* Handles SU ast for kthreads. */
 #define	P2_LWP_EVENTS	0x00000010	/* Report LWP events via ptrace(2). */
+#define	P2_ASLR_ENABLE	0x00000020	/* Force enable ASLR. */
+#define	P2_ASLR_DISABLE	0x00000040	/* Force disable ASLR. */
+#define	P2_ASLR_IGNSTART 0x00000080	/* Enable ASLR to consume sbrk area. */
 
 /* Flags protected by proctree_lock, kept in p_treeflags. */
 #define	P_TREE_ORPHANED		0x00000001	/* Reparented, on orphan list */

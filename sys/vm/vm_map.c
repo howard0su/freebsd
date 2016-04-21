@@ -1470,6 +1470,20 @@ vm_map_fixed(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	return (result);
 }
 
+static const int aslr_pages_rnd_64[2] = {0x1000, 0x10};
+static const int aslr_pages_rnd_32[2] = {0x100, 0x4};
+
+static int aslr_sloppiness = 5;
+SYSCTL_INT(_vm, OID_AUTO, aslr_sloppiness, CTLFLAG_RW, &aslr_sloppiness, 0,
+    "");
+
+static int aslr_collapse_anon = 1;
+SYSCTL_INT(_vm, OID_AUTO, aslr_collapse_anon, CTLFLAG_RW,
+    &aslr_collapse_anon, 0,
+    "");
+
+#define	MAP_32BIT_MAX_ADDR	((vm_offset_t)1 << 31)
+
 /*
  *	vm_map_find finds an unallocated region in the target address
  *	map with the given length.  The search is defined to be
@@ -1485,8 +1499,10 @@ vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 	    vm_size_t length, vm_offset_t max_addr, int find_space,
 	    vm_prot_t prot, vm_prot_t max, int cow)
 {
-	vm_offset_t alignment, initial_addr, start;
-	int result;
+	vm_map_entry_t prev_entry;
+	vm_offset_t alignment, initial_addr, start, rand_max, rs, re;
+	const int *aslr_pages_rnd;
+	int result, do_aslr, pidx, anon;
 
 	KASSERT((cow & (MAP_STACK_GROWS_DOWN | MAP_STACK_GROWS_UP)) == 0 ||
 	    object == NULL,
@@ -1499,8 +1515,34 @@ vm_map_find(vm_map_t map, vm_object_t object, vm_ooffset_t offset,
 		alignment = (vm_offset_t)1 << (find_space >> 8);
 	} else
 		alignment = 0;
-	initial_addr = *addr;
+	do_aslr = (map->flags & MAP_ASLR) != 0 ? aslr_sloppiness : 0;
+	anon = object == NULL && (cow & (MAP_INHERIT_SHARE |
+	    MAP_STACK_GROWS_UP | MAP_STACK_GROWS_DOWN)) == 0 &&
+	    prot != PROT_NONE && aslr_collapse_anon;
+	if (do_aslr) {
+		if (vm_map_max(map) > MAP_32BIT_MAX_ADDR &&
+		    (max_addr == 0 || max_addr > MAP_32BIT_MAX_ADDR))
+			aslr_pages_rnd = aslr_pages_rnd_64;
+		else
+			aslr_pages_rnd = aslr_pages_rnd_32;
+		if (find_space != VMFS_NO_SPACE && (map->flags &
+		    MAP_ASLR_IGNSTART) != 0) {
+			initial_addr = anon ? map->anon_loc : vm_map_min(map);
+		} else {
+			initial_addr = anon && *addr == 0 ? map->anon_loc :
+			    *addr;
+		}
+	} else {
+		initial_addr = *addr;
+	}
 again:
+	if (anon && do_aslr == aslr_sloppiness - 1) {
+		/*
+		 * A try at anon_loc location failed, do free pass
+		 * from the start of the map.
+		 */
+		initial_addr = vm_map_min(map);
+	}
 	start = initial_addr;
 	vm_map_lock(map);
 	do {
@@ -1508,11 +1550,45 @@ again:
 			if (vm_map_findspace(map, start, length, addr) ||
 			    (max_addr != 0 && *addr + length > max_addr)) {
 				vm_map_unlock(map);
+				if (do_aslr > 0) {
+					do_aslr--;
+					goto again;
+				}
 				if (find_space == VMFS_OPTIMAL_SPACE) {
 					find_space = VMFS_ANY_SPACE;
 					goto again;
 				}
 				return (KERN_NO_SPACE);
+			}
+			/*
+			 * The R step for ASLR.  But skip it if we are
+			 * trying to coalesce anon memory request.
+			 */
+			if (do_aslr > 0 &&
+			    !(anon && do_aslr == aslr_sloppiness)) {
+				vm_map_lookup_entry(map, *addr, &prev_entry);
+				if (MAXPAGESIZES > 1 && pagesizes[1] != 0 &&
+				    (find_space == VMFS_SUPER_SPACE ||
+				    find_space == VMFS_OPTIMAL_SPACE))
+					pidx = 1;
+				else
+					pidx = 0;
+				re = prev_entry->next == &map->header ?
+				    map->max_offset : prev_entry->next->start;
+				rs = prev_entry == &map->header ?
+				    map->min_offset : prev_entry->end;
+				rand_max = re - (*addr - rs) - length;
+				if (max_addr != 0 &&
+				    *addr + rand_max > max_addr)
+					rand_max = max_addr - *addr - length;
+				rand_max /= pagesizes[pidx];
+				if (rand_max < aslr_pages_rnd[pidx]) {
+					vm_map_unlock(map);
+					do_aslr--;
+					goto again;
+				}
+				*addr += (arc4random() % rand_max) *
+				    pagesizes[pidx];
 			}
 			switch (find_space) {
 			case VMFS_SUPER_SPACE:
@@ -1529,7 +1605,6 @@ again:
 				}
 				break;
 			}
-
 			start = *addr;
 		}
 		if ((cow & (MAP_STACK_GROWS_DOWN | MAP_STACK_GROWS_UP)) != 0) {
@@ -1539,8 +1614,15 @@ again:
 			result = vm_map_insert(map, object, offset, start,
 			    start + length, prot, max, cow);
 		}
+		if (result != KERN_SUCCESS && do_aslr > 0) {
+			vm_map_unlock(map);
+			do_aslr--;
+			goto again;
+		}
 	} while (result == KERN_NO_SPACE && find_space != VMFS_NO_SPACE &&
 	    find_space != VMFS_ANY_SPACE);
+	if (result == KERN_SUCCESS && anon)
+		map->anon_loc = *addr + length;
 	vm_map_unlock(map);
 	return (result);
 }
