@@ -123,7 +123,7 @@ hv_vmbus_do_hypercall(uint64_t control, void* input, void* output)
  *  This routine must be called
  *  before any other routines in here are called
  */
-int
+static int
 hv_vmbus_init(void) 
 {
 	hv_vmbus_x64_msr_hypercall_contents	hypercall_msr;
@@ -189,7 +189,7 @@ hv_vmbus_init(void)
 /**
  * @brief Cleanup routine, called normally during driver unloading or exiting
  */
-void
+static void
 hv_vmbus_cleanup(void) 
 {
 	hv_vmbus_x64_msr_hypercall_contents hypercall_msr;
@@ -508,6 +508,10 @@ hyperv_init(void *dummy __unused)
 		/* Register virtual timecount */
 		tc_init(&hv_timecounter);
 	}
+
+	hv_vmbus_init();
 }
 SYSINIT(hyperv_initialize, SI_SUB_HYPERVISOR, SI_ORDER_FIRST, hyperv_init,
+    NULL);
+SYSUNINIT(hyperv_uninitialize, SI_SUB_HYPERVISOR, SI_ORDER_FIRST, hv_vmbus_cleanup,
     NULL);

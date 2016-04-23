@@ -370,6 +370,27 @@ vmbus_probe(device_t dev) {
 
 extern inthand_t IDTVEC(hv_vmbus_callback);
 
+static int
+vmbus_connect_root(void)
+{
+	int ret;
+	/*
+	 * Connect to VMBus in the root partition
+	 */
+	ret = hv_vmbus_connect();
+
+	if (ret != 0)
+		return (ret);
+
+	hv_vmbus_request_channel_offers();
+
+	vmbus_scan();
+	bus_generic_attach(vmbus_devp);
+	device_printf(vmbus_devp, "device scan, probe and attach done\n");
+
+	return (ret);
+}
+
 /**
  * @brief Main vmbus driver initialization routine.
  *
@@ -385,7 +406,7 @@ extern inthand_t IDTVEC(hv_vmbus_callback);
 static int
 vmbus_bus_init(void)
 {
-	int i, j, n, ret;
+	int i, j, ret;
 	char buf[MAXCOMLEN + 1];
 	cpuset_t cpu_mask;
 
@@ -393,14 +414,7 @@ vmbus_bus_init(void)
 		return (0);
 
 	vmbus_inited = 1;
-
-	ret = hv_vmbus_init();
-
-	if (ret) {
-		if(bootverbose)
-			printf("Error VMBUS: Hypervisor Initialization Failed!\n");
-		return (ret);
-	}
+	ret = 0;
 
 	/*
 	 * Find a free IDT slot for vmbus callback.
@@ -410,7 +424,7 @@ vmbus_bus_init(void)
 		if(bootverbose)
 			printf("Error VMBUS: Cannot find free IDT slot for "
 			    "vmbus callback!\n");
-		goto cleanup;
+		return (-1);
 	}
 
 	if(bootverbose)
@@ -470,45 +484,6 @@ vmbus_bus_init(void)
 
 	smp_rendezvous(NULL, hv_vmbus_synic_init, NULL, &setup_args);
 
-	/*
-	 * Connect to VMBus in the root partition
-	 */
-	ret = hv_vmbus_connect();
-
-	if (ret != 0)
-		goto cleanup1;
-
-	hv_vmbus_request_channel_offers();
-
-	vmbus_scan();
-	bus_generic_attach(vmbus_devp);
-	device_printf(vmbus_devp, "device scan, probe and attach done\n");
-
-	return (ret);
-
-	cleanup1:
-	/*
-	 * Free pages alloc'ed
-	 */
-	for (n = 0; n < 2 * MAXCPU; n++)
-		if (setup_args.page_buffers[n] != NULL)
-			free(setup_args.page_buffers[n], M_DEVBUF);
-
-	/*
-	 * remove swi and vmbus callback vector;
-	 */
-	CPU_FOREACH(j) {
-		if (hv_vmbus_g_context.hv_event_queue[j] != NULL) {
-			taskqueue_free(hv_vmbus_g_context.hv_event_queue[j]);
-			hv_vmbus_g_context.hv_event_queue[j] = NULL;
-		}
-	}
-
-	lapic_ipi_free(hv_vmbus_g_context.hv_cb_vector);
-
-	cleanup:
-	hv_vmbus_cleanup();
-
 	return (ret);
 }
 
@@ -550,6 +525,9 @@ vmbus_init(void)
 	if (!cold) 
 #endif
 		vmbus_bus_init();
+
+	if (!cold)
+		vmbus_connect_root();
 }
 
 static void
@@ -566,8 +544,6 @@ vmbus_bus_exit(void)
 		if (setup_args.page_buffers[i] != NULL)
 			free(setup_args.page_buffers[i], M_DEVBUF);
 	}
-
-	hv_vmbus_cleanup();
 
 	/* remove swi */
 	CPU_FOREACH(i) {
@@ -615,9 +591,6 @@ vmbus_modevent(module_t mod, int what, void *arg)
 	switch (what) {
 
 	case MOD_LOAD:
-#ifdef EARLY_AP_STARTUP
-		vmbus_init();
-#endif
 		vmbus_mod_load();
 		break;
 	case MOD_UNLOAD:
@@ -659,4 +632,6 @@ MODULE_VERSION(vmbus, 1);
 #ifndef EARLY_AP_STARTUP
 /* We want to be started after SMP is initialized */
 SYSINIT(vmb_init, SI_SUB_SMP + 1, SI_ORDER_FIRST, vmbus_init, NULL);
+#else
+SYSINIT(vmb_init, SI_SUB_ROOT_CONF - 1, SI_ORDER_FIRST, vmbus_init, NULL);
 #endif
